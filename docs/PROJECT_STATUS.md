@@ -6,7 +6,7 @@ Phase 3 — Realtime Engine.
 
 ## Status
 
-IN PROGRESS. Phase 2 fue revisada, aprobada y mergeada en `main` mediante PR #2. Phase 3 está en la rama `phase/03-realtime-engine` y todavía no está mergeada.
+COMPLETE. Phase 3 fue revisada, corregida y mergeada en `main` mediante PR #3. El merge quedó registrado en el commit `7cfe8144536ca1d95c462c3f803d35f5950c0f73`.
 
 ## Completed
 
@@ -26,11 +26,13 @@ IN PROGRESS. Phase 2 fue revisada, aprobada y mergeada en `main` mediante PR #2.
 - Rama `phase/02-tools` creada y publicada desde el merge de Phase 1.
 - Contrato, registry, manager, validación, autorización, contexto, resultados y errores de tools implementados en la rama de Phase 2.
 - PR #2 revisado y mergeado a `main`.
-- EventBus, runtime, scheduler, stream, máquina de estados y adapters de Phase 3 implementados en la rama de trabajo.
+- EventBus, runtime, scheduler, stream, máquina de estados y adapters de Phase 3 implementados.
+- PR #3 revisado, corregido y mergeado a `main`.
+- Race condition de terminalización corregido y cubierto por pruebas adicionales.
 
 ## In Progress
 
-Phase 3 está implementada y pendiente de cierre documental, commit final y revisión humana.
+Ninguno. Phase 3 está cerrada.
 
 ## Blocked
 
@@ -39,7 +41,7 @@ Phase 3 está implementada y pendiente de cierre documental, commit final y revi
 
 ## Next
 
-Completar verificaciones, crear el commit final de Phase 3 y esperar revisión humana. No crear PR ni hacer merge automáticamente.
+Realizar el checkpoint post-merge de Phase 3 y preparar la definición de Phase 4 — Voice Service. No iniciar implementación de Phase 4 hasta que su alcance, contratos y criterios de aceptación estén revisados y aprobados.
 
 ## Known Risks
 
