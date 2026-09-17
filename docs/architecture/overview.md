@@ -2,7 +2,7 @@
 
 ## Estado
 
-Este documento describe límites y contratos de Phase 3. No representa una implementación completa del asistente.
+Este documento describe los límites y contratos implementados hasta Phase 4. No representa una implementación completa del asistente.
 
 ## Capas
 
@@ -30,6 +30,7 @@ Las capacidades futuras de voz, memoria y avatar se conectarán mediante contrat
 - ToolProvider: esquema, permisos, ejecución acotada y resultado validado.
 - RealtimeEngine: ciclo de vida, eventos correlacionados, streaming abstracto, cancelación y concurrencia acotada.
 - AvatarProvider: estados visuales derivados de eventos del core.
+- VoiceService: coordinación explícita y acotada de entrada, STT, TTS y salida de audio.
 
 Los contratos principales de Phase 1, el perímetro de tools de Phase 2 y el runtime de Phase 3 están implementados en TypeScript. Las capacidades futuras se añadirán cuando una fase las necesite; no se implementan anticipadamente.
 
@@ -49,4 +50,4 @@ Seguridad, permisos, configuración, logging, métricas, manejo de errores, prue
 
 ## Estado actual
 
-La implementación contiene ciclo de vida de aplicación, AssistantCore, sesión en memoria, proveedores mock/direct, configuración, errores, logging, tools de Phase 2 y Realtime Engine de Phase 3. No hay aún UI, voz, memoria persistente, herramientas del sistema, routing determinista ni streaming real de proveedores externos.
+La implementación contiene ciclo de vida de aplicación, AssistantCore, sesión en memoria, proveedores mock/direct, configuración, errores, logging, tools de Phase 2, Realtime Engine de Phase 3 y Voice Service de Phase 4. Voice Service usa únicamente mocks, mantiene el audio en memoria y requiere integración explícita con el llamador. No hay UI, proveedores de voz reales, memoria persistente, herramientas del sistema, routing determinista ni agente autónomo.

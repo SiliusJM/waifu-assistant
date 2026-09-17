@@ -7,6 +7,7 @@ Las decisiones relevantes se registran como ADRs para preservar contexto y facil
 - ADR-003: contratos del Assistant Core, streaming y cancelación.
 - ADR-004: validación declarativa propia para Phase 2.
 - ADR-005: Realtime Engine, eventos, estados, concurrencia y cancelación para Phase 3.
+- ADR-006: contratos, lifecycle y privacidad del Voice Service para Phase 4.
 
 Decisiones futuras previstas, solo cuando exista evidencia:
 
@@ -16,3 +17,5 @@ Decisiones futuras previstas, solo cuando exista evidencia:
 - estrategia de memoria y recuperación;
 - renderer 2D o 3D del avatar;
 - base de datos y políticas de caché.
+
+ADR-007 — selección y benchmark de proveedores STT/TTS — permanece abierto y no es requisito de Phase 4.

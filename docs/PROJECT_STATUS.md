@@ -6,7 +6,7 @@ Phase 4 — Voice Service.
 
 ## Status
 
-READY FOR IMPLEMENTATION. Phase 3 fue revisada, corregida y mergeada en `main` mediante PR #3. La definición arquitectónica de Phase 4 fue auditada contra el repositorio y queda aprobada para implementación incremental.
+IN PROGRESS. Phase 3 fue revisada, corregida y mergeada en `main` mediante PR #3. Phase 4 está implementada en la rama `phase/04-voice-service`, pendiente de revisión y Pull Request.
 
 ## Completed
 
@@ -31,10 +31,12 @@ READY FOR IMPLEMENTATION. Phase 3 fue revisada, corregida y mergeada en `main` m
 - Race condition de terminalización corregida y cubierta por pruebas adicionales.
 - Documentación post-merge de Phase 2 y Phase 3 reconciliada con el estado real de `main`.
 - Definición arquitectónica de Phase 4 auditada y aprobada.
+- Contratos de audio, providers abstractos, `VoiceSession`, `VoiceService`, eventos, errores y mocks de Phase 4 implementados.
+- Cancelación, timeout por etapa, cleanup, logging seguro y correlación explícita con `RealtimeEngine` implementados.
 
 ## In Progress
 
-Phase 4 está pendiente de implementación. Los proveedores reales de STT/TTS no son parte obligatoria de la primera implementación y se evaluarán posteriormente mediante un spike comparativo.
+Phase 4 está pendiente de revisión final, commit y Pull Request. Los proveedores reales de STT/TTS no son parte de esta implementación y se evaluarán posteriormente mediante un spike comparativo.
 
 ## Blocked
 
@@ -43,7 +45,7 @@ Phase 4 está pendiente de implementación. Los proveedores reales de STT/TTS no
 
 ## Next
 
-Crear/publicar la rama `phase/04-voice-service` e implementar únicamente los contratos y lifecycle definidos para Voice Service: audio, STT, TTS, reproducción, `VoiceSession`, `VoiceError`, mocks, cancelación, timeout, cleanup, logging seguro y tests deterministas sin hardware ni red. No implementar todavía proveedores reales obligatorios ni avanzar a Phase 5.
+Revisar y publicar el commit de `phase/04-voice-service` con los contratos y lifecycle de Voice Service. No implementar todavía proveedores reales obligatorios ni avanzar a Phase 5.
 
 ## Known Risks
 
