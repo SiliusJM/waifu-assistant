@@ -6,7 +6,7 @@ Fecha del diagnóstico: 2026-09-17.
 
 La carpeta waifu-assistant existía como directorio vacío, sin código previo que preservar y sin repositorio Git inicializado. No se detectaron archivos de configuración del proyecto, secretos locales, tests, CI/CD ni dependencias instaladas dentro del proyecto.
 
-Conclusión: Phase 0 puede comenzar desde una base limpia y pequeña, pero no existe un remote de GitHub que permita colaboración o publicación todavía.
+Conclusión: Phase 0 comenzó desde una base limpia y pequeña. El remote origin ya está configurado y el checkpoint actual de main está publicado en https://github.com/SiliusJM/waifu-assistant.
 
 ## Entorno
 
@@ -29,7 +29,8 @@ Conclusión: Phase 0 puede comenzar desde una base limpia y pequeña, pero no ex
 - No existían ramas, commits ni remotes.
 - La identidad Git global estaba configurada, sin que se registrara su valor en este documento.
 - La configuración global indica master como rama por defecto; Phase 0 establece main para este repositorio.
-- No se ejecutó ningún push. No se conoce una URL remota y gh no está instalado.
+- Remote origin: https://github.com/SiliusJM/waifu-assistant.git.
+- La rama main y el checkpoint de Phase 0 fueron publicados correctamente en GitHub.
 
 ## Proyecto previo y archivos sensibles
 

@@ -36,7 +36,7 @@ No se implementan Assistant Core conversacional, herramientas reales, shell cont
 - Se revisaron git diff y git status.
 - Se actualizó CHANGELOG.md y docs/PROJECT_STATUS.md.
 - Se creó un commit reproducible.
-- No se realizó push porque no existe remote conocido.
+- El remote origin está configurado y la rama main fue publicada en GitHub: https://github.com/SiliusJM/waifu-assistant.
 - No se declara Phase 1 iniciada.
 
 ## Implementación
@@ -48,7 +48,7 @@ El runtime de Phase 0 es Node.js ESM sin dependencias de terceros. El build copi
 - El check de lint es deliberadamente pequeño y no sustituye un linter de proyecto completo.
 - La ausencia de dependencias reduce superficie y reproducibilidad inicial, pero Phase 1 tendrá que elegir un toolchain de calidad.
 - El diagnóstico de hardware está limitado por permisos WMI.
-- La ausencia de remote impide publicar el checkpoint en GitHub.
+- El checkpoint depende de conservar la rama main publicada y de no hacer force push.
 
 ## Comandos de verificación
 
@@ -58,4 +58,4 @@ El runtime de Phase 0 es Node.js ESM sin dependencias de terceros. El build copi
 
 ## Resultado del checkpoint
 
-Phase 0 fue implementada y verificada localmente en 2026-09-17. La aprobación humana y la definición de un remote son actividades posteriores; no bloquean la existencia del checkpoint local.
+Phase 0 fue implementada, aprobada conceptualmente y verificada en 2026-09-17. El checkpoint está disponible en https://github.com/SiliusJM/waifu-assistant, en la rama main, commit a6118d3.

@@ -18,6 +18,7 @@ COMPLETE. Phase 0 cumple sus criterios documentados y queda pendiente de aprobac
 - Build, lint sintáctico y tests básicos reproducibles sin dependencias externas.
 - Arquitectura base, riesgos y decisión provisional sobre proveedores documentados.
 - Changelog actualizado.
+- Remote origin configurado y rama main publicada en GitHub: https://github.com/SiliusJM/waifu-assistant.
 
 ## In Progress
 
@@ -25,7 +26,6 @@ Ninguno dentro de Phase 0.
 
 ## Blocked
 
-- No existe remote de GitHub conocido; no se realizó push.
 - Las métricas de hardware están pendientes por bloqueo de WMI.
 - La selección final de TypeScript, UI, voz, memoria, avatar y gateway requiere prototipos y evidencia en sus fases correspondientes.
 
