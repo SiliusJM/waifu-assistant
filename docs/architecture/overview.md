@@ -2,7 +2,7 @@
 
 ## Estado
 
-Este documento describe límites y contratos de Phase 2. No representa una implementación completa del asistente.
+Este documento describe límites y contratos de Phase 3. No representa una implementación completa del asistente.
 
 ## Capas
 
@@ -19,7 +19,7 @@ Este documento describe límites y contratos de Phase 2. No representa una imple
           |
     Deterministic local tools
 
-Las capacidades futuras de realtime, voz, memoria, avatar y eventos se conectarán mediante contratos, no mediante imports directos entre proveedores y la lógica de negocio. El sistema de tools de Phase 2 mantiene la frontera de ejecución separada del core.
+Las capacidades futuras de voz, memoria y avatar se conectarán mediante contratos, no mediante imports directos entre proveedores y la lógica de negocio. Phase 3 añade el runtime de eventos y la frontera de interacción; el sistema de tools mantiene separada la frontera de ejecución.
 
 ## Contratos previstos
 
@@ -28,9 +28,10 @@ Las capacidades futuras de realtime, voz, memoria, avatar y eventos se conectar�
 - TTSProvider: síntesis y cancelación cuando el backend lo soporte.
 - MemoryProvider: guardar, recuperar, editar y olvidar con políticas explícitas.
 - ToolProvider: esquema, permisos, ejecución acotada y resultado validado.
+- RealtimeEngine: ciclo de vida, eventos correlacionados, streaming abstracto, cancelación y concurrencia acotada.
 - AvatarProvider: estados visuales derivados de eventos del core.
 
-Los contratos principales de Phase 1 y el perímetro de tools de Phase 2 están implementados en TypeScript. Las capacidades futuras se añadirán cuando una fase las necesite; no se implementan anticipadamente.
+Los contratos principales de Phase 1, el perímetro de tools de Phase 2 y el runtime de Phase 3 están implementados en TypeScript. Las capacidades futuras se añadirán cuando una fase las necesite; no se implementan anticipadamente.
 
 ## Routing
 
@@ -48,4 +49,4 @@ Seguridad, permisos, configuración, logging, métricas, manejo de errores, prue
 
 ## Estado actual
 
-La implementación contiene ciclo de vida de aplicación, AssistantCore, sesión en memoria, proveedores mock/direct, configuración, errores, logging y la infraestructura de tools de Phase 2. No hay aún UI, voz, memoria persistente, herramientas del sistema ni routing determinista.
+La implementación contiene ciclo de vida de aplicación, AssistantCore, sesión en memoria, proveedores mock/direct, configuración, errores, logging, tools de Phase 2 y Realtime Engine de Phase 3. No hay aún UI, voz, memoria persistente, herramientas del sistema, routing determinista ni streaming real de proveedores externos.

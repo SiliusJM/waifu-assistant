@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-Phase 2 — Tool System.
+Phase 3 — Realtime Engine.
 
 ## Status
 
-COMPLETE. Phase 2 fue revisada, aprobada y mergeada en `main` mediante PR #2. El merge quedó registrado en el commit `0d0729c6640d16d7d4282157d9b700f9e9fbe3af`.
+IN PROGRESS. Phase 2 fue revisada, aprobada y mergeada en `main` mediante PR #2. Phase 3 está en la rama `phase/03-realtime-engine` y todavía no está mergeada.
 
 ## Completed
 
@@ -26,10 +26,11 @@ COMPLETE. Phase 2 fue revisada, aprobada y mergeada en `main` mediante PR #2. El
 - Rama `phase/02-tools` creada y publicada desde el merge de Phase 1.
 - Contrato, registry, manager, validación, autorización, contexto, resultados y errores de tools implementados en la rama de Phase 2.
 - PR #2 revisado y mergeado a `main`.
+- EventBus, runtime, scheduler, stream, máquina de estados y adapters de Phase 3 implementados en la rama de trabajo.
 
 ## In Progress
 
-Ninguno. Phase 2 está cerrada.
+Phase 3 está implementada y pendiente de cierre documental, commit final y revisión humana.
 
 ## Blocked
 
@@ -38,7 +39,7 @@ Ninguno. Phase 2 está cerrada.
 
 ## Next
 
-Realizar el checkpoint de post-merge y preparar la definición de Phase 3 — Realtime Engine. No iniciar implementación de Phase 3 hasta que su alcance, contratos y criterios de aceptación estén revisados y aprobados.
+Completar verificaciones, crear el commit final de Phase 3 y esperar revisión humana. No crear PR ni hacer merge automáticamente.
 
 ## Known Risks
 

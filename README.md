@@ -4,7 +4,7 @@ Asistente personal de escritorio desarrollado de forma incremental y segura.
 
 ## Estado
 
-Phase 2 — Tool System está implementada en la rama `phase/02-tools` y pendiente de revisión/merge manual. La base incluye conversación de texto con sesión en memoria y proveedores abstraídos; Phase 2 añade sólo el perímetro seguro para herramientas explícitas. No implementa herramientas de control del equipo.
+Phase 3 — Realtime Engine está implementada en la rama `phase/03-realtime-engine` y pendiente de revisión/merge manual. La base incluye conversación de texto, tools seguras y un runtime interno de eventos, streaming abstracto, cancelación y concurrencia. No implementa voz, UI, shell ni herramientas de control del equipo.
 
 ## Principios
 
@@ -35,7 +35,7 @@ dist y dist-tests son artefactos generados y no se versionan.
 
 ## Próximo paso
 
-Phase 2 se desarrolla en la rama `phase/02-tools` y debe ser revisada y aprobada antes de cualquier Phase 3. No se implementan shell, PowerShell, `exec`, `spawn` ni herramientas del sistema. OmniRoute permanece desactivado y su benchmark es un experimento separado.
+Phase 3 se desarrolla en la rama `phase/03-realtime-engine` y debe ser revisada y aprobada antes de cualquier fase posterior. No se implementan shell, PowerShell, `exec`, `spawn`, `child_process` ni herramientas del sistema. OmniRoute permanece desactivado y su benchmark es un experimento separado.
 
 ## Documentación
 
@@ -48,3 +48,4 @@ Phase 2 se desarrolla en la rama `phase/02-tools` y debe ser revisada y aprobada
 - docs/phases/phase-00-foundation.md: alcance y criterios de aceptación de Phase 0.
 - docs/phases/phase-01-assistant-core.md: alcance y criterios de aceptación actuales.
 - docs/phases/phase-02-tool-system.md: alcance y criterios de aceptación de Phase 2.
+- docs/phases/phase-03-realtime-engine.md: alcance y criterios de aceptación de Phase 3.
