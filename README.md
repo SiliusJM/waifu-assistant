@@ -4,9 +4,9 @@ Asistente personal de escritorio desarrollado de forma incremental y segura.
 
 ## Estado
 
-Phase 3 — Realtime Engine está COMPLETA y mergeada en `main`. La base incluye conversación de texto, tools seguras y un runtime interno de eventos, streaming abstracto, cancelación y concurrencia. No implementa voz, UI, shell ni herramientas de control del equipo.
+Phase 3 — Realtime Engine está COMPLETA y mergeada en `main`. La base incluye conversación de texto, tools seguras y un runtime interno de eventos, streaming abstracto, cancelación y concurrencia.
 
-Phase 4 — Voice Service está implementada en la rama `phase/04-voice-service`. Incluye contratos desacoplados de audio, STT, TTS y reproducción, lifecycle, cancelación, timeout, cleanup, logging seguro y mocks deterministas. Los proveedores reales quedan fuera hasta realizar un spike comparativo.
+Phase 4 — Voice Service está COMPLETA y mergeada en `main` mediante PR #4, con merge commit `1ec4384dc529ed303e85413e7969a3896c741a69`. Incluye contratos desacoplados de audio, STT, TTS y reproducción, `VoiceService`, `VoiceSession`, `VoiceError`, lifecycle, cancelación, timeout por etapa, cleanup, logging seguro, eventos correlacionados y mocks deterministas. Los proveedores reales de voz no fueron seleccionados ni integrados.
 
 ## Principios
 
@@ -21,7 +21,7 @@ La arquitectura mantendrá el núcleo separado de proveedores de IA, voz, memori
 - npm o pnpm
 - Git
 
-Python está disponible para la futura evaluación del servicio especializado de voz.
+Python está disponible para la evaluación posterior de proveedores especializados de voz.
 
 ## Verificación
 
@@ -37,7 +37,9 @@ Instalar las dependencias y ejecutar:
 
 ## Próximo paso
 
-Revisar Phase 4 en `phase/04-voice-service` mediante Pull Request. No integrar todavía proveedores de voz obligatorios, wake word, RVC, avatar, Electron/Vue, Spotify, YouTube, navegador, Computer Use, MCP, plugins, memoria/RAG, automatizaciones ni agente autónomo.
+Realizar el checkpoint post-merge de Phase 4 y preparar la definición de Phase 5 — Streaming Voice & Interruptions. No implementar Phase 5 hasta que su alcance, contratos, criterios de aceptación y riesgos hayan sido revisados y aprobados.
+
+Los proveedores reales de STT/TTS se evaluarán mediante un spike comparativo independiente y ADR-007; no forman parte del cierre de Phase 4.
 
 ## Documentación
 
