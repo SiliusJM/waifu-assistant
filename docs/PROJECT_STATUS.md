@@ -6,7 +6,7 @@ Phase 2 — Tool System.
 
 ## Status
 
-COMPLETE IN BRANCH. Phase 0 y Phase 1 están completadas y Phase 1 fue mergeada en `main`. Phase 2 está completada en `phase/02-tools`, pendiente de aprobación y merge manual.
+COMPLETE. Phase 2 fue revisada, aprobada y mergeada en `main` mediante PR #2. El merge quedó registrado en el commit `0d0729c6640d16d7d4282157d9b700f9e9fbe3af`.
 
 ## Completed
 
@@ -25,10 +25,11 @@ COMPLETE IN BRANCH. Phase 0 y Phase 1 están completadas y Phase 1 fue mergeada 
 - Tests unitarios y de integración HTTP controlados pasando sin credenciales externas.
 - Rama `phase/02-tools` creada y publicada desde el merge de Phase 1.
 - Contrato, registry, manager, validación, autorización, contexto, resultados y errores de tools implementados en la rama de Phase 2.
+- PR #2 revisado y mergeado a `main`.
 
 ## In Progress
 
-Ninguno dentro de Phase 2. La rama queda pendiente de auditoría humana y merge.
+Ninguno. Phase 2 está cerrada.
 
 ## Blocked
 
@@ -37,12 +38,9 @@ Ninguno dentro de Phase 2. La rama queda pendiente de auditoría humana y merge.
 
 ## Next
 
-Revisar y aprobar Phase 2. Después de su merge manual, decidir el trabajo posterior.
+Realizar el checkpoint de post-merge y preparar la definición de Phase 3 — Realtime Engine. No iniciar implementación de Phase 3 hasta que su alcance, contratos y criterios de aceptación estén revisados y aprobados.
 
 ## Known Risks
 
 - Agregar un gateway puede aumentar latencia y superficie de exposición.
 - La compresión de contexto puede perder información y debe tener pruebas de fidelidad.
-- Fallback entre proveedores puede cambiar comportamiento, capacidades de tool calling y políticas de datos.
-- No se ha validado todavía un proveedor de voz ni un hardware objetivo.
-- El benchmark empírico de OmniRoute permanece separado y no bloquea Phase 1.
