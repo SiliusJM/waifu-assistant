@@ -9,7 +9,7 @@ Implementar una infraestructura de voz desacoplada y testeable para captura, tra
 - Contratos tipados `AudioFormat`, `AudioChunk`, `AudioArtifact`, `AudioInputProvider`, `AudioOutputProvider`, `STTProvider` y `TTSProvider`.
 - Representación canónica de entrada: PCM signed 16-bit little-endian, 16 kHz, mono. Las conversiones futuras deberán ser explícitas y configurables.
 - `VoiceSession` separado de `Session`, con estados independientes para captura, STT, TTS y playback.
-- `VoiceService` con lifecycle explícito, `AbortSignal`, timeout global o por etapa, cleanup y resultados terminales idempotentes.
+- `VoiceService` con lifecycle explícito, `AbortSignal`, timeout por etapa, cleanup y resultados terminales idempotentes. `timeoutMs` actúa como fallback de timeout para cada etapa cuando no existe un timeout específico.
 - `VoiceEventMap` independiente, con envelopes correlacionados, secuencia monotónica e IDs de sesión de voz.
 - `VoiceError` categorizado y mensajes seguros, sin causas internas, audio ni transcripciones completas.
 - Mocks deterministas para entrada, salida, STT y TTS.
@@ -29,6 +29,16 @@ Una operación de transcripción recorre `created → capturing → transcribing
 
 Los tests usan únicamente mocks en memoria y cubren formatos, captura, partial/final STT, síntesis, reproducción, correlación, cancelación durante captura/STT/TTS/playback, timeout por etapa, cleanup, errores tipados, privacidad del logging, integración explícita con RealtimeEngine y regresión de las fases anteriores.
 
+Verificación reportada para la rama de Phase 4:
+
+- Build: OK
+- Lint: OK
+- Typecheck: OK
+- Tests: 57/57
+- `npm run check`: OK
+- `git diff --check`: OK
+- Git status: limpio
+
 ## Criterios de aceptación
 
 - Contratos y lifecycle implementados sin proveedores reales.
@@ -40,4 +50,6 @@ Los tests usan únicamente mocks en memoria y cubren formatos, captura, partial/
 
 ## Resultado
 
-Phase 4 queda implementada en `phase/04-voice-service`, pendiente únicamente de revisión del commit y del Pull Request. No se inicia Phase 5.
+Phase 4 está COMPLETA y mergeada en `main` mediante PR #4, con merge commit `1ec4384dc529ed303e85413e7969a3896c741a69`.
+
+Los proveedores reales de STT/TTS siguen fuera del alcance de esta implementación y serán evaluados mediante un spike comparativo posterior. No se inicia Phase 5 hasta revisar y aprobar su definición, alcance, contratos y criterios de aceptación.
