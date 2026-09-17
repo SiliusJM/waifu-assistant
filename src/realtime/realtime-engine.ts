@@ -55,6 +55,8 @@ class RuntimeInteraction implements InteractionHandle {
   private cancellationFrom: InteractionState | undefined;
   private cancellationEventEmitted = false;
   private timeoutTriggered = false;
+  private terminalResult: InteractionResult | undefined;
+  private terminalFinalized = false;
   constructor(
     readonly id: string,
     readonly correlationId: string,
@@ -154,11 +156,24 @@ class RuntimeInteraction implements InteractionHandle {
     await this.emit('state_changed', { from, to: 'cancelling' }, true);
   }
 
-  complete(result: InteractionResult): void {
-    if (this.isTerminal()) return;
+  reserveTerminal(result: InteractionResult): boolean {
+    if (this.terminalResult !== undefined || this.isTerminal()) return false;
     this.transition(result.status);
-    this.resolveCompletion(result);
+    this.terminalResult = result;
+    return true;
+  }
+
+  finalizeTerminal(): void {
+    if (this.terminalFinalized || this.terminalResult === undefined) return;
+    this.terminalFinalized = true;
+    this.resolveCompletion(this.terminalResult);
     this.stream.close();
+  }
+
+  complete(result: InteractionResult): boolean {
+    if (!this.reserveTerminal(result)) return false;
+    this.finalizeTerminal();
+    return true;
   }
 
   close(): void {
@@ -275,16 +290,12 @@ export class RealtimeEngine {
           }
           if (interaction.state === 'streaming') await interaction.emit('text_delta', { delta: output.delta });
         } else if (output.type === 'completed') {
-          await interaction.emit('interaction_completed', { state: 'completed', response: output.response });
-          interaction.complete({ status: 'completed', response: output.response });
+          await this.finishCompleted(interaction, output.response);
           return;
         }
       }
       if (interaction.isCancelling()) await this.finishCancellationOutcome(interaction);
-      else {
-        await interaction.emit('interaction_completed', { state: 'completed' });
-        interaction.complete({ status: 'completed' });
-      }
+      else await this.finishCompleted(interaction);
     } catch (error) {
       if (interaction.isCancelling() || interaction.signal.aborted || isAbortError(error)) {
         if (interaction.timedOut) await this.finishFailed(interaction, new RealtimeError(
@@ -307,11 +318,15 @@ export class RealtimeEngine {
   private async finishCancelled(interaction: RuntimeInteraction): Promise<void> {
     if (interaction.isTerminal()) return;
     await interaction.emitCancelling();
-    await interaction.emit('interaction_cancelled', {
-      state: 'cancelled',
-      reason: interaction.reason,
-    }, true);
-    interaction.complete({ status: 'cancelled', reason: interaction.reason });
+    if (!interaction.reserveTerminal({ status: 'cancelled', reason: interaction.reason })) return;
+    try {
+      await interaction.emit('interaction_cancelled', {
+        state: 'cancelled',
+        reason: interaction.reason,
+      }, true);
+    } finally {
+      interaction.finalizeTerminal();
+    }
   }
 
   private async finishCancellationOutcome(interaction: RuntimeInteraction): Promise<void> {
@@ -328,11 +343,27 @@ export class RealtimeEngine {
   private async finishFailed(interaction: RuntimeInteraction, error: RealtimeError): Promise<void> {
     if (interaction.isTerminal()) return;
     if (interaction.isCancelling()) await interaction.emitCancelling();
-    await interaction.emit('interaction_failed', {
-      state: 'failed',
-      code: error.code,
-      message: error.message,
-    }, true);
-    interaction.complete({ status: 'failed', code: error.code, message: error.message });
+    if (!interaction.reserveTerminal({ status: 'failed', code: error.code, message: error.message })) return;
+    try {
+      await interaction.emit('interaction_failed', {
+        state: 'failed',
+        code: error.code,
+        message: error.message,
+      }, true);
+    } finally {
+      interaction.finalizeTerminal();
+    }
+  }
+
+  private async finishCompleted(
+    interaction: RuntimeInteraction,
+    response?: RealtimeEventPayloadMap['interaction_completed']['response'],
+  ): Promise<void> {
+    if (!interaction.reserveTerminal({ status: 'completed', response })) return;
+    try {
+      await interaction.emit('interaction_completed', { state: 'completed', response }, true);
+    } finally {
+      interaction.finalizeTerminal();
+    }
   }
 }

@@ -121,6 +121,65 @@ test('realtime engine emits correlated ordered events and completes once', async
   assert.deepEqual(publishedDeltas, ['one', 'two']);
 });
 
+test('terminal completion reservation wins a deterministic cancellation race', async () => {
+  const engine = new RealtimeEngine({
+    source: new MockInteractionSource({ chunks: ['done'] }),
+    logger: silentLogger,
+  });
+  let cancellationAttempt: boolean | undefined;
+  const unsubscribe = engine.events.subscribe('interaction_completed', (event) => {
+    cancellationAttempt = engine.cancel(event.interactionId, 'race after completion event');
+  });
+  const handle = engine.start(request());
+  const [events, result] = await Promise.all([collect(handle.events()), handle.result()]);
+  unsubscribe();
+
+  assert.equal(cancellationAttempt, false);
+  assert.equal(result.status, 'completed');
+  assert.equal(handle.cancel('late cancellation'), false);
+  assert.equal(events.filter((event) => event.type === 'interaction_completed').length, 1);
+  assert.equal(events.some((event) => event.type === 'interaction_cancelled'), false);
+  assert.equal(events.some((event) => event.type === 'interaction_failed'), false);
+});
+
+test('terminal completion remains stable when timeout fires during terminal backpressure', async () => {
+  const engine = new RealtimeEngine({
+    source: new MockInteractionSource({ chunks: ['buffered'] }),
+    streamCapacity: 1,
+    defaultTimeoutMs: 20,
+    logger: silentLogger,
+  });
+  const handle = engine.start(request());
+  const iterator = handle.events()[Symbol.asyncIterator]();
+  const events: RealtimeEvent[] = [];
+
+  for (let index = 0; index < 4; index += 1) {
+    const next = await iterator.next();
+    assert.equal(next.done, false);
+    if (!next.done) events.push(next.value);
+  }
+  assert.deepEqual(events.map((event) => event.type), [
+    'interaction_admitted',
+    'state_changed',
+    'interaction_started',
+    'state_changed',
+  ]);
+
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  let next = await iterator.next();
+  while (!next.done) {
+    events.push(next.value);
+    next = await iterator.next();
+  }
+  const result = await handle.result();
+
+  assert.equal(result.status, 'completed');
+  assert.equal(handle.cancel('late cancellation'), false);
+  assert.deepEqual(events.map((event) => event.type).slice(-2), ['text_delta', 'interaction_completed']);
+  assert.equal(events.some((event) => event.type === 'interaction_failed'), false);
+  assert.equal(events.some((event) => event.type === 'interaction_cancelled'), false);
+});
+
 test('admission is an event and cancellation before start is terminal', async () => {
   const engine = new RealtimeEngine({
     source: new MockInteractionSource({ chunks: ['never'], delayMs: 20 }),
