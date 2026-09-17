@@ -13,13 +13,15 @@ Waifu Assistant es un proyecto incremental y seguro de asistente personal de esc
 - No avanzar a otra fase hasta que la fase activa cumpla todos sus criterios de aceptación.
 - Las tecnologías listadas como candidatas deben evaluarse antes de convertirse en decisiones.
 
-## Alcance actual: Phase 4 — Voice Service
+## Alcance actual: checkpoint post-merge de Phase 4
 
 Phase 3 — Realtime Engine está cerrada y mergeada en `main`.
 
-Phase 4 está definida y aprobada para implementación. Debe implementar únicamente infraestructura de voz desacoplada: contratos de entrada/salida de audio, `STTProvider`, `TTSProvider`, `VoiceService`, `VoiceSession`, `VoiceError`, providers mock, cancelación, timeout, cleanup, logging seguro y tests deterministas sin hardware ni red.
+Phase 4 — Voice Service está cerrada y mergeada en `main` mediante PR #4. La fase implementa infraestructura de voz desacoplada: contratos de entrada/salida de audio, `STTProvider`, `TTSProvider`, `VoiceService`, `VoiceSession`, `VoiceError`, providers mock, cancelación, timeout, cleanup, logging seguro y tests deterministas sin hardware ni red.
 
-Phase 4 no incluye todavía proveedores reales obligatorios, wake word, barge-in avanzado, streaming avanzado de audio, RVC, avatar, Electron/Vue, persistencia, RAG, MCP, plugins, browser automation, agente autónomo ni el flujo automático `STT → LLM → Tool → TTS`.
+Los proveedores reales de STT/TTS no fueron seleccionados ni integrados. ADR-007 queda abierto para el spike comparativo posterior.
+
+No iniciar implementación de Phase 5 hasta que su definición, alcance, contratos, criterios de aceptación y riesgos hayan sido revisados y aprobados.
 
 ## Arquitectura y seguridad
 
@@ -42,7 +44,7 @@ Desde la raíz del repositorio:
 - `npm test`
 - `npm run check`
 
-Phase 4 mantiene TypeScript estricto y no debe introducir ejecución de procesos ni shell. Ningún código de la fase puede importar `node:child_process` ni ejecutar comandos, scripts o código generado.
+Las fases de voz mantienen TypeScript estricto y no deben introducir ejecución de procesos ni shell. Ningún código de voz puede importar `node:child_process` ni ejecutar comandos, scripts o código generado.
 
 ## Cierre de una fase
 
