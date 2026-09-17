@@ -32,3 +32,9 @@ Todos los cambios relevantes del proyecto se documentarán aquí.
 
 - Logging sin prompts completos ni credenciales.
 - OmniRoute no instalado, no obligatorio y desactivado por defecto.
+
+### Fixed
+
+- DirectAIProvider acepta respuestas de tool calling sin contenido textual.
+- Añadidas pruebas de streaming, cancelación durante backoff y clasificación de retries HTTP.
+- Documentado y probado el límite de `Retry-After` mediante `maxDelayMs`.

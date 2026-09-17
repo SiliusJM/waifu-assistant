@@ -26,7 +26,7 @@ AI_PROVIDER puede ser mock o direct. El modo mock no necesita credenciales. El m
 
 ## Errores y retries
 
-Se distinguen configuración, autenticación, red, timeout, rate limit, respuesta inválida, proveedor, cancelación y validación. Solo red, timeout, rate limit y errores 5xx elegibles se reintentan, con máximo de intentos y backoff configurables. 400, 401/403, JSON inválido y cancelación no se reintentan.
+Se distinguen configuración, autenticación, red, timeout, rate limit, respuesta inválida, proveedor, cancelación y validación. Solo red, timeout, rate limit y errores 5xx elegibles se reintentan, con máximo de intentos y backoff configurables. 400, 401/403, JSON inválido y cancelación no se reintentan. `Retry-After` acepta segundos enteros y nunca supera `maxDelayMs`; valores inválidos se ignoran y se usa el backoff exponencial.
 
 ## Pruebas
 
@@ -54,4 +54,4 @@ El servidor HTTP controlado cubre éxito, 400, 401, 429, 500, retry recuperable,
 
 ## Resultado
 
-Phase 1 fue implementada y verificada localmente el 2026-09-17. El checkpoint queda en la rama main y requiere aprobación humana antes de iniciar Phase 2.
+Phase 1 fue implementada y verificada localmente el 2026-09-17. El checkpoint está publicado en GitHub en la rama `phase/01-core`, commit `f4321a0`, y requiere aprobación humana antes de iniciar Phase 2.

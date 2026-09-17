@@ -3,7 +3,7 @@ import { createServer, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import { DirectAIProvider } from '../../src/ai/direct-ai-provider.js';
-import type { AIRequest, RetryPolicy } from '../../src/ai/ai-types.js';
+import type { AIRequest, AIStreamEvent, RetryPolicy } from '../../src/ai/ai-types.js';
 import { AssistantError } from '../../src/shared/errors.js';
 
 const request: AIRequest = {
@@ -67,6 +67,50 @@ test('direct provider handles a successful response', async () => {
   );
 });
 
+test('direct provider accepts tool calls without textual content', async () => {
+  await withServer(
+    (response) => sendJson(response, 200, {
+      model: 'test-model',
+      choices: [{
+        message: {
+          content: null,
+          tool_calls: [{ id: 'call-1', function: { name: 'lookup', arguments: '{}' } }],
+        },
+        finish_reason: 'tool_calls',
+      }],
+    }),
+    async (baseURL) => {
+      const result = await provider(baseURL).complete(request);
+      assert.equal(result.text, '');
+      assert.equal(result.toolCalls?.[0]?.name, 'lookup');
+      assert.equal(result.finishReason, 'tool_calls');
+    },
+  );
+});
+
+test('direct provider stream emits the completed response', async () => {
+  await withServer(
+    (response) => sendJson(response, 200, {
+      model: 'test-model',
+      choices: [{ message: { content: 'streamed' }, finish_reason: 'stop' }],
+    }),
+    async (baseURL) => {
+      const events: AIStreamEvent[] = [];
+      for await (const event of provider(baseURL).stream(request)) {
+        events.push(event);
+      }
+      assert.equal(events.length, 1);
+      assert.equal(events[0]?.type, 'completed');
+      if (events[0]?.type === 'completed') {
+        assert.equal(events[0].response.text, 'streamed');
+        assert.equal(events[0].response.provider, 'direct-http');
+        assert.equal(events[0].response.model, 'test-model');
+        assert.equal(events[0].response.finishReason, 'stop');
+      }
+    },
+  );
+});
+
 test('direct provider categorizes 400, 401, 429 and 500 responses', async () => {
   const cases: Array<[number, AssistantError['code']]> = [
     [400, 'PROVIDER_ERROR'],
@@ -102,6 +146,52 @@ test('direct provider retries a retryable 500 response once', async () => {
       }).complete(request);
       assert.equal(result.text, 'recovered');
       assert.equal(calls, 2);
+    },
+  );
+});
+
+test('direct provider does not retry 400 or 401 responses', async () => {
+  for (const statusCode of [400, 401]) {
+    let calls = 0;
+    await withServer(
+      (response) => {
+        calls += 1;
+        sendJson(response, statusCode, { error: 'permanent' });
+      },
+      async (baseURL) => {
+        await assertCode(
+          provider(baseURL, {
+            retryPolicy: { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0 },
+          }).complete(request),
+          statusCode === 401 ? 'AUTHENTICATION_ERROR' : 'PROVIDER_ERROR',
+        );
+        assert.equal(calls, 1);
+      },
+    );
+  }
+});
+
+test('direct provider caps Retry-After at maxDelayMs', async () => {
+  let calls = 0;
+  const controller = new AbortController();
+  await withServer(
+    (response) => {
+      calls += 1;
+      response.writeHead(429, {
+        'content-type': 'application/json',
+        'retry-after': '1',
+      });
+      response.end(JSON.stringify({ error: 'slow down' }));
+    },
+    async (baseURL) => {
+      setTimeout(() => controller.abort(), 100);
+      await assertCode(
+        provider(baseURL, {
+          retryPolicy: { maxAttempts: 10, baseDelayMs: 0, maxDelayMs: 20 },
+        }).complete(request, { signal: controller.signal }),
+        'CANCELLATION_ERROR',
+      );
+      assert.ok(calls >= 2);
     },
   );
 });
@@ -143,6 +233,27 @@ test('direct provider classifies timeout and caller cancellation separately', as
         provider(baseURL, { timeoutMs: 500 }).complete(request, { signal: controller.signal }),
         'CANCELLATION_ERROR',
       );
+    },
+  );
+});
+
+test('direct provider cancellation during retry backoff prevents the next request', async () => {
+  let calls = 0;
+  const controller = new AbortController();
+  await withServer(
+    (response) => {
+      calls += 1;
+      sendJson(response, 500, { error: 'temporary' });
+    },
+    async (baseURL) => {
+      setTimeout(() => controller.abort(), 10);
+      await assertCode(
+        provider(baseURL, {
+          retryPolicy: { maxAttempts: 2, baseDelayMs: 1000, maxDelayMs: 1000 },
+        }).complete(request, { signal: controller.signal }),
+        'CANCELLATION_ERROR',
+      );
+      assert.equal(calls, 1);
     },
   );
 });

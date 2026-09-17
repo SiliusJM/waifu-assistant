@@ -112,7 +112,11 @@ function parseResponse(payload: unknown, requestedModel: string, providerName: s
     });
   }
 
-  if (typeof choice.message.content !== 'string') {
+  const toolCalls = parseToolCalls(choice.message.tool_calls);
+  const text = choice.message.content === undefined || choice.message.content === null
+    ? ''
+    : choice.message.content;
+  if (typeof text !== 'string' || (text.length === 0 && (!toolCalls || toolCalls.length === 0))) {
     throw new AssistantError('The provider returned invalid message content.', {
       code: 'INVALID_RESPONSE_ERROR',
       retryable: false,
@@ -120,12 +124,12 @@ function parseResponse(payload: unknown, requestedModel: string, providerName: s
   }
 
   return {
-    text: choice.message.content,
+    text,
     provider: providerName,
     model: typeof payload.model === 'string' ? payload.model : requestedModel,
     finishReason: finishReason(choice.finish_reason),
     usage: parseUsage(payload.usage),
-    toolCalls: parseToolCalls(choice.message.tool_calls),
+    toolCalls,
   };
 }
 
