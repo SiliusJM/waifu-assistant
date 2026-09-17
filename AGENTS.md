@@ -13,9 +13,9 @@ Waifu Assistant es un proyecto incremental de asistente personal de escritorio. 
 - No avanzar a otra fase hasta que la fase activa cumpla todos sus criterios de aceptación.
 - Las tecnologías listadas como candidatas deben evaluarse antes de convertirse en decisiones.
 
-## Alcance actual: Phase 0
+## Alcance actual: Phase 1
 
-Phase 0 establece gobierno, documentación, configuración y un esqueleto mínimo ejecutable. No incluye conversación con modelos, herramientas del sistema, voz, memoria, navegador, avatar, UI ni agente autónomo.
+Phase 1 implementa conversación de texto, sesión en memoria, proveedor de IA abstraído, configuración, errores y logging seguro. No incluye herramientas reales, voz, memoria persistente, navegador, avatar, UI ni agente autónomo.
 
 ## Arquitectura y seguridad
 
@@ -31,9 +31,10 @@ Desde la raíz del repositorio:
 
 - npm run build
 - npm run lint
+- npm run typecheck
 - npm test
 
-El esqueleto de Phase 0 no fija todavía un compilador de TypeScript ni un linter de terceros. La decisión se tomará antes de Phase 1 con evaluación de mantenimiento, seguridad, compatibilidad y reproducibilidad.
+Phase 1 usa TypeScript estricto, ESLint y los tipos de Node con versiones fijadas en package.json y package-lock.json.
 
 ## Cierre de una fase
 

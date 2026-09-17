@@ -6,7 +6,9 @@
 # Node and generated output
 node_modules/
 dist/
+dist-tests/
 coverage/
+.tsbuildinfo
 
 # Local tooling and operating-system files
 .vscode/*

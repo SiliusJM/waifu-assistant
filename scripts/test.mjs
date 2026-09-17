@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const testsRoot = join(root, 'tests');
+const testsRoot = join(root, 'dist-tests');
 
 async function collectTestFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -13,7 +13,7 @@ async function collectTestFiles(directory) {
     const entryPath = join(directory, entry.name);
     if (entry.isDirectory()) {
       files.push(...await collectTestFiles(entryPath));
-    } else if (entry.isFile() && entry.name.endsWith('.test.mjs')) {
+    } else if (entry.isFile() && entry.name.endsWith('.test.js')) {
       files.push(entryPath);
     }
   }

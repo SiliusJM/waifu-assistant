@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-Phase 0 — Architecture & Foundation.
+Phase 1 — Assistant Core.
 
 ## Status
 
-COMPLETE. Phase 0 cumple sus criterios documentados y queda pendiente de aprobación humana antes de iniciar Phase 1.
+COMPLETE. Phase 0 fue aprobada conceptualmente y Phase 1 cumple sus criterios documentados. Queda pendiente aprobación humana antes de iniciar Phase 2.
 
 ## Completed
 
@@ -19,10 +19,14 @@ COMPLETE. Phase 0 cumple sus criterios documentados y queda pendiente de aprobac
 - Arquitectura base, riesgos y decisión provisional sobre proveedores documentados.
 - Changelog actualizado.
 - Remote origin configurado y rama main publicada en GitHub: https://github.com/SiliusJM/waifu-assistant.
+- TypeScript estricto, ESLint y configuración de compilación reproducible implementados para Phase 1.
+- AssistantCore, Session, Message, Context, Response y providers implementados.
+- Errores categorizados, cancelación, timeout y retry explícito implementados.
+- Tests unitarios y de integración HTTP controlados pasando sin credenciales externas.
 
 ## In Progress
 
-Ninguno dentro de Phase 0.
+Ninguno dentro de Phase 1.
 
 ## Blocked
 
@@ -31,7 +35,7 @@ Ninguno dentro de Phase 0.
 
 ## Next
 
-Revisión y aprobación de Phase 0. Después, iniciar Phase 1 — Assistant Core, empezando por una evaluación reproducible de TypeScript frente a JavaScript ESM con tipado gradual y por la definición de AIProvider.
+Revisar y aprobar Phase 1. Después, iniciar Phase 2 — Tool System.
 
 ## Known Risks
 
@@ -39,3 +43,4 @@ Revisión y aprobación de Phase 0. Después, iniciar Phase 1 — Assistant Core
 - La compresión de contexto puede perder información y debe tener pruebas de fidelidad.
 - Fallback entre proveedores puede cambiar comportamiento, capacidades de tool calling y políticas de datos.
 - No se ha validado todavía un proveedor de voz ni un hardware objetivo.
+- El benchmark empírico de OmniRoute permanece separado y no bloquea Phase 1.

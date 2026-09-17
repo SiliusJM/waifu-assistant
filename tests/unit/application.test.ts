@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createApplication } from '../../dist/core/application.mjs';
+import { createApplication } from '../../src/core/application.js';
 
 test('application starts and stops idempotently', () => {
-  const events = [];
+  const events: string[] = [];
   const logger = {
-    info(message, context) {
-      events.push({ message, context });
+    info(message: string): void {
+      events.push(message);
     },
+    warn(): void {},
+    error(): void {},
   };
   const application = createApplication({ logger });
 
@@ -16,8 +18,5 @@ test('application starts and stops idempotently', () => {
   assert.equal(application.start(), 'running');
   assert.equal(application.stop(), 'stopped');
   assert.equal(application.stop(), 'stopped');
-  assert.deepEqual(events.map(({ message }) => message), [
-    'Application started',
-    'Application stopped',
-  ]);
+  assert.deepEqual(events, ['Application started', 'Application stopped']);
 });
