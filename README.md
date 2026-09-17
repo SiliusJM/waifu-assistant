@@ -37,7 +37,7 @@ Instalar las dependencias y ejecutar:
 
 ## Próximo paso
 
-Implementar únicamente Phase 4 — Voice Service en su rama correspondiente. No integrar todavía proveedores de voz obligatorios, wake word, RVC, avatar, Electron/Vue, Spotify, YouTube, navegador, Computer Use, MCP, plugins, memoria/RAG, automatizaciones ni agente autónomo.
+Revisar Phase 4 en `phase/04-voice-service` mediante Pull Request. No integrar todavía proveedores de voz obligatorios, wake word, RVC, avatar, Electron/Vue, Spotify, YouTube, navegador, Computer Use, MCP, plugins, memoria/RAG, automatizaciones ni agente autónomo.
 
 ## Documentación
 
