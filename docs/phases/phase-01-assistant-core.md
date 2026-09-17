@@ -54,4 +54,4 @@ El servidor HTTP controlado cubre éxito, 400, 401, 429, 500, retry recuperable,
 
 ## Resultado
 
-Phase 1 fue implementada y verificada localmente el 2026-09-17. El checkpoint está publicado en GitHub en la rama `phase/01-core`, commit `f4321a0`, y requiere aprobación humana antes de iniciar Phase 2.
+Phase 1 fue implementada y verificada localmente el 2026-09-17. El checkpoint está publicado en GitHub en la rama `phase/01-core`, commit `5d3f406a6d889fce65e07eda6acddd29fbb42200`, y requiere aprobación humana antes de iniciar Phase 2.
