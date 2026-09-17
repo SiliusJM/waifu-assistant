@@ -6,7 +6,7 @@ Asistente personal de escritorio desarrollado de forma incremental y segura.
 
 Phase 3 — Realtime Engine está COMPLETA y mergeada en `main`. La base incluye conversación de texto, tools seguras y un runtime interno de eventos, streaming abstracto, cancelación y concurrencia. No implementa voz, UI, shell ni herramientas de control del equipo.
 
-Phase 4 — Voice Service está definida y aprobada para implementación. Su objetivo es añadir contratos desacoplados de audio, STT, TTS y reproducción, junto con lifecycle, cancelación, timeout, cleanup, logging seguro y mocks deterministas. Los proveedores reales quedan fuera de la implementación inicial hasta realizar un spike comparativo.
+Phase 4 — Voice Service está implementada en la rama `phase/04-voice-service`. Incluye contratos desacoplados de audio, STT, TTS y reproducción, lifecycle, cancelación, timeout, cleanup, logging seguro y mocks deterministas. Los proveedores reales quedan fuera hasta realizar un spike comparativo.
 
 ## Principios
 
@@ -51,3 +51,4 @@ Implementar únicamente Phase 4 — Voice Service en su rama correspondiente. No
 - `docs/phases/phase-01-assistant-core.md`: alcance y criterios de aceptación de Phase 1.
 - `docs/phases/phase-02-tool-system.md`: alcance y criterios de aceptación de Phase 2.
 - `docs/phases/phase-03-realtime-engine.md`: alcance, criterios y cierre de Phase 3.
+- `docs/phases/phase-04-voice-service.md`: alcance, contratos, seguridad y criterios de Phase 4.

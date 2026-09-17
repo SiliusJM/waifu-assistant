@@ -72,3 +72,20 @@ Todos los cambios relevantes del proyecto se documentarán aquí.
 
 - PR #3 revisado, corregido y mergeado a `main` en `7cfe8144536ca1d95c462c3f803d35f5950c0f73`.
 - Phase 3 cerrada después de regresión completa y verificación local.
+
+## Phase 4 — Voice Service
+
+### Added
+
+- Contratos desacoplados de audio, captura, salida, STT y TTS.
+- `VoiceSession`, `VoiceService`, `VoiceEventMap`, errores tipados y mocks deterministas.
+- Cancelación cooperativa, timeout por etapa, cleanup explícito y correlación con `RealtimeEngine`.
+
+### Security
+
+- Audio en memoria por defecto y sin logging de audio o transcripciones completas.
+- Sin proveedores reales, procesos, shell ni flujo autónomo STT → LLM → Tool → TTS.
+
+### Status
+
+- Implementación en `phase/04-voice-service`; ADR-007 de selección de proveedores permanece abierto.

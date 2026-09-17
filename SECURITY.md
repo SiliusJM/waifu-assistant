@@ -25,3 +25,11 @@ Un proveedor de IA puede recibir prompts, contexto y credenciales. DirectAIProvi
 ## Reporte
 
 Los reportes de seguridad deben describir el impacto sin incluir secretos. Hasta disponer de un canal privado del repositorio, no publicar detalles explotables en un issue público.
+
+## Voz
+
+- El audio se mantiene en memoria por defecto y no se persiste.
+- No se registran audio ni transcripciones completas; los logs usan IDs, estados, tamaños, duraciones, proveedores y códigos.
+- Los errores de voz no incluyen audio, texto completo ni detalles internos del provider.
+- La entrada se valida contra el formato canónico PCM 16 kHz, mono; cualquier conversión futura deberá ser explícita.
+- Los providers reales de STT/TTS no forman parte de Phase 4. La selección y el benchmark quedan para ADR-007.
