@@ -45,6 +45,10 @@ Todos los cambios relevantes del proyecto se documentarán aquí.
 
 - Phase 2 no importa `child_process` ni implementa `exec`, `spawn`, PowerShell, CMD o shell arbitrario.
 
+### Status
+
+- PR #2 revisado y mergeado a `main`; Phase 2 cerrada.
+
 ## Phase 3 — Realtime Engine
 
 ### Added
@@ -62,3 +66,9 @@ Todos los cambios relevantes del proyecto se documentarán aquí.
 - DirectAIProvider acepta respuestas de tool calling sin contenido textual.
 - Añadidas pruebas de streaming, cancelación durante backoff y clasificación de retries HTTP.
 - Documentado y probado el límite de `Retry-After` mediante `maxDelayMs`.
+- Corregida la carrera de terminalización del `RealtimeEngine`, garantizando que el resultado terminal se reserve antes de publicar el evento terminal y evitando finales contradictorios.
+
+### Status
+
+- PR #3 revisado, corregido y mergeado a `main` en `7cfe8144536ca1d95c462c3f803d35f5950c0f73`.
+- Phase 3 cerrada después de regresión completa y verificación local.
