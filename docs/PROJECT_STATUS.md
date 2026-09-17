@@ -6,7 +6,7 @@ Phase 4 — Voice Service.
 
 ## Status
 
-IN PROGRESS. Phase 3 fue revisada, corregida y mergeada en `main` mediante PR #3. Phase 4 está implementada en la rama `phase/04-voice-service`, pendiente de revisión y Pull Request.
+COMPLETE. Phase 4 fue revisada técnicamente y mergeada en `main` mediante PR #4. El merge quedó registrado en el commit `1ec4384dc529ed303e85413e7969a3896c741a69`.
 
 ## Completed
 
@@ -33,10 +33,12 @@ IN PROGRESS. Phase 3 fue revisada, corregida y mergeada en `main` mediante PR #3
 - Definición arquitectónica de Phase 4 auditada y aprobada.
 - Contratos de audio, providers abstractos, `VoiceSession`, `VoiceService`, eventos, errores y mocks de Phase 4 implementados.
 - Cancelación, timeout por etapa, cleanup, logging seguro y correlación explícita con `RealtimeEngine` implementados.
+- Tests de Phase 4: 57/57 pasando según la verificación realizada en la rama de la fase.
+- PR #4 revisado técnicamente y mergeado a `main`.
 
 ## In Progress
 
-Phase 4 está pendiente de revisión final, commit y Pull Request. Los proveedores reales de STT/TTS no son parte de esta implementación y se evaluarán posteriormente mediante un spike comparativo.
+Ninguno. Phase 4 está cerrada.
 
 ## Blocked
 
@@ -45,7 +47,7 @@ Phase 4 está pendiente de revisión final, commit y Pull Request. Los proveedor
 
 ## Next
 
-Revisar y publicar el commit de `phase/04-voice-service` con los contratos y lifecycle de Voice Service. No implementar todavía proveedores reales obligatorios ni avanzar a Phase 5.
+Realizar el checkpoint post-merge de Phase 4 y preparar la definición de Phase 5 — Streaming Voice & Interruptions. No implementar Phase 5 hasta que su alcance, contratos, criterios de aceptación y riesgos hayan sido revisados y aprobados.
 
 ## Known Risks
 
