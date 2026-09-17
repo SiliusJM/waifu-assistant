@@ -3,6 +3,8 @@
 Las decisiones relevantes se registran como ADRs para preservar contexto y facilitar migraciones.
 
 - ADR-001: abstracción de proveedor de IA y OmniRoute opcional.
+- ADR-002: toolchain TypeScript estricto para Phase 1.
+- ADR-003: contratos del Assistant Core, streaming y cancelación.
 
 Decisiones futuras previstas, solo cuando exista evidencia:
 

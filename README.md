@@ -4,7 +4,7 @@ Asistente personal de escritorio desarrollado de forma incremental y segura.
 
 ## Estado
 
-La base del repositorio corresponde a Phase 0 — Architecture & Foundation. El proyecto todavía no implementa conversación con modelos ni herramientas de control del equipo.
+La base del repositorio corresponde a Phase 1 — Assistant Core. Implementa conversación de texto con sesión en memoria y proveedores abstraídos. No implementa herramientas de control del equipo.
 
 ## Principios
 
@@ -23,17 +23,19 @@ Python está disponible para una futura evaluación del servicio especializado d
 
 ## Verificación
 
-Instalar no requiere dependencias de terceros en Phase 0. Ejecutar:
+Instalar las dependencias y ejecutar:
 
+    npm install
     npm run build
     npm run lint
+    npm run typecheck
     npm test
 
-El build copia el esqueleto ESM a dist y valida su sintaxis. dist es un artefacto generado y no se versiona.
+dist y dist-tests son artefactos generados y no se versionan.
 
 ## Próximo paso
 
-La siguiente fase será Phase 1 — Assistant Core, únicamente después de revisar y aprobar los criterios de Phase 0. Su primera decisión técnica pendiente es seleccionar TypeScript o JavaScript ESM con tipado gradual para el core, respaldada por una evaluación reproducible.
+Phase 1 debe ser revisada y aprobada antes de iniciar Phase 2 — Tool System. OmniRoute permanece desactivado y su benchmark es un experimento separado.
 
 ## Documentación
 
@@ -41,4 +43,7 @@ La siguiente fase será Phase 1 — Assistant Core, únicamente después de revi
 - docs/PROJECT_STATUS.md: estado y riesgos.
 - docs/architecture/overview.md: arquitectura propuesta y límites.
 - docs/adr/ADR-001-provider-abstraction-and-optional-omniroute.md: evaluación inicial del gateway.
-- docs/phases/phase-00-foundation.md: alcance y criterios de aceptación.
+- docs/adr/ADR-002-typescript-strict-toolchain.md: decisión de toolchain.
+- docs/adr/ADR-003-phase-1-core-contracts.md: contratos del core.
+- docs/phases/phase-00-foundation.md: alcance y criterios de aceptación de Phase 0.
+- docs/phases/phase-01-assistant-core.md: alcance y criterios de aceptación actuales.

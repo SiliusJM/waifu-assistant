@@ -2,7 +2,7 @@
 
 ## Estado
 
-Este documento describe límites y contratos de Phase 0. No representa una implementación completa del asistente.
+Este documento describe límites y contratos de Phase 1. No representa una implementación completa del asistente.
 
 ## Capas
 
@@ -30,7 +30,7 @@ Las capacidades futuras de realtime, voz, memoria, avatar y eventos se conectar�
 - ToolProvider: esquema, permisos, ejecución acotada y resultado validado.
 - AvatarProvider: estados visuales derivados de eventos del core.
 
-Los contratos se definirán cuando una fase los necesite. Phase 0 no crea APIs ficticias ni integra proveedores.
+Los contratos principales de Phase 1 están implementados en TypeScript. Las capacidades futuras se añadirán cuando una fase las necesite; no se implementan anticipadamente.
 
 ## Routing
 
@@ -48,4 +48,4 @@ Seguridad, permisos, configuración, logging, métricas, manejo de errores, prue
 
 ## Estado actual
 
-La implementación de Phase 0 contiene solo un ciclo de vida mínimo de aplicación y logging. No hay aún UI, IA, voz, memoria, herramientas ni red.
+La implementación de Phase 1 contiene ciclo de vida de aplicación, AssistantCore, sesión en memoria, proveedores mock/direct, configuración, errores y logging. No hay aún UI, voz, memoria persistente, herramientas reales ni routing determinista.

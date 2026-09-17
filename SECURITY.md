@@ -2,7 +2,7 @@
 
 ## Alcance
 
-La seguridad es un requisito de diseño desde la primera fase. Phase 0 establece reglas y configuración segura, pero todavía no ejecuta herramientas del sistema ni llamadas a proveedores.
+La seguridad es un requisito de diseño desde la primera fase. Phase 1 no ejecuta herramientas del sistema, pero sí realiza llamadas HTTP configurables cuando se activa explícitamente el proveedor direct.
 
 ## Secretos
 
@@ -20,7 +20,7 @@ No se permitirá por defecto que un LLM construya o ejecute comandos shell arbit
 
 ## Proveedores y gateway
 
-Un gateway de IA puede recibir prompts, contexto, resultados de herramientas y credenciales de proveedor. OmniRoute solo podrá activarse de forma explícita, con configuración local, proveedores permitidos, logs sin secretos y controles de timeout, fallback y coste. No se usará para fast paths deterministas.
+Un proveedor de IA puede recibir prompts, contexto y credenciales. DirectAIProvider usa configuración externa, timeout, retries clasificados y logs sin contenido de prompts. OmniRoute permanece desactivado y no forma parte de Phase 1; si se evalúa después, deberá estar detrás de AIProvider y fuera de fast paths deterministas.
 
 ## Reporte
 

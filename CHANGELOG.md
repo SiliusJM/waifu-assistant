@@ -16,3 +16,19 @@ Todos los cambios relevantes del proyecto se documentarán aquí.
 
 - Los proveedores de IA y OmniRoute no se integran en Phase 0.
 - OmniRoute queda como adaptador opcional detrás de una abstracción AIProvider y fuera de las rutas deterministas.
+
+## Phase 1 — Assistant Core
+
+### Added
+
+- Toolchain TypeScript estricto con build, lint, typecheck y lockfile reproducible.
+- Session, Message, Context, Response y AssistantCore con responsabilidades separadas.
+- AIProvider preparado para complete, stream y AbortSignal.
+- MockAIProvider y DirectAIProvider HTTP configurable.
+- Errores categorizados, timeout y retry explícito.
+- Tests unitarios y de integración HTTP sin credenciales ni proveedores externos.
+
+### Security
+
+- Logging sin prompts completos ni credenciales.
+- OmniRoute no instalado, no obligatorio y desactivado por defecto.
