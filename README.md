@@ -4,13 +4,15 @@ Asistente personal de escritorio desarrollado de forma incremental y segura.
 
 ## Estado
 
-Phase 3 — Realtime Engine está implementada en la rama `phase/03-realtime-engine` y pendiente de revisión/merge manual. La base incluye conversación de texto, tools seguras y un runtime interno de eventos, streaming abstracto, cancelación y concurrencia. No implementa voz, UI, shell ni herramientas de control del equipo.
+Phase 3 — Realtime Engine está COMPLETA y mergeada en `main`. La base incluye conversación de texto, tools seguras y un runtime interno de eventos, streaming abstracto, cancelación y concurrencia. No implementa voz, UI, shell ni herramientas de control del equipo.
+
+Phase 4 — Voice Service está definida y aprobada para implementación. Su objetivo es añadir contratos desacoplados de audio, STT, TTS y reproducción, junto con lifecycle, cancelación, timeout, cleanup, logging seguro y mocks deterministas. Los proveedores reales quedan fuera de la implementación inicial hasta realizar un spike comparativo.
 
 ## Principios
 
 Seguridad, integridad del proyecto, correctitud, estabilidad, baja latencia, mantenibilidad, experiencia de usuario, coste y nuevas capacidades, en ese orden.
 
-La arquitectura mantendrá el núcleo separado de proveedores de IA, voz, memoria, avatar y herramientas. Electron, Vue, TypeScript, Python, faster-whisper, Edge-TTS, RVC, SQLite, Three.js, Live2D/VTube Studio, RAG y OmniRoute permanecen como candidatos sujetos a evaluación.
+La arquitectura mantendrá el núcleo separado de proveedores de IA, voz, memoria, avatar y herramientas. Electron, Vue, TypeScript, Python, faster-whisper, Edge-TTS, RVC, SQLite, Three.js, Live2D/VTube Studio, RAG y OmniRoute permanecen como candidatos sujetos a evaluación por fase.
 
 ## Requisitos locales detectados
 
@@ -19,7 +21,7 @@ La arquitectura mantendrá el núcleo separado de proveedores de IA, voz, memori
 - npm o pnpm
 - Git
 
-Python está disponible para una futura evaluación del servicio especializado de voz. No es necesario para ejecutar esta fase.
+Python está disponible para la futura evaluación del servicio especializado de voz.
 
 ## Verificación
 
@@ -31,21 +33,21 @@ Instalar las dependencias y ejecutar:
     npm run typecheck
     npm test
 
-dist y dist-tests son artefactos generados y no se versionan.
+`dist` y `dist-tests` son artefactos generados y no se versionan.
 
 ## Próximo paso
 
-Phase 3 se desarrolla en la rama `phase/03-realtime-engine` y debe ser revisada y aprobada antes de cualquier fase posterior. No se implementan shell, PowerShell, `exec`, `spawn`, `child_process` ni herramientas del sistema. OmniRoute permanece desactivado y su benchmark es un experimento separado.
+Implementar únicamente Phase 4 — Voice Service en su rama correspondiente. No integrar todavía proveedores de voz obligatorios, wake word, RVC, avatar, Electron/Vue, Spotify, YouTube, navegador, Computer Use, MCP, plugins, memoria/RAG, automatizaciones ni agente autónomo.
 
 ## Documentación
 
-- docs/PROJECT_DISCOVERY.md: diagnóstico del entorno y del repositorio.
-- docs/PROJECT_STATUS.md: estado y riesgos.
-- docs/architecture/overview.md: arquitectura propuesta y límites.
-- docs/adr/ADR-001-provider-abstraction-and-optional-omniroute.md: evaluación inicial del gateway.
-- docs/adr/ADR-002-typescript-strict-toolchain.md: decisión de toolchain.
-- docs/adr/ADR-003-phase-1-core-contracts.md: contratos del core.
-- docs/phases/phase-00-foundation.md: alcance y criterios de aceptación de Phase 0.
-- docs/phases/phase-01-assistant-core.md: alcance y criterios de aceptación actuales.
-- docs/phases/phase-02-tool-system.md: alcance y criterios de aceptación de Phase 2.
-- docs/phases/phase-03-realtime-engine.md: alcance y criterios de aceptación de Phase 3.
+- `docs/PROJECT_DISCOVERY.md`: diagnóstico del entorno y del repositorio.
+- `docs/PROJECT_STATUS.md`: estado y riesgos.
+- `docs/architecture/overview.md`: arquitectura y límites.
+- `docs/adr/ADR-001-provider-abstraction-and-optional-omniroute.md`: evaluación inicial del gateway.
+- `docs/adr/ADR-002-typescript-strict-toolchain.md`: decisión de toolchain.
+- `docs/adr/ADR-003-phase-1-core-contracts.md`: contratos del core.
+- `docs/phases/phase-00-foundation.md`: alcance y criterios de aceptación de Phase 0.
+- `docs/phases/phase-01-assistant-core.md`: alcance y criterios de aceptación de Phase 1.
+- `docs/phases/phase-02-tool-system.md`: alcance y criterios de aceptación de Phase 2.
+- `docs/phases/phase-03-realtime-engine.md`: alcance, criterios y cierre de Phase 3.
