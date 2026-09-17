@@ -6,6 +6,7 @@ Las decisiones relevantes se registran como ADRs para preservar contexto y facil
 - ADR-002: toolchain TypeScript estricto para Phase 1.
 - ADR-003: contratos del Assistant Core, streaming y cancelación.
 - ADR-004: validación declarativa propia para Phase 2.
+- ADR-005: Realtime Engine, eventos, estados, concurrencia y cancelación para Phase 3.
 
 Decisiones futuras previstas, solo cuando exista evidencia:
 

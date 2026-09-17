@@ -45,6 +45,18 @@ Todos los cambios relevantes del proyecto se documentarán aquí.
 
 - Phase 2 no importa `child_process` ni implementa `exec`, `spawn`, PowerShell, CMD o shell arbitrario.
 
+## Phase 3 — Realtime Engine
+
+### Added
+
+- EventBus, RealtimeEngine, InteractionHandle, scheduler, stream acotado y máquina de estados.
+- Correlación, secuencia monotónica, cancelación, timeout, cleanup y adapters para el core y tools.
+- MockInteractionSource y tests deterministas de streaming y concurrencia.
+
+### Security
+
+- Phase 3 no implementa procesos, shell, herramientas reales del sistema, streaming externo ni agente autónomo.
+
 ### Fixed
 
 - DirectAIProvider acepta respuestas de tool calling sin contenido textual.
