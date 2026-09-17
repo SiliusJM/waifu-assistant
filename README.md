@@ -4,7 +4,7 @@ Asistente personal de escritorio desarrollado de forma incremental y segura.
 
 ## Estado
 
-La base del repositorio corresponde a Phase 1 — Assistant Core. Implementa conversación de texto con sesión en memoria y proveedores abstraídos. No implementa herramientas de control del equipo.
+El repositorio está implementando Phase 2 — Tool System. La base incluye conversación de texto con sesión en memoria y proveedores abstraídos; Phase 2 añade sólo el perímetro seguro para herramientas explícitas. No implementa herramientas de control del equipo.
 
 ## Principios
 
@@ -35,7 +35,7 @@ dist y dist-tests son artefactos generados y no se versionan.
 
 ## Próximo paso
 
-Phase 1 debe ser revisada y aprobada antes de iniciar Phase 2 — Tool System. OmniRoute permanece desactivado y su benchmark es un experimento separado.
+Phase 2 se desarrolla en la rama `phase/02-tools` y debe ser revisada y aprobada antes de cualquier Phase 3. No se implementan shell, PowerShell, `exec`, `spawn` ni herramientas del sistema. OmniRoute permanece desactivado y su benchmark es un experimento separado.
 
 ## Documentación
 
@@ -47,3 +47,4 @@ Phase 1 debe ser revisada y aprobada antes de iniciar Phase 2 — Tool System. O
 - docs/adr/ADR-003-phase-1-core-contracts.md: contratos del core.
 - docs/phases/phase-00-foundation.md: alcance y criterios de aceptación de Phase 0.
 - docs/phases/phase-01-assistant-core.md: alcance y criterios de aceptación actuales.
+- docs/phases/phase-02-tool-system.md: alcance y criterios de aceptación de Phase 2.

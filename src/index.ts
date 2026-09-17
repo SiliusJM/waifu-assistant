@@ -22,3 +22,24 @@ export {
   type AssistantErrorCode,
 } from './shared/errors.js';
 export { createLogger, type Logger } from './shared/logger.js';
+export { ToolError, type ToolErrorCode } from './tools/errors.js';
+export { ToolManager, type ToolManagerOptions } from './tools/tool-manager.js';
+export { ToolRegistry } from './tools/tool-registry.js';
+export { validateToolArguments } from './tools/validation.js';
+export type {
+  Tool,
+  ToolArgumentProperty,
+  ToolArgumentSchema,
+  ToolAuthorizer,
+  ToolAuthorization,
+  ToolAuthorizationDecision,
+  ToolExecutionContext,
+  ToolExecutionOptions,
+  ToolFailure,
+  ToolInternalError,
+  ToolResult,
+  ToolRiskLevel,
+  ToolSuccess,
+  ToolValidationIssue,
+  ToolValidationResult,
+} from './tools/tool-types.js';

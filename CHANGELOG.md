@@ -33,6 +33,18 @@ Todos los cambios relevantes del proyecto se documentarán aquí.
 - Logging sin prompts completos ni credenciales.
 - OmniRoute no instalado, no obligatorio y desactivado por defecto.
 
+## Phase 2 — Tool System
+
+### Added
+
+- Contrato tipado de herramientas, registro, manager, validación declarativa y autorización explícita.
+- Contexto de ejecución, resultados discriminados, errores específicos y cancelación cooperativa.
+- Tests de seguridad que rechazan texto no validado como herramienta o comando del sistema.
+
+### Security
+
+- Phase 2 no importa `child_process` ni implementa `exec`, `spawn`, PowerShell, CMD o shell arbitrario.
+
 ### Fixed
 
 - DirectAIProvider acepta respuestas de tool calling sin contenido textual.

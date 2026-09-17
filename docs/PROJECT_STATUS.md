@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-Phase 1 — Assistant Core.
+Phase 2 — Tool System.
 
 ## Status
 
-COMPLETE. Phase 0 fue aprobada conceptualmente y Phase 1 cumple sus criterios documentados. Queda pendiente aprobación humana antes de iniciar Phase 2.
+IN PROGRESS. Phase 0 y Phase 1 están completadas y Phase 1 fue mergeada en `main`. Phase 2 está en la rama `phase/02-tools` y no está aprobada ni mergeada.
 
 ## Completed
 
@@ -23,10 +23,11 @@ COMPLETE. Phase 0 fue aprobada conceptualmente y Phase 1 cumple sus criterios do
 - AssistantCore, Session, Message, Context, Response y providers implementados.
 - Errores categorizados, cancelación, timeout y retry explícito implementados.
 - Tests unitarios y de integración HTTP controlados pasando sin credenciales externas.
+- Rama `phase/02-tools` creada y publicada desde el merge de Phase 1.
 
 ## In Progress
 
-Ninguno dentro de Phase 1.
+Contratos iniciales de tools, registry, manager, validación y autorización en implementación.
 
 ## Blocked
 
@@ -35,7 +36,7 @@ Ninguno dentro de Phase 1.
 
 ## Next
 
-Revisar y aprobar Phase 1. Después, iniciar Phase 2 — Tool System.
+Completar y auditar Phase 2. Después de su aprobación manual, decidir el trabajo posterior.
 
 ## Known Risks
 
