@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-Phase 3 — Realtime Engine.
+Phase 4 — Voice Service.
 
 ## Status
 
-COMPLETE. Phase 3 fue revisada, corregida y mergeada en `main` mediante PR #3. El merge quedó registrado en el commit `7cfe8144536ca1d95c462c3f803d35f5950c0f73`.
+READY FOR IMPLEMENTATION. Phase 3 fue revisada, corregida y mergeada en `main` mediante PR #3. La definición arquitectónica de Phase 4 fue auditada contra el repositorio y queda aprobada para implementación incremental.
 
 ## Completed
 
@@ -28,22 +28,35 @@ COMPLETE. Phase 3 fue revisada, corregida y mergeada en `main` mediante PR #3. E
 - PR #2 revisado y mergeado a `main`.
 - EventBus, runtime, scheduler, stream, máquina de estados y adapters de Phase 3 implementados.
 - PR #3 revisado, corregido y mergeado a `main`.
-- Race condition de terminalización corregido y cubierto por pruebas adicionales.
+- Race condition de terminalización corregida y cubierta por pruebas adicionales.
+- Documentación post-merge de Phase 2 y Phase 3 reconciliada con el estado real de `main`.
+- Definición arquitectónica de Phase 4 auditada y aprobada.
 
 ## In Progress
 
-Ninguno. Phase 3 está cerrada.
+Phase 4 está pendiente de implementación. Los proveedores reales de STT/TTS no son parte obligatoria de la primera implementación y se evaluarán posteriormente mediante un spike comparativo.
 
 ## Blocked
 
-- Las métricas de hardware están pendientes por bloqueo de WMI.
-- La selección final de TypeScript, UI, voz, memoria, avatar y gateway requiere prototipos y evidencia en sus fases correspondientes.
+- Las métricas de hardware siguen pendientes por el bloqueo de WMI.
+- La selección final de proveedores de STT/TTS requiere pruebas locales comparables de compatibilidad, latencia, calidad, consumo, cancelación y licencias.
 
 ## Next
 
-Realizar el checkpoint post-merge de Phase 3 y preparar la definición de Phase 4 — Voice Service. No iniciar implementación de Phase 4 hasta que su alcance, contratos y criterios de aceptación estén revisados y aprobados.
+Crear/publicar la rama `phase/04-voice-service` e implementar únicamente los contratos y lifecycle definidos para Voice Service: audio, STT, TTS, reproducción, `VoiceSession`, `VoiceError`, mocks, cancelación, timeout, cleanup, logging seguro y tests deterministas sin hardware ni red. No implementar todavía proveedores reales obligatorios ni avanzar a Phase 5.
 
 ## Known Risks
 
-- Agregar un gateway puede aumentar latencia y superficie de exposición.
-- La compresión de contexto puede perder información y debe tener pruebas de fidelidad.
+- Diferencias entre formatos de audio PCM/WAV/MP3/Opus.
+- Permisos y enumeración de dispositivos Windows.
+- Compatibilidad de Python y dependencias de voz con el entorno real.
+- Consumo de CPU/RAM y cold start de modelos locales.
+- Cancelación difícil en bindings nativos.
+- Fuga de datos mediante proveedores cloud.
+- Licencias distintas entre software, modelos y voces.
+- Calidad variable en español.
+- Falsos parciales de STT.
+- Backpressure entre audio y transcripción.
+- Reproducción solapada.
+- Recursos temporales no eliminados.
+- Acoplamiento accidental entre voz y `RealtimeEngine`.
