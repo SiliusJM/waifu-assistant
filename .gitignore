@@ -1,0 +1,23 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Node and generated output
+node_modules/
+dist/
+coverage/
+
+# Local tooling and operating-system files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.log
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local caches
+.cache/
+.turbo/
