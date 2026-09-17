@@ -4,7 +4,7 @@ Asistente personal de escritorio desarrollado de forma incremental y segura.
 
 ## Estado
 
-El repositorio está implementando Phase 2 — Tool System. La base incluye conversación de texto con sesión en memoria y proveedores abstraídos; Phase 2 añade sólo el perímetro seguro para herramientas explícitas. No implementa herramientas de control del equipo.
+Phase 2 — Tool System está implementada en la rama `phase/02-tools` y pendiente de revisión/merge manual. La base incluye conversación de texto con sesión en memoria y proveedores abstraídos; Phase 2 añade sólo el perímetro seguro para herramientas explícitas. No implementa herramientas de control del equipo.
 
 ## Principios
 

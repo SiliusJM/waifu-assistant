@@ -6,7 +6,7 @@ Phase 2 — Tool System.
 
 ## Status
 
-IN PROGRESS. Phase 0 y Phase 1 están completadas y Phase 1 fue mergeada en `main`. Phase 2 está en la rama `phase/02-tools` y no está aprobada ni mergeada.
+COMPLETE IN BRANCH. Phase 0 y Phase 1 están completadas y Phase 1 fue mergeada en `main`. Phase 2 está completada en `phase/02-tools`, pendiente de aprobación y merge manual.
 
 ## Completed
 
@@ -28,7 +28,7 @@ IN PROGRESS. Phase 0 y Phase 1 están completadas y Phase 1 fue mergeada en `mai
 
 ## In Progress
 
-Contratos iniciales de tools, registry, manager, validación y autorización en implementación.
+Ninguno dentro de Phase 2. La rama queda pendiente de auditoría humana y merge.
 
 ## Blocked
 
@@ -37,7 +37,7 @@ Contratos iniciales de tools, registry, manager, validación y autorización en 
 
 ## Next
 
-Completar y auditar Phase 2. Después de su aprobación manual, decidir el trabajo posterior.
+Revisar y aprobar Phase 2. Después de su merge manual, decidir el trabajo posterior.
 
 ## Known Risks
 
