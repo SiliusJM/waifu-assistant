@@ -24,6 +24,7 @@ IN PROGRESS. Phase 0 y Phase 1 están completadas y Phase 1 fue mergeada en `mai
 - Errores categorizados, cancelación, timeout y retry explícito implementados.
 - Tests unitarios y de integración HTTP controlados pasando sin credenciales externas.
 - Rama `phase/02-tools` creada y publicada desde el merge de Phase 1.
+- Contrato, registry, manager, validación, autorización, contexto, resultados y errores de tools implementados en la rama de Phase 2.
 
 ## In Progress
 
