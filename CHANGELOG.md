@@ -1,3 +1,14 @@
+## Phase 8 — Internet & Browser TLS fixture limitation
+
+### Status / limitations
+
+- PR #18 revisado y mergeado a `main`; merge commit `25985396222c8dc51db9f71b55606cf85aab2254`.
+- No se creó fixture TLS inseguro.
+- HTTPS público→HTTPS, HTTPS→HTTP, HTTPS→interno y WebSocket/CONNECT sobre TLS permanecen `NOT EXECUTED`.
+- La viabilidad del fixture TLS queda documentada como `NOT EXECUTED`/`LIMITATION` debido a la ausencia de un mecanismo seguro y reproducible de emisión X.509 dentro del entorno actual.
+- DNS/socket pinning continúa `SIMULATED`/`NOT EXECUTED`.
+- No se añadieron dependencias, scripts, cambios en `src/`, manifests ni lockfiles.
+
 ## Phase 8 — Internet & Browser HTTPS + DNS/socket evidence
 
 ### Added
