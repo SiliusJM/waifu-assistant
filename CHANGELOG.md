@@ -89,3 +89,19 @@ Todos los cambios relevantes del proyecto se documentarán aquí.
 ### Status
 
 - Implementación en `phase/04-voice-service`; ADR-007 de selección de proveedores permanece abierto.
+
+## Phase 5 — Streaming Voice & Interruptions
+
+### Added
+
+- Streaming coexistente con el modo batch de Phase 4 para captura, STT, TTS y playback.
+- Queues acotadas, backpressure, coordinación por sesión/dispositivo, interruption, supersede y cancelación jerárquica.
+- Eventos de control correlacionados, métricas monotónicas, mocks deterministas y cleanup de recursos.
+
+### Security
+
+- Sin audio persistente, logs de contenido completo, providers reales, LLM real, procesos o shell.
+
+### Status
+
+- Implementación en `phase/05-streaming-voice`; pendiente de revisión externa y sin merge a `main`.

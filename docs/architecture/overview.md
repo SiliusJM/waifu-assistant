@@ -34,6 +34,12 @@ Las capacidades futuras de voz, memoria y avatar se conectarán mediante contrat
 
 Los contratos principales de Phase 1, el perímetro de tools de Phase 2 y el runtime de Phase 3 están implementados en TypeScript. Las capacidades futuras se añadirán cuando una fase las necesite; no se implementan anticipadamente.
 
+## Streaming voice (Phase 5)
+
+Phase 5 mantiene coexistencia entre los modos batch y streaming de VoiceService. El plano de datos usa iterables y queues acotadas para audio; el plano de control usa eventos correlacionados sin transportar bytes. VoiceConcurrencyCoordinator separa la exclusividad por sesión y por dispositivo, mientras interruption y supersede liberan y descartan la operación anterior de forma explícita.
+
+La integración con RealtimeEngine sigue siendo responsabilidad del llamador. No hay providers reales, LLM real, pipeline autónomo, persistencia ni APIs de procesos.
+
 ## Routing
 
 1. La entrada se clasifica.

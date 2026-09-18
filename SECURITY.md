@@ -28,6 +28,9 @@ Los reportes de seguridad deben describir el impacto sin incluir secretos. Hasta
 
 ## Voz
 
+- Phase 5 no usa `child_process`, `exec`, `spawn`, shell, PowerShell, CMD ni herramientas del sistema. El audio circula solo por queues/iterables acotados en memoria.
+- Las interrupciones y supersedes descartan los buffers de la operación anterior y liberan listeners, timers y recursos de playback.
+
 - El audio se mantiene en memoria por defecto y no se persiste.
 - No se registran audio ni transcripciones completas; los logs usan IDs, estados, tamaños, duraciones, proveedores y códigos.
 - Los errores de voz no incluyen audio, texto completo ni detalles internos del provider.

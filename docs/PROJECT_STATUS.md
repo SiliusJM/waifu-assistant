@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-Phase 4 — Voice Service.
+Phase 5 — Streaming Voice & Interruptions.
 
 ## Status
 
-COMPLETE. Phase 4 fue revisada técnicamente y mergeada en `main` mediante PR #4. El merge quedó registrado en el commit `1ec4384dc529ed303e85413e7969a3896c741a69`.
+IN PROGRESS. Phase 4 permanece completa y mergeada en `main`. Phase 5 se implementa en `phase/05-streaming-voice` y queda pendiente de revisión externa; no está mergeada.
 
 ## Completed
 
@@ -35,10 +35,11 @@ COMPLETE. Phase 4 fue revisada técnicamente y mergeada en `main` mediante PR #4
 - Cancelación, timeout por etapa, cleanup, logging seguro y correlación explícita con `RealtimeEngine` implementados.
 - Tests de Phase 4: 57/57 pasando según la verificación realizada en la rama de la fase.
 - PR #4 revisado técnicamente y mergeado a `main`.
+- Contratos streaming, queues acotadas, coordinación de concurrencia, interruption/supersede, cancelación jerárquica, métricas y mocks de Phase 5 implementados en la rama de la fase.
 
 ## In Progress
 
-Ninguno. Phase 4 está cerrada.
+Phase 5 está en revisión técnica. Phase 4 está cerrada en `main`.
 
 ## Blocked
 
@@ -47,7 +48,7 @@ Ninguno. Phase 4 está cerrada.
 
 ## Next
 
-Realizar el checkpoint post-merge de Phase 4 y preparar la definición de Phase 5 — Streaming Voice & Interruptions. No implementar Phase 5 hasta que su alcance, contratos, criterios de aceptación y riesgos hayan sido revisados y aprobados.
+Revisar externamente Phase 5. Después de la revisión, decidir si se abre PR; no hacer merge ni iniciar Phase 6 automáticamente.
 
 ## Known Risks
 
