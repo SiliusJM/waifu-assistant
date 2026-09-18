@@ -12,8 +12,9 @@ Base de la rama: `origin/main` en `41c65539464ddb5e91117e2dc3217ec0c59e92c7`.
 
 ### Sistema y permisos
 
-- Producto observado: Windows 10 Pro.
-- Versión/build observado: `2009`, build `26200`, arquitectura `64 bits`.
+- El reporte del entorno entregó señales inconsistentes para identificar la versión de Windows: `2009`, build `26200`, arquitectura `64 bits`, junto con la etiqueta de edición `Pro`.
+- No se normaliza esta combinación como "Windows 10 Pro" en el documento hasta volver a consultar directamente la información de versión/edición del sistema en una sesión con datos consistentes.
+- La identificación exacta del producto/versión queda `LIMITATION` en este spike; el resto de las observaciones de permisos, Hyper-V, Firewall, WSL2 y Chromium se conserva sin depender de esa clasificación.
 - Identidad: `SILIUS\SILIUS`.
 - Grupo administrativo: no.
 - Token elevado: no.
