@@ -22,6 +22,14 @@ No se permitirá por defecto que un LLM construya o ejecute comandos shell arbit
 
 Un proveedor de IA puede recibir prompts, contexto y credenciales. DirectAIProvider usa configuración externa, timeout, retries clasificados y logs sin contenido de prompts. OmniRoute permanece desactivado y no forma parte de Phase 1; si se evalúa después, deberá estar detrás de AIProvider y fuera de fast paths deterministas.
 
+## Personality System
+
+- Los perfiles de personalidad son declarativos y se validan estrictamente contra catálogos, rangos, límites de texto, locales y schemaVersion.
+- No existe `systemPrompt` libre, evaluación dinámica ni una ruta desde personalidad hacia tools, permisos, riesgo, autorización o APIs de procesos.
+- Los snapshots son inmutables por interacción; un cambio de perfil afecta interacciones futuras y no reescribe historial.
+- Los hints de voz son abstractos y no contienen parámetros específicos de providers TTS. No hay memoria persistente, preferencias persistentes, emoción ni hot reload.
+- Los logs de personalidad usan IDs, versiones, fingerprint, conteos y códigos de error; no registran prompts completos, historial, texto del usuario, preferencias privadas ni secretos.
+
 ## Reporte
 
 Los reportes de seguridad deben describir el impacto sin incluir secretos. Hasta disponer de un canal privado del repositorio, no publicar detalles explotables en un issue público.

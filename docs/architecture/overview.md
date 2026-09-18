@@ -50,6 +50,12 @@ La integración con RealtimeEngine sigue siendo responsabilidad del llamador. No
 
 OmniRoute no podrá sustituir la validación de herramientas ni ejecutar comandos deterministas. Un fallback de modelo no es un fallback de permiso.
 
+## Personality System (Phase 6)
+
+Phase 6 añade una capa declarativa entre la configuración de personalidad y `AssistantCore`: perfiles validados, política, compilación determinista y snapshots inmutables por interacción. `AssistantCore` traduce el snapshot a instrucciones `system` del request sin añadirlas a `Session`. El registro interno puede mantener varios perfiles y publicar eventos de ciclo de vida.
+
+Personality System no es un agente, un motor de seguridad, una capa de permisos, una memoria, un coordinador de voz ni un sistema de tools. No usa APIs de procesos, proveedores reales, LLM real, persistencia, hot reload o UI. Los hints de voz son abstractos y no conocen TTS.
+
 ## Transversal
 
 Seguridad, permisos, configuración, logging, métricas, manejo de errores, pruebas y cancelación serán responsabilidades explícitas y no detalles implícitos del proveedor.

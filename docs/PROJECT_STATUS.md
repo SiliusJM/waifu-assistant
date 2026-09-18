@@ -1,12 +1,16 @@
 # Project Status
 
+## Phase 6 branch status
+
+La rama activa `phase/06-personality-system` implementa Personality System sobre `origin/main` y queda pendiente de revisión externa. No está mergeada a `main`; Phase 6 no debe marcarse como COMPLETE hasta concluir esa revisión.
+
 ## Current Phase
 
-Phase 5 — Streaming Voice & Interruptions.
+Phase 6 — Personality System (implementación en rama, pendiente de revisión externa).
 
 ## Status
 
-COMPLETE. Phase 5 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #5. El merge quedó registrado en `1f076df8e880c273abe261142aab9757c541d73e`.
+IN PROGRESS. Phase 5 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #5. Phase 6 está implementada en `phase/06-personality-system` y aún no está mergeada.
 
 ## Completed
 
@@ -42,7 +46,7 @@ COMPLETE. Phase 5 fue revisada técnicamente, corregida y mergeada en `main` med
 
 ## In Progress
 
-Ninguno. Phase 5 está cerrada y mergeada en `main`.
+Phase 6 — Personality System: implementación local completada, pendiente de revisión externa.
 
 ## Blocked
 
@@ -51,7 +55,7 @@ Ninguno. Phase 5 está cerrada y mergeada en `main`.
 
 ## Next
 
-Preparar la definición de Phase 6 — Personality System. No implementar Phase 6 hasta que su alcance, contratos, criterios de aceptación y riesgos hayan sido revisados y aprobados.
+Completar la revisión externa de Phase 6. No hacer merge a `main` ni iniciar Phase 7 automáticamente.
 
 ## Known Risks
 

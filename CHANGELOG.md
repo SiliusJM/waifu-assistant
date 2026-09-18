@@ -1,5 +1,30 @@
 # Changelog
 
+## Phase 6 - Personality System
+
+### Added
+
+- Perfiles declarativos con identidad, traits, tono, speaking style, reglas tipadas, límites expresivos y política de locale.
+- `PersonalityValidator`, catálogo controlado, `PersonalityPolicy`, compilador determinista, snapshots inmutables y fingerprint.
+- Registro multi-perfil en memoria, JSON canónico validado y eventos de lifecycle limitados.
+- Integración opcional de snapshots por interacción en `AssistantCore`, sin contaminar `Session`.
+- Tests deterministas y regresión completa sin red, credenciales, hardware ni providers reales.
+
+### Security
+
+- Sin `systemPrompt` libre, ejecución dinámica, APIs de procesos, shell, permisos, tools, memoria persistente, voz real o LLM real.
+- Logs limitados a identificadores, versiones, fingerprint y conteos; no incluyen prompts completos, historial, preferencias privadas ni secretos.
+
+### Status
+
+- Implementación pendiente de revisión externa en `phase/06-personality-system`; no mergeada a `main`.
+
+### Fixed
+
+- Registro de personalidad protegido con copia defensiva y deep-freeze en todos sus accesores.
+- Preference overrides normalizados y validados en runtime con fallback seguro.
+- `identity.description` conservado como metadata del snapshot, sin compilarse como instrucción normativa.
+
 Todos los cambios relevantes del proyecto se documentarán aquí.
 
 ## [Unreleased]
