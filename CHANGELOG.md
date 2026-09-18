@@ -1,5 +1,27 @@
 # Changelog
 
+## Phase 8 — Internet & Browser egress boundary spike
+
+### Added
+
+- Fixture de proxy/egress inferior al browser para probar navegación, redirects, subrecursos, `fetch`/XHR, WebSocket y clasificación de destinos.
+- Evidencia de bloqueo de redirect público → interno con `internalHits=0`.
+- Evidencia de bloqueo de WebSocket interno mediante `CONNECT`.
+
+### Security / limitations
+
+- Service Worker: NOT EXECUTED porque Chromium no expuso `navigator.serviceWorker` para el origen controlado.
+- DNS rebinding: simulación controlada, no pinning real.
+- El hostname `public.test` es una etiqueta controlada mapeada al fixture local; no demuestra aislamiento OS-level ni DNS público real.
+- HTTPS→HTTP no fue ejecutado en el fixture HTTP-only.
+- Aislamiento de red y combinación interception + proxy quedan abiertos.
+
+### Status
+
+- PR #13 revisado y mergeado a `main`; merge commit `cd22a2fd8f8b979c5ef32ecdb63f66ff50a94079`.
+- Proxy/egress fixture: 19 PASS, 0 FAIL, 2 NOT EXECUTED; `internalHits=0`.
+- No se integró egress proxy productivo ni BrowserProvider.
+
 ## Phase 8 — Internet & Browser external tests
 
 ### Added
