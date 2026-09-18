@@ -2,7 +2,7 @@
 
 ## Estado
 
-Propuesta documental. Preparada en `phase/08-internet-browser`; requiere revisión y aprobación antes de cualquier implementación. No modifica `main` ni selecciona providers, frameworks o un host de navegador.
+Aceptada como definición arquitectónica y mergeada a `main` mediante PR #9; merge commit `ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`. No implementa providers, frameworks ni un host de navegador.
 
 ## Contexto
 
