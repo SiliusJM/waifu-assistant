@@ -87,7 +87,7 @@ Sin introducir código de producción todavía:
 3. Probar el mecanismo con resolución efectiva y DNS rebinding real en un entorno aislado; mantener la simulación separada.
 4. Repetir Search con credenciales temporales para Brave, Tavily y Exa y medir las 20 consultas.
 5. Evaluar browser remoto y crash cleanup seguro.
-6. Convertir toda la evidencia en una decisión arquitectónica documentada antes de implementar `WebSearchProvider`, `WebFetchProvider` o `BrowserProvider`.
+6. Cerrar el `decision-gate` de ADR-012 con evidencia reproducible antes de implementar `WebSearchProvider`, `WebFetchProvider` o `BrowserProvider`.
 
 ## Phase 8 — Internet & Browser
 
