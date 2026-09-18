@@ -36,6 +36,7 @@ AssistantCore
 - La subetapa HTTPS/TLS confirmó que Playwright/Chromium puede iniciar en un contexto efímero, pero no existe un mecanismo de emisión y confianza de certificado X.509 efímero compatible con las restricciones actuales. HTTPS público→HTTPS, HTTPS→HTTP, HTTPS→interno y CONNECT/WebSocket sobre TLS permanecen `NOT EXECUTED`; no se usó `ignoreHTTPSErrors`, no se modificó el trust store y no se añadió una dependencia de certificados.
 - Browser remoto y crash cleanup: `NOT EXECUTED`.
 - Browser local: contexto efímero, sandbox solicitado y cleanup normal; sin prueba de aislamiento OS-level.
+- Host isolation evidence: contexto efímero sin storage heredado, rechazo browser-level de `file://` desde una página HTTP y cleanup normal/timeout/shutdown con árbol temporal eliminado. El sandbox fue solicitado, pero filesystem/sandbox OS-level y crash cleanup permanecen `LIMITATION`/`NOT EXECUTED`; esta evidencia no cierra el gate ni selecciona Playwright como dependencia productiva.
 - Provisioning experimental: Playwright `1.63.0` pudo iniciar Chrome Headless Shell `153.0.8010.12` con sandbox solicitado; esta disponibilidad local no selecciona un browser productivo ni cierra el gate.
 
 ## No decidido
