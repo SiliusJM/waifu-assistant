@@ -2,7 +2,7 @@
 
 ## Estado
 
-Definición arquitectónica preparada en la rama `phase/08-internet-browser`. Esta rama no implementa Phase 8, no añade dependencias, no cambia `main` y no abre un PR. La implementación solo podrá comenzar después de revisar y aprobar esta definición y de conservar el cierre de Phase 7 como base.
+Definición arquitectónica revisada, aprobada y mergeada a `main` mediante PR #9 (`ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`). La fase continúa sin implementación de producción, dependencias, providers reales ni navegación.
 
 ## 1. Objetivo
 
@@ -301,4 +301,4 @@ Estas decisiones requieren spikes, threat modeling y pruebas controladas. No aut
 
 ## 21. No implementación explícita
 
-La rama contiene únicamente definición arquitectónica y documentación sincronizada. Phase 8 no se considera implementada, no habilita navegación real y no autoriza todavía la instalación de un framework de browser, la selección de un provider ni la creación de herramientas reales.
+El cierre de esta fase contiene únicamente la definición arquitectónica y documentación sincronizada. Phase 8 no se considera implementada, no habilita navegación real y no autoriza todavía la instalación de un framework de browser, la selección final de un provider ni la creación de herramientas reales.
