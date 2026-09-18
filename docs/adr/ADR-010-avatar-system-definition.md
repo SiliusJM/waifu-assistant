@@ -2,7 +2,7 @@
 
 ## Estado
 
-Aceptada como definición arquitectónica. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7 con merge commit `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La implementación acotada está en `phase/07-avatar-system-implementation` y pendiente de revisión/merge; no existe decisión tecnológica definitiva sobre renderer.
+Aceptada e implementada en alcance acotado. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7 con merge commit `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La implementación del núcleo fue revisada, corregida y mergeada mediante PR #8 con merge commit `417a30deca884f55057164475b08b2521d47347d`. No se ha seleccionado un renderer concreto.
 
 ## Contexto
 
