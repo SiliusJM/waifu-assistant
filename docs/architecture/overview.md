@@ -2,7 +2,7 @@
 
 ## Estado
 
-Phase 8 queda definida solo a nivel arquitectonico en `phase/08-internet-browser`. No se ha implementado acceso a internet ni browser.
+Phase 8 queda definida y aprobada a nivel arquitectónico en `main` mediante PR #9. No se ha implementado acceso a internet ni browser.
 
 Este documento describe los límites y contratos implementados hasta Phase 7. No representa una implementación completa del asistente.
 
