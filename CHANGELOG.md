@@ -1,3 +1,18 @@
+## Phase 8 — Internet & Browser experimental browser runtime provisioning
+
+### Added
+
+- Provisioning experimental del Chrome Headless Shell requerido por Playwright fuera del repositorio mediante `npx playwright install chromium-headless-shell`.
+- Registro de disponibilidad local de Playwright `1.63.0` y Chrome Headless Shell `153.0.8010.12` con sandbox solicitado.
+
+### Status / limitations
+
+- PR #19 revisado y mergeado a `main`; merge commit `4e442e1669f2d199228e0ad7829f585f67b18c58`.
+- Los harnesses browser disponibles fueron repetidos sin cambios en `src/`, manifests ni lockfiles.
+- Se conserva el FAIL conocido del redirect público → interno bajo `browserContext.route()`.
+- HTTPS, DNS/socket pinning real, browser remoto y crash cleanup seguro continúan sin evidencia suficiente; ADR-012 permanece provisional.
+- El provisioning no constituye una dependencia productiva ni selecciona browser, proxy, sandbox o aislamiento definitivo.
+
 ## Phase 8 — Internet & Browser TLS fixture limitation
 
 ### Status / limitations
