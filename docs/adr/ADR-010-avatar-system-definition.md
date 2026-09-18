@@ -24,7 +24,9 @@ La sincronización usa eventos tipados, correlación, snapshots inmutables y una
 
 `AvatarProvider.initialize()` expone una instantánea de `AvatarProviderCapabilities`: IDs de `expressions`, IDs de `animations`, `interruptiblePresentation` y `assetKinds` soportados. `AvatarRuntime` valida el snapshot contra esa declaración antes de llamar a `present()`; la capacidad no concede autoridad ni acceso a recursos.
 
-Cualquier estado de lifecycle distinto de `stopped`, incluido `error`, puede iniciar `shutting_down`. Shutdown cancela operaciones, libera recursos y es idempotente; repetirlo durante o después de cleanup no ejecuta una segunda liberación.
+Cualquier estado de lifecycle distinto de `stopped`, incluido `error`, puede iniciar `shutting_down`. Shutdown solicita cancelación mediante `AbortSignal`, descarta lo pendiente, impide nuevas presentaciones y libera recursos dentro de un límite acotado. En un provider no interrumpible, el abort no garantiza cancelación física: la operación queda fuera de servicio y no puede recibir otro `present()`. Shutdown sigue siendo idempotente; repetirlo durante o después de cleanup no ejecuta una segunda liberación.
+
+La capability `interruptiblePresentation` define la coordinación, no la cantidad de operaciones: siempre existe como máximo una operación `AvatarProvider.present()` activa por runtime. Si es `true`, el runtime envía `AbortSignal`, descarta la presentación activa y presenta el snapshot más reciente. Si es `false`, conserva la operación actual, no inicia un segundo `present()` concurrente y mantiene como máximo un snapshot pendiente; cada nuevo snapshot reemplaza ese pendiente mediante latest-wins y solo se presenta al finalizar la operación actual. `AbortSignal` sigue siendo obligatorio para shutdown y cancelación cooperativa de providers interrumpibles, pero no garantiza cancelación física en un provider no interrumpible. Esta coordinación es asíncrona y no bloquea AssistantCore, RealtimeEngine ni VoiceService.
 
 Personality System solo aporta metadata controlada (`personalityId`, versión, `CharacterIdentity` para presentación). `PersonalitySnapshot.instructions`, `description` como texto normativo y `VoicePresentationHints` no se convierten en animaciones. Cualquier mapeo futuro debe pertenecer a una política explícita de avatar.
 
@@ -46,6 +48,7 @@ El coste es una capa de adaptación y una decisión posterior sobre manifests, c
 
 - Snapshot compuesto único con `state = reaction`, `baseState` como única fuente de restauración y política latest-wins con secuencia global.
 - Contrato de `AvatarProviderCapabilities` expuesto por `initialize()` y validado por el runtime.
+- Política explícita para providers interrumpibles y no interrumpibles: una operación activa, un pendiente máximo, latest-wins y degradación no bloqueante.
 - Contrato de fallback cuando el renderer no esté disponible.
 - Primer renderer y estrategia de assets en una fase de implementación posterior.
 - Owner de los adaptadores de eventos y campos de identidad expuestos a UI.

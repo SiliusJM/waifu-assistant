@@ -75,6 +75,13 @@ Coordina lifecycle, provider, cancelación de presentaciones y cleanup. Mantiene
 
 Adaptador del renderer. Presenta un snapshot compuesto validado mediante una única operación lógica por runtime, expone capacidades declaradas y cancela o finaliza la presentación vigente. No decide estado lógico, permisos ni selección de herramientas.
 
+La política depende de `AvatarProviderCapabilities.interruptiblePresentation`:
+
+- Si es `true`, `AvatarRuntime` envía `AbortSignal` a la presentación activa, descarta el snapshot anterior y presenta el snapshot más reciente.
+- Si es `false`, `AvatarRuntime` no inicia un segundo `present()` concurrente. Mantiene la operación actual y como máximo un snapshot pendiente; cada snapshot nuevo reemplaza el pendiente anterior mediante latest-wins. Cuando termina la operación actual, presenta únicamente el último snapshot pendiente.
+
+En ambos casos existe una sola operación `AvatarProvider.present()` activa por runtime. `AbortSignal` se utiliza para shutdown y para providers interrumpibles; enviarlo a un provider no interrumpible no garantiza cancelación física. El runtime no espera indefinidamente al provider ni bloquea `AssistantCore`, `RealtimeEngine` o `VoiceService`: la presentación es opcional, asíncrona y desacoplada.
+
 ### AvatarPresentationPolicy
 
 Tabla controlada que mapea estado, reacción y perfil de personaje a IDs de expresión/animación. No acepta prompts ni código generado. Una animación desconocida se rechaza o se sustituye por un fallback declarado.
@@ -207,7 +214,7 @@ No se añade un evento por cada frame ni se transportan bytes de audio, imágene
 3. `loading`: el provider resuelve capacidades y manifest permitido.
 4. `ready`: se publica estado inicial `IDLE`.
 5. `present`: se aplican snapshots con `AbortSignal` y secuencia.
-6. `shutdown`: se cancela la presentación activa, se descarta la pendiente, se libera el provider y se publica `avatar_shutdown`.
+6. `shutdown`: se solicita cancelación mediante `AbortSignal`, se descarta la pendiente, se impide iniciar nuevos `present()` y se libera el provider dentro de un límite acotado antes de publicar `avatar_shutdown`. En un provider no interrumpible, el abort no garantiza detener físicamente la operación; el runtime la deja fuera de servicio y aplica la degradación definida sin bloquear al core.
 7. `error`: se conserva el diagnóstico categorizado; no se propaga una excepción visual al core.
 
 Todo recurso temporal se limpia en `finally`. El shutdown debe ser idempotente y no aceptar nuevas señales después de `STOPPED`.
@@ -245,11 +252,13 @@ No debe consumir `PersonalitySnapshot.instructions`, ni interpretar `description
 
 - Solo una presentación lógica y una operación `AvatarProvider.present()` efectiva por runtime; un snapshot pendiente puede ser reemplazado por el más reciente.
 - Una nueva señal de estado cancela o reemplaza la presentación anterior mediante `AbortSignal` y conserva la última secuencia global válida.
+- Si `interruptiblePresentation = true`, el abort cooperativo cancela la operación activa, se descarta su snapshot y se presenta el snapshot más reciente.
+- Si `interruptiblePresentation = false`, el abort no se usa para fingir una cancelación física: la operación actual continúa, no se ejecuta un segundo `present()` y se conserva como máximo un snapshot pendiente latest-wins. Al terminar la operación actual se presenta solo ese snapshot.
 - Una reacción durante `SPEAKING` se representa dentro del snapshot compuesto (`state = reaction`, `baseState = speaking`); no inicia un segundo `present()` concurrente ni cancela audio.
 - Al finalizar la reacción, el controller restaura `baseState`; no existe un campo paralelo `resumeAfterReaction`.
 - Una reacción nueva reemplaza la anterior únicamente mediante política latest-wins; no se crea una cola de reacciones en Phase 7.
 - Señales antiguas se descartan comparando exclusivamente su `sequence` global, asignada en el boundary de normalización; `sourceSequence` solo sirve para diagnóstico y deduplicación local.
-- Shutdown cancela todo y deja el runtime en `STOPPED`.
+- Shutdown solicita cancelación de todo mediante `AbortSignal`, descarta lo pendiente y deja el runtime en `STOPPED` después del cleanup lógico; un provider no interrumpible puede no detener físicamente su operación, que queda fuera de servicio y no puede recibir otro `present()`.
 - Los eventos duplicados no producen transiciones ni callbacks duplicados.
 
 La ordenación requiere un boundary único de normalización que reciba `sourceId` y `sourceSequence` de cada adaptador, valide la señal y asigne la secuencia global. El avatar no intenta comparar contadores locales de fuentes distintas, reconstruir una historia completa ni reparar eventos faltantes.
@@ -302,7 +311,9 @@ Categorías propuestas: configuración, lifecycle, estado inválido, provider no
 - Animación inexistente: fallback declarado o error de capability; nunca se ejecuta texto arbitrario.
 - Evento inválido/antiguo: se rechaza sin mutar estado.
 - Avatar no ready: se rechaza o coalesce según operación; no se simula `READY`.
+- Provider no interrumpible: la presentación actual continúa sin iniciar otra en paralelo; el runtime conserva solo el último snapshot pendiente y degrada/observa la latencia sin bloquear al core.
 - Shutdown durante animación: cancelación cooperativa, cleanup y `avatar_shutdown`.
+- Si el provider no responde o no puede finalizar, se aplica timeout/degradación controlada según el lifecycle; `AbortSignal` no se presenta como cancelación física cuando `interruptiblePresentation` es `false`.
 - Renderer caído: estado técnico `ERROR` y degradación a no-op opcional; no cambia el resultado lógico de la interacción.
 
 ## 22. Límites de seguridad
@@ -353,6 +364,9 @@ La observabilidad debe distinguir estado solicitado, estado aceptado y presentac
 - Lifecycle completo con initialize/load/ready/error/shutdown/cleanup y shutdown idempotente.
 - `MockAvatarProvider` y tests sin renderer, hardware, red, assets reales o filesystem arbitrario.
 - Snapshots y eventos inmutables; límites de tamaño y estructuras pendientes acotadas.
+- Con `interruptiblePresentation = true`, una nueva señal aborta cooperativamente la presentación activa y solo se presenta el snapshot más reciente.
+- Con `interruptiblePresentation = false`, nunca hay dos `present()` concurrentes, existe como máximo un snapshot pendiente y latest-wins reemplaza el pendiente hasta que termina la operación actual.
+- `AbortSignal` se usa para shutdown y cancelación cooperativa, pero los tests no asumen cancelación física cuando la capability es `false`.
 - Reacciones durante `SPEAKING` preservan playback lógico y vuelven al estado base.
 - Interrupción `SPEAKING -> LISTENING` no produce estados contradictorios y respeta correlación/secuencia.
 - Fallos visuales aislados de AssistantCore, RealtimeEngine y VoiceService.
