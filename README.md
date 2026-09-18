@@ -58,7 +58,7 @@ Instalar las dependencias y ejecutar:
 
 ## Próximo paso
 
-La siguiente etapa no es implementación productiva. El spike de egress ya demostró en un proxy fixture controlado que un boundary inferior puede bloquear redirects y destinos internos con `internalHits=0`, pero aún no demuestra aislamiento de red del host, Service Worker real, DNS rebinding real ni HTTPS→HTTP. El siguiente paso es cerrar las fronteras restantes (HTTPS, DNS rebinding real, aislamiento de red/host, browser remoto y crash cleanup seguro) y documentar la arquitectura definitiva antes de introducir herramientas de producción. Search real con credenciales temporales y browser remoto/crash cleanup siguen pendientes.
+La siguiente etapa no es implementación productiva. El spike de egress ya demostró en un proxy fixture controlado que un boundary inferior puede bloquear redirects y destinos internos con `internalHits=0`, pero aún no demuestra aislamiento de red del host, DNS rebinding real ni HTTPS→HTTP en un fixture TLS. El siguiente paso es cerrar las fronteras restantes (HTTPS, DNS rebinding real, aislamiento de red/host, browser remoto y crash cleanup seguro) y documentar la arquitectura definitiva antes de introducir herramientas de producción. Search real con credenciales temporales y browser remoto/crash cleanup siguen pendientes.
 
 Los proveedores reales de STT/TTS se evaluarán mediante un spike comparativo independiente y ADR-007; no forman parte del cierre de Phase 4.
 
