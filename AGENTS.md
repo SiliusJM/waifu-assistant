@@ -13,6 +13,12 @@ Waifu Assistant es un proyecto incremental y seguro de asistente personal de esc
 - No avanzar a otra fase hasta que la fase activa cumpla todos sus criterios de aceptación.
 - Las tecnologías listadas como candidatas deben evaluarse antes de convertirse en decisiones.
 
+## Alcance documental actual: Phase 8 - Internet & Browser
+
+La rama `phase/08-internet-browser` contiene unicamente la definicion arquitectonica de Phase 8. No se implementan browser automation, Playwright, Puppeteer, Selenium, WebView, providers reales, scraping, UI, Electron/Vue, persistencia, cookies, credenciales, downloads/uploads, APIs de procesos ni shell.
+
+La definicion separa `WebSearchProvider`, `WebFetchProvider` y `BrowserProvider`. Todo acceso futuro debera pasar por `ToolManager`, tratar el contenido web como dato no confiable, usar permisos `auto`/`confirm`/`block`, aplicar `AbortSignal` y mantener concurrencia acotada. La aprobacion documental no autoriza codigo de produccion ni navegacion real.
+
 ## Alcance actual: implementación de Phase 7 - Avatar System
 
 Phase 6 — Personality System está cerrada y mergeada en `main` mediante PR #6, con merge commit `532c956e2a407b9e9e540584947a24739490bb03`. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7, con merge commit `c30ccd3bff298c37cc1dd12a01ec775074b83b02`.

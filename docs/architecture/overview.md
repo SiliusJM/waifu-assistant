@@ -2,6 +2,8 @@
 
 ## Estado
 
+Phase 8 queda definida solo a nivel arquitectonico en `phase/08-internet-browser`. No se ha implementado acceso a internet ni browser.
+
 Este documento describe los límites y contratos implementados hasta Phase 7. No representa una implementación completa del asistente.
 
 ## Capas
@@ -61,6 +63,16 @@ Personality System no es un agente, un motor de seguridad, una capa de permisos,
 Phase 7 tiene una definición arquitectónica aprobada mediante PR #7 y merge commit `c30ccd3bff298c37cc1dd12a01ec775074b83b02`, materializada en la rama `phase/07-avatar-system-implementation`. La capa incluye adaptadores de entrada por señales normalizadas, `AvatarController`, `AvatarRuntime`, snapshots visuales inmutables, capabilities y un `AvatarProvider` reemplazable. Los estados visuales son `IDLE`, `LISTENING`, `SPEAKING` y `REACTION`; el lifecycle técnico se mantiene separado. No se ha elegido renderer, host de escritorio, formato de assets ni tecnología 2D/3D.
 
 El avatar consume señales normalizadas y metadata controlada. No importa `RealtimeEngine`, `VoiceService` o `Personality System`, no interpreta instrucciones de personalidad, no ejecuta herramientas y no accede a procesos, shell, filesystem arbitrario, audio crudo o conversaciones.
+
+## Internet & Browser (Phase 8 - definicion unicamente)
+
+Phase 8 define tres fronteras separadas: `WebSearchProvider` para busqueda de solo lectura, `WebFetchProvider` para extraccion controlada y `BrowserProvider` para sesiones y acciones interactivas futuras. Ninguna esta implementada ni tiene un provider seleccionado.
+
+La ruta futura pasa por una capability de internet y `ToolManager` antes de invocar un adapter. Search, fetch y browser tienen lifecycle, permisos y errores diferentes. El contenido web se representa como `WebData` no confiable y nunca puede modificar instrucciones, conceder permisos, pedir secretos o autorizar acciones.
+
+La definicion establece validacion de URLs y redirects, `auto`/`confirm`/`block`, cancelacion mediante `AbortSignal`, timeouts, concurrencia acotada, latest-wins para lecturas sustituibles y una sola operacion activa por pagina. Login, credenciales, formularios, publicacion, compras, downloads, uploads, persistencia y acciones irreversibles permanecen bloqueados o requieren decisiones futuras.
+
+Esta seccion no introduce browser automation, dependencias, UI, Electron/Vue, renderer, scraping, APIs de procesos, shell ni codigo de produccion.
 
 ## Transversal
 

@@ -59,6 +59,12 @@ Ninguno. Phase 7 está cerrada y mergeada. El núcleo implementado no incluye re
 
 Preparar la definición de Phase 8. No iniciar su implementación hasta que su alcance, contratos, criterios de aceptación y riesgos sean revisados y aprobados.
 
+## Phase 8 — Internet & Browser
+
+La definicion arquitectonica esta preparada en `phase/08-internet-browser`. El alcance es documental: separa busqueda, fetch y browser; define lifecycle, permisos, prompt injection, privacidad, concurrencia e integracion con `ToolManager`. No hay codigo de produccion, dependencias, providers reales, automatizacion, UI, persistencia ni APIs de procesos.
+
+La rama no modifica `main`, no abre PR y no convierte Phase 8 en una fase implementada. La implementacion futura requiere aprobacion explicita y un spike de provider/sandbox.
+
 ## Known Risks
 
 - Diferencias entre formatos de audio PCM/WAV/MP3/Opus.

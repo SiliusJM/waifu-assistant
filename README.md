@@ -4,6 +4,13 @@ Asistente personal de escritorio desarrollado de forma incremental y segura.
 
 ## Estado
 
+Phase 8 — Internet & Browser esta definida unicamente a nivel arquitectonico en la rama `phase/08-internet-browser`. No se han anadido browser automation, providers reales, dependencias, UI, persistencia ni codigo de produccion. Su implementacion requiere una aprobacion posterior.
+
+Documentacion de Phase 8:
+
+- `docs/phases/phase-08-internet-and-browser.md`: definicion, seguridad, lifecycle y criterios; sin implementacion.
+- `docs/adr/ADR-011-internet-and-browser-definition.md`: decision arquitectonica de Internet & Browser.
+
 Phase 3 — Realtime Engine está COMPLETA y mergeada en `main`. La base incluye conversación de texto, tools seguras y un runtime interno de eventos, streaming abstracto, cancelación y concurrencia.
 
 Phase 4 — Voice Service está COMPLETA y mergeada en `main` mediante PR #4, con merge commit `1ec4384dc529ed303e85413e7969a3896c741a69`. Incluye contratos desacoplados de audio, STT, TTS y reproducción, `VoiceService`, `VoiceSession`, `VoiceError`, lifecycle, cancelación, timeout por etapa, cleanup, logging seguro, eventos correlacionados y mocks deterministas. Los proveedores reales de voz no fueron seleccionados ni integrados.

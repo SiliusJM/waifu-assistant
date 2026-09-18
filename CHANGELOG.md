@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased] — Phase 8 definition
+
+### Added
+
+- Definicion arquitectonica de `WebSearchProvider`, `WebFetchProvider` y `BrowserProvider` con responsabilidades separadas.
+- Contratos conceptuales para lifecycle de sesion/pagina, navegacion, permisos, contenido web no confiable, prompt injection, cancelacion y concurrencia acotada.
+- ADR-011 y documentacion de seguridad para URLs, redirects, cookies, credenciales, downloads, uploads y acciones irreversibles.
+
+### Security
+
+- Phase 8 permanece sin providers reales, browser automation, dependencias, UI, persistencia, credenciales, shell, APIs de procesos o codigo de produccion.
+- La aprobacion de una accion futura debera pasar por `ToolManager`; una pagina web nunca concede autoridad ni puede convertir sus instrucciones en permisos.
+
+### Status
+
+- Definicion documental en `phase/08-internet-browser`; no implementada, no mergeada a `main` y sin PR abierto.
+
 ## Phase 6 - Personality System
 
 ### Added
