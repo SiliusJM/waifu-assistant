@@ -9,6 +9,7 @@ Las decisiones relevantes se registran como ADRs para preservar contexto y facil
 - ADR-005: Realtime Engine, eventos, estados, concurrencia y cancelación para Phase 3.
 - ADR-006: contratos, lifecycle y privacidad del Voice Service para Phase 4.
 - ADR-008: streaming de voz, backpressure, concurrencia e interrupciones para Phase 5.
+- ADR-009: Personality System declarativo, validado y aplicado mediante snapshots por interacción.
 
 Decisiones futuras previstas, solo cuando exista evidencia:
 
