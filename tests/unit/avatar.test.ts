@@ -5,6 +5,8 @@ import {
   AvatarError,
   AvatarRuntime,
   AvatarSignalNormalizer,
+  isAvatarSignal,
+  MAX_AVATAR_REACTION_DURATION_MS,
   MockAvatarProvider,
   type AvatarCharacterProfile,
   type AvatarProvider,
@@ -60,6 +62,82 @@ test('normalizer assigns one global sequence and deduplicates per source', () =>
   assert.throws(() => normalizer.normalize(signal('listen_stopped', 0, 'voice')), AvatarError);
 });
 
+test('normalizer validates the complete runtime signal contract before consuming sequence', () => {
+  const normalizer = new AvatarSignalNormalizer();
+  const malformedSignals: unknown[] = [
+    signal('unknown' as AvatarSignalInput['type'], 1),
+    signal('' as AvatarSignalInput['type'], 1),
+    signal('listen_started', 1, ''),
+    { ...signal('listen_started', 1), correlationId: '' },
+    signal('listen_started', 0),
+    signal('listen_started', 1.5),
+    signal('listen_started', -1),
+    signal('reaction_requested', 1),
+    signal('reaction_requested', 1, 'voice', { reactionId: 'bad reaction' }),
+    signal('reaction_requested', 1, 'voice', { reactionId: 'wave', durationMs: 0 }),
+    signal('reaction_requested', 1, 'voice', { reactionId: 'wave', durationMs: 1.5 }),
+    signal('reaction_requested', 1, 'voice', { reactionId: 'wave', durationMs: MAX_AVATAR_REACTION_DURATION_MS + 1 }),
+    signal('listen_started', 1, 'voice', { reactionId: 'wave' }),
+    signal('listen_started', 1, 'voice', { durationMs: 1 }),
+  ];
+
+  for (const malformed of malformedSignals) {
+    assert.throws(() => normalizer.normalize(malformed), AvatarError);
+  }
+  const valid = normalizer.normalize(signal('listen_started', 1));
+  assert.equal(valid?.sequence, 1);
+  assert.equal(valid?.sourceSequence, 1);
+
+  const secondNormalizer = new AvatarSignalNormalizer();
+  assert.throws(() => secondNormalizer.normalize(signal('unknown' as AvatarSignalInput['type'], 1, 'separate-source')), AvatarError);
+  const validAfterInvalid = secondNormalizer.normalize(signal('listen_started', 1, 'separate-source'));
+  assert.equal(validAfterInvalid?.sequence, 1);
+});
+
+test('isAvatarSignal rejects malformed values instead of checking only basic properties', () => {
+  assert.equal(isAvatarSignal(signal('unknown' as AvatarSignalInput['type'], 1)), false);
+  assert.equal(isAvatarSignal(signal('' as AvatarSignalInput['type'], 1)), false);
+  assert.equal(isAvatarSignal(signal('reaction_requested', 1)), false);
+  assert.equal(isAvatarSignal(signal('listen_started', 1.2)), false);
+  assert.equal(isAvatarSignal(signal('listen_started', 1, 'voice', { reactionId: 'wave' })), false);
+  assert.equal(isAvatarSignal(signal('listen_started', 1)), true);
+  const normalized = new AvatarSignalNormalizer().normalize(signal('listen_started', 1));
+  assert.ok(normalized);
+  assert.equal(isAvatarSignal(normalized), true);
+});
+
+test('malformed runtime signals do not mutate avatar state, sequence, events, or presentation', async () => {
+  const provider = new MockAvatarProvider({ capabilities: capabilities(true) });
+  const avatar = runtime(provider);
+  await avatar.initialize();
+  const initialSnapshot = avatar.currentSnapshot;
+  const stateEvents: unknown[] = [];
+  const errorEvents: unknown[] = [];
+  avatar.events.subscribe('avatar_state_changed', (event) => stateEvents.push(event));
+  avatar.events.subscribe('avatar_error', (event) => errorEvents.push(event));
+  const malformedSignals: unknown[] = [
+    signal('unknown' as AvatarSignalInput['type'], 1),
+    signal('listen_started', 0),
+    signal('reaction_requested', 1),
+    signal('listen_started', 1, 'voice', { reactionId: 'wave' }),
+  ];
+
+  for (const malformed of malformedSignals) {
+    assert.throws(() => avatar.submit(malformed), AvatarError);
+  }
+  assert.throws(() => avatar.accept(signal('unknown' as AvatarSignalInput['type'], 1)), AvatarError);
+  assert.equal(avatar.currentSnapshot, initialSnapshot);
+  assert.equal(avatar.controller.visualState, 'IDLE');
+  assert.equal(avatar.controller.lastGlobalSequence, 0);
+  assert.equal(stateEvents.length, 0);
+  assert.equal(errorEvents.length, 0);
+  assert.equal(provider.presentCalls.length, 0);
+  assert.equal(avatar.pendingSnapshot, undefined);
+  assert.equal(avatar.submit(signal('listen_started', 1)), true);
+  assert.equal(avatar.controller.lastGlobalSequence, 1);
+  await avatar.shutdown();
+});
+
 test('runtime lifecycle is deterministic and stopped blocks new activity', async () => {
   const provider = new MockAvatarProvider({ capabilities: capabilities(true) });
   const avatar = runtime(provider);
@@ -100,9 +178,11 @@ test('old global sequences and duplicate global sequences are ignored by the con
   const first = avatar.normalizer.normalize(signal('listen_started', 1));
   assert.ok(first);
   assert.equal(avatar.accept(first), true);
+  const second = avatar.normalizer.normalize(signal('speech_started', 2));
+  assert.ok(second);
+  assert.equal(avatar.accept(second), true);
   assert.equal(avatar.accept(first), false);
-  assert.equal(avatar.currentSnapshot.state, 'LISTENING');
-  assert.equal(avatar.accept({ ...first, sequence: first.sequence - 1 }), false);
+  assert.equal(avatar.currentSnapshot.state, 'SPEAKING');
   await avatar.shutdown();
 });
 

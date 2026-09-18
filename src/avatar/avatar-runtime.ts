@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { EventBus } from '../realtime/event-bus.js';
 import { createLogger, type Logger } from '../shared/logger.js';
-import { AvatarController } from './avatar-controller.js';
+import { AvatarController, validateAvatarSignal } from './avatar-controller.js';
 import { AvatarError, isAbortError } from './avatar-errors.js';
 import { AvatarPresentationPolicy, isControlledAvatarId } from './avatar-policy.js';
 import type {
@@ -68,15 +68,17 @@ export class AvatarSignalNormalizer {
   private globalSequence = 0;
   private readonly sourceSequences = new Map<string, number>();
 
-  normalize(input: AvatarSignalInput): AvatarSignal | undefined {
-    if (!input.sourceId || !input.correlationId || !Number.isSafeInteger(input.sourceSequence) || input.sourceSequence <= 0) {
-      throw new AvatarError('Avatar signals require valid source and sequence metadata.', 'AVATAR_CONFIGURATION_ERROR');
-    }
-    const previous = this.sourceSequences.get(input.sourceId) ?? 0;
-    if (input.sourceSequence <= previous) return undefined;
-    this.sourceSequences.set(input.sourceId, input.sourceSequence);
+  validate(input: unknown): AvatarSignalInput {
+    return validateAvatarSignal(input) as AvatarSignalInput;
+  }
+
+  normalize(input: unknown): AvatarSignal | undefined {
+    const validated = this.validate(input);
+    const previous = this.sourceSequences.get(validated.sourceId) ?? 0;
+    if (validated.sourceSequence <= previous) return undefined;
+    this.sourceSequences.set(validated.sourceId, validated.sourceSequence);
     this.globalSequence += 1;
-    return Object.freeze({ ...input, sequence: this.globalSequence }) as AvatarSignal;
+    return Object.freeze({ ...validated, sequence: this.globalSequence }) as AvatarSignal;
   }
 }
 
@@ -159,16 +161,22 @@ export class AvatarRuntime {
     }
   }
 
-  submit(input: AvatarSignalInput): boolean {
+  submit(input: unknown): boolean {
     const signal = this.normalizer.normalize(input);
     return signal ? this.accept(signal) : false;
   }
 
-  accept(signal: AvatarSignal): boolean {
+  accept(signal: unknown): boolean {
     if (this.lifecycle !== 'READY') return false;
+    let validatedSignal: AvatarSignal;
+    try {
+      validatedSignal = validateAvatarSignal(signal, { allowGlobalSequence: true }) as AvatarSignal;
+    } catch (error) {
+      throw error instanceof AvatarError ? error : new AvatarError('Avatar signal validation failed.', 'AVATAR_CONFIGURATION_ERROR', false, error);
+    }
     let preparation: ReturnType<AvatarController['prepare']>;
     try {
-      preparation = this.controller.prepare(signal);
+      preparation = this.controller.prepare(validatedSignal);
     } catch (error) {
       const avatarError = error instanceof AvatarError ? error : new AvatarError('Avatar state validation failed.', 'AVATAR_STATE_ERROR', false, error);
       this.publishError(avatarError, 'present');
@@ -195,8 +203,8 @@ export class AvatarRuntime {
       sequence: result.snapshot.sequence,
       ...(result.snapshot.correlationId ? { correlationId: result.snapshot.correlationId } : {}),
     });
-    if (signal.type === 'reaction_requested') {
-      this.publish('avatar_reaction_requested', { reactionId: signal.reactionId, sequence: signal.sequence, correlationId: signal.correlationId });
+    if (validatedSignal.type === 'reaction_requested') {
+      this.publish('avatar_reaction_requested', { reactionId: validatedSignal.reactionId, sequence: validatedSignal.sequence, correlationId: validatedSignal.correlationId });
     }
     this.schedule(snapshot);
     return true;
