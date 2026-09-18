@@ -6,7 +6,7 @@ Phase 8 — Internet & Browser (definición, spikes y controlled/external tests 
 
 ## Status
 
-Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #6. El merge quedó registrado en `532c956e2a407b9e9e540584947a24739490bb03`. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7; el merge quedó registrado en `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La implementación de Phase 7 fue revisada, corregida y mergeada mediante PR #8; el merge quedó registrado en `417a30deca884f55057164475b08b2521d47347d`. La definición de Phase 8 fue revisada y mergeada mediante PR #9; el merge quedó registrado en `ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`. El spike de providers y sandbox fue revisado y mergeado mediante PR #10; el merge quedó registrado en `bb29fb303c83eeed2c73b7d4944479756c2362ea`. Los controlled tests fueron revisados y mergeados mediante PR #11; el merge quedó registrado en `35045dcf9bcd9ff6b31c9bb7908af7872daae5a3`. La ejecución externa fue revisada y mergeada mediante PR #12; el merge quedó registrado en `4be0966603feeb97ad04cb86ea1f1c95f08d1d82`. El egress boundary spike fue revisado y mergeado mediante PR #13; el merge quedó registrado en `cd22a2fd8f8b979c5ef32ecdb63f66ff50a94079`.
+Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #6. El merge quedó registrado en `532c956e2a407b9e9e540584947a24739490bb03`. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7; el merge quedó registrado en `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La implementación de Phase 7 fue revisada, corregida y mergeada mediante PR #8; el merge quedó registrado en `417a30deca884f55057164475b08b2521d47347d`. La definición de Phase 8 fue revisada y mergeada mediante PR #9; el merge quedó registrado en `ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`. El spike de providers y sandbox fue revisado y mergeado mediante PR #10; el merge quedó registrado en `bb29fb303c83eeed2c73b7d4944479756c2362ea`. Los controlled tests fueron revisados y mergeados mediante PR #11; el merge quedó registrado en `35045dcf9bcd9ff6b31c9bb7908af7872daae5a3`. La ejecución externa fue revisada y mergeada mediante PR #12; el merge quedó registrado en `4be0966603feeb97ad04cb86ea1f1c95f08d1d82`. El egress boundary spike fue revisado y mergeado mediante PR #13; el merge quedó registrado en `cd22a2fd8f8b979c5ef32ecdb63f66ff50a94079`. El egress hardening fue revisado y mergeado mediante PR #14; el merge quedó registrado en `9dab02d72e710e691121da27489474d1ed4ccf3b`.
 
 ## Completed
 
@@ -61,11 +61,12 @@ Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #
 - El proxy fixture bloqueó redirects públicos hacia destinos internos y WebSocket interno mediante CONNECT.
 - Service Worker en el egress fixture: NOT EXECUTED; Chromium no expuso `navigator.serviceWorker` para el origen controlado.
 - DNS rebinding sigue siendo una simulación controlada, no pinning real.
+- Egress hardening por canal: 14 PASS, 0 FAIL, 6 NOT EXECUTED y 1 SIMULATED; `internalHits=[]`.
 - No se seleccionó todavía proxy productivo, aislamiento de red, browser remoto ni combinación definitiva.
 
 ## In Progress
 
-Ninguno. La evidencia externa fue cerrada y mergeada; la implementación productiva de Phase 8 todavía no ha comenzado.
+Ninguno. La evidencia de egress fue ampliada y mergeada; la implementación productiva de Phase 8 todavía no ha comenzado.
 
 ## Blocked
 
@@ -80,7 +81,7 @@ Ninguno. La evidencia externa fue cerrada y mergeada; la implementación product
 ## Next
 
 Sin introducir código de producción todavía:
-1. Probar el boundary inferior en un entorno con Service Worker realmente ejecutable y registrar si `internalHits` permanece en cero.
+1. Probar el boundary inferior en un entorno con Service Worker realmente ejecutable y registrar si `internalHits` permanece en cero por canal.
 2. Ejecutar una prueba controlada de HTTPS→HTTP y revisar el comportamiento de WebSocket/CONNECT con TLS donde corresponda.
 3. Probar el mecanismo con resolución efectiva y DNS rebinding real en un entorno aislado; mantener la simulación separada.
 4. Repetir Search con credenciales temporales para Brave, Tavily y Exa y medir las 20 consultas.
