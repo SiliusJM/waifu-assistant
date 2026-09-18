@@ -50,7 +50,7 @@ Instalar las dependencias y ejecutar:
 
 ## Próximo paso
 
-Preparar la definición de Phase 8. No iniciar su implementación hasta que su alcance, contratos, criterios de aceptación y riesgos sean revisados y aprobados.
+La definición de Phase 8 ya está preparada. El siguiente paso es revisarla y aprobar su alcance, contratos, criterios de aceptación y riesgos antes de iniciar la implementación.
 
 Los proveedores reales de STT/TTS se evaluarán mediante un spike comparativo independiente y ADR-007; no forman parte del cierre de Phase 4.
 

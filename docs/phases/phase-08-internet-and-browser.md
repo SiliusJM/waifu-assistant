@@ -139,6 +139,10 @@ El provider no bloquea `AssistantCore`, `RealtimeEngine` ni `VoiceService`. Las 
 
 ## 7. Navegación, URLs y redirects
 
+La validación debe incluir una defensa explícita contra SSRF. Los destinos HTTP(S) que resuelvan a loopback, redes privadas, link-local, multicast, rangos reservados u otros destinos internos se bloquean por defecto, salvo una autorización explícita definida por una política futura. Esta regla aplica tanto a la URL inicial como a cada destino de redirect.
+
+La decisión no puede basarse únicamente en el texto o hostname recibido: debe considerar la resolución DNS efectiva antes de conectar y durante la navegación controlada. El provider debe evitar bypasses por cambios de resolución, DNS rebinding, múltiples respuestas DNS o diferencias entre validación y conexión. Los rangos concretos, la estrategia de resolución y el comportamiento ante cambios quedan para el spike posterior, pero el bloqueo por defecto es contractual.
+
 La navegación futura solo aceptará esquemas explícitamente permitidos por política, inicialmente orientados a HTTP(S). Se rechazan por defecto `file:`, `data:`, `javascript:`, extensiones, rutas locales y esquemas desconocidos.
 
 Cada URL se normaliza y valida antes de salir al provider. Un redirect es una nueva decisión: se revalidan esquema, host, límites y permiso. Debe existir un máximo de saltos y un límite de tiempo; nunca se sigue una cadena ilimitada.
@@ -278,6 +282,8 @@ La telemetría debe distinguir: solicitud recibida, autorización, operación in
 Estas decisiones requieren spikes, threat modeling y pruebas controladas. No autorizan implementación en esta rama.
 
 ## 20. Criterios de aceptación de la definición
+
+- La política SSRF bloquea por defecto destinos loopback, privados, link-local, multicast, reservados e internos, incluyendo redirects y resoluciones DNS susceptibles de rebinding.
 
 - Se distingue explícitamente búsqueda, fetch y browser interactivo.
 - Las responsabilidades de `WebSearchProvider`, `WebFetchProvider` y `BrowserProvider` están separadas.
