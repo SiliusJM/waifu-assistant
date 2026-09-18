@@ -15,7 +15,7 @@ Waifu Assistant es un proyecto incremental y seguro de asistente personal de esc
 
 ## Alcance actual: Phase 8 - Internet & Browser
 
-La definición arquitectónica de Phase 8 fue revisada y aprobada mediante PR #9 y mergeada a `main` en `ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`. Esta fase continúa exclusivamente en el plano documental: no se implementan browser automation, Playwright, Puppeteer, Selenium, WebView, providers reales, scraping, UI, Electron/Vue, persistencia, cookies, credenciales, downloads/uploads, APIs de procesos ni shell.
+La definición arquitectónica de Phase 8 fue revisada y aprobada mediante PR #9 y mergeada a `main` en `ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`. El spike de providers y sandbox fue revisado y mergeado mediante PR #10 en `bb29fb303c83eeed2c73b7d4944479756c2362ea`. La fase continúa sin implementación productiva: no se implementan browser automation, Playwright, Puppeteer, Selenium, WebView, providers reales, scraping, UI, Electron/Vue, persistencia, cookies, credenciales, downloads/uploads, APIs de procesos ni shell.
 
 La definición separa `WebSearchProvider`, `WebFetchProvider` y `BrowserProvider`. Todo acceso futuro deberá pasar por `ToolManager`, tratar el contenido web como dato no confiable, usar permisos `auto`/`confirm`/`block`, aplicar `AbortSignal` y mantener concurrencia acotada. La aprobación de esta definición no constituye implementación ni habilita navegación real.
 
