@@ -93,8 +93,11 @@ export interface StreamingAudioOutputProvider {
 }
 
 export interface VoiceStreamingQueueOptions {
+  /** Initial capture chunk duration policy in milliseconds; not an operational timeout. */
   readonly captureChunkDurationMs?: number;
+  /** Initial playback buffering policy in milliseconds; not an operational timeout. */
   readonly playbackBufferMs?: number;
+  /** Maximum pending buffering policy in milliseconds; not an operational timeout. */
   readonly maxPendingMs?: number;
   readonly queueCapacity?: number;
   readonly streamCapacity?: number;

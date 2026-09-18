@@ -66,6 +66,12 @@ function validateTimeout(value: number | undefined): void {
   }
 }
 
+function validateBufferParameter(name: string, value: number | undefined): void {
+  if (value !== undefined && (!Number.isFinite(value) || value <= 0)) {
+    throw new VoiceError('Streaming buffer parameter ' + name + ' must be a positive number of milliseconds.', 'VOICE_CONFIGURATION_ERROR');
+  }
+}
+
 function validateAudioChunk(chunk: AudioChunk): void {
   if (!(chunk.data instanceof Uint8Array)
     || !Number.isInteger(chunk.sequence)
@@ -124,9 +130,9 @@ export class StreamingVoiceService {
     if (!Number.isInteger(this.queueCapacity) || this.queueCapacity < 1) {
       throw new VoiceError('Streaming queue capacity must be positive.', 'VOICE_CONFIGURATION_ERROR');
     }
-    validateTimeout(options.captureChunkDurationMs);
-    validateTimeout(options.playbackBufferMs);
-    validateTimeout(options.maxPendingMs);
+    validateBufferParameter('captureChunkDurationMs', options.captureChunkDurationMs);
+    validateBufferParameter('playbackBufferMs', options.playbackBufferMs);
+    validateBufferParameter('maxPendingMs', options.maxPendingMs);
     validateTimeout(options.defaultTimeoutMs);
   }
 
@@ -186,6 +192,9 @@ export class StreamingVoiceService {
       options.synthesisTimeoutMs,
       options.playbackTimeoutMs,
     ]) validateTimeout(timeoutMs);
+    validateBufferParameter('captureChunkDurationMs', options.captureChunkDurationMs);
+    validateBufferParameter('playbackBufferMs', options.playbackBufferMs);
+    validateBufferParameter('maxPendingMs', options.maxPendingMs);
     const timeoutMs = options.timeoutMs ?? this.defaultTimeoutMs;
     const timeout = timeoutMs === undefined
       ? undefined
@@ -373,7 +382,7 @@ export class StreamingVoiceService {
         try {
           await playback.stop('immediate', operation.reasonCode ?? 'cancelled');
           if (operation.reasonCode === 'interrupted' || operation.reasonCode === 'superseded') {
-            operation.mark('interruption_effective_stop');
+            operation.mark('interruption_effective_playback_stop');
           }
         } catch (error) {
           this.logger.warn('Streaming playback cleanup failed', {
@@ -532,7 +541,7 @@ export class StreamingVoiceService {
     try {
       await input.stop(operation.reasonCode ?? 'completed');
       if (operation.reasonCode === 'interrupted' || operation.reasonCode === 'superseded') {
-        operation.mark('interruption_effective_stop');
+        operation.mark('interruption_effective_capture_stop');
       }
     } catch (error) {
       this.logger.warn('Streaming input cleanup failed', {

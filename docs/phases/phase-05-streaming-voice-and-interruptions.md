@@ -18,11 +18,13 @@ Implementada en `phase/05-streaming-voice` y pendiente de revisión externa. No 
 
 Los parámetros de capacidad y buffering son configurables. Los valores iniciales no constituyen objetivos de rendimiento ni decisiones irreversibles.
 
+`captureChunkDurationMs`, `playbackBufferMs` y `maxPendingMs` son políticas de buffering expresadas en milisegundos, no timeouts operativos. Se validan como duraciones positivas y no se convierten a bytes sin información específica del provider. La métrica `interruption_latency` usa únicamente la marca de detención efectiva del playback; la captura mantiene una marca separada.
+
 ## Contratos principales
 
 `AudioInputStream`, `AudioStreamChunk`, `StreamingAudioInputProvider`, `StreamingSTTProvider`, `StreamingSTTSession`, `StreamingTTSProvider`, `StreamingTTSOperation`, `StreamingAudioOutputProvider`, `AudioPlaybackHandle`, `AudioStreamResult`, `STTStartRequest`, `VoiceTerminationReason` y `StreamingVoiceOperationHandle`.
 
-`VoiceService` expone `startStreamingTranscription`, `startStreamingSynthesis` y `shutdownStreaming`, manteniendo los métodos batch existentes. El llamador conserva la decisión de cuándo conectar una transcripción con `RealtimeEngine` y cuándo iniciar TTS.
+`VoiceService` mantiene el adaptador público y expone `startStreamingTranscription`, `startStreamingSynthesis` y `shutdownStreaming`, manteniendo los métodos batch existentes. `StreamingVoiceService` implementa la operación streaming y `shutdownStreaming` delega en ella. El llamador conserva la decisión de cuándo conectar una transcripción con `RealtimeEngine` y cuándo iniciar TTS.
 
 ## Seguridad y límites
 
@@ -33,4 +35,3 @@ Quedan fuera: wake word, barge-in avanzado, RVC, avatar, Electron/Vue, persisten
 ## Verificación
 
 La verificación de cierre se ejecuta desde la rama de la fase y debe incluir `build`, `lint`, `typecheck`, `test`, `npm run check`, `git diff --check` y revisión de estado/diff. Phase 5 no se declara completa hasta la revisión externa.
-

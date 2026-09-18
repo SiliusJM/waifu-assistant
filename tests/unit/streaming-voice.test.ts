@@ -116,6 +116,24 @@ test('bounded audio queue applies backpressure and cancellation without drops', 
   queue.close();
 });
 
+test('streaming buffer policies validate as milliseconds, not timeouts', () => {
+  for (const name of ['captureChunkDurationMs', 'playbackBufferMs', 'maxPendingMs'] as const) {
+    assert.throws(
+      () => streamingService({ [name]: 0 }),
+      (error: unknown) => error instanceof VoiceError && error.code === 'VOICE_CONFIGURATION_ERROR',
+    );
+  }
+
+  const service = streamingService();
+  assert.throws(
+    () => service.startStreamingSynthesis(
+      { sessionId: 'conversation-1', text: 'invalid buffer policy' },
+      { playbackBufferMs: Number.NaN },
+    ),
+    (error: unknown) => error instanceof VoiceError && error.code === 'VOICE_CONFIGURATION_ERROR',
+  );
+});
+
 test('interruption during capture stops input and reports its cause', async () => {
   const input = new MockStreamingAudioInputProvider({ delayMs: 50 });
   const service = streamingService({ input });
@@ -131,6 +149,8 @@ test('interruption during capture stops input and reports its cause', async () =
   assert.equal(result.status, 'cancelled');
   if (result.status === 'cancelled') assert.equal(result.reasonCode, 'interrupted');
   assert.equal(input.stopCount, 1);
+  assert.equal(handle.metrics().marks.interruption_effective_capture_stop !== undefined, true);
+  assert.equal(handle.metrics().durationsMs.interruption_latency, undefined);
   assert.equal(events.some((event) => event.type === 'interruption_completed'), true);
 });
 
@@ -149,6 +169,8 @@ test('interruption during playback stops immediately and discards remaining chun
   assert.equal(result.status, 'cancelled');
   if (result.status === 'cancelled') assert.equal(result.reasonCode, 'interrupted');
   assert.equal(output.stopCount, 1);
+  assert.equal(handle.metrics().marks.interruption_effective_playback_stop !== undefined, true);
+  assert.equal(handle.metrics().durationsMs.interruption_latency !== undefined, true);
 });
 
 test('explicit supersede releases the old session before the replacement starts', async () => {

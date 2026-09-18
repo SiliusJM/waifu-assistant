@@ -17,7 +17,7 @@ export class VoiceLatencyTracker {
       ['TTS_start', 'first_TTS_chunk', 'tts_to_first_chunk'],
       ['TTS_start', 'playback_start', 'tts_to_playback'],
       ['playback_start', 'playback_end', 'playback_duration'],
-      ['interruption_requested', 'interruption_effective_stop', 'interruption_latency'],
+      ['interruption_requested', 'interruption_effective_playback_stop', 'interruption_latency'],
       ['cancellation', 'resource_release', 'cancellation_latency'],
     ];
     for (const [from, to, name] of pairs) {
