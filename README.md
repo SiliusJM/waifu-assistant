@@ -12,6 +12,8 @@ Phase 5 — Streaming Voice & Interruptions está COMPLETA y mergeada en `main` 
 
 Phase 6 — Personality System está COMPLETA y mergeada en `main` mediante PR #6, con merge commit `532c956e2a407b9e9e540584947a24739490bb03`. Añade personalidad declarativa, catálogos controlados, validación estricta, snapshots por interacción, registry multi-perfil, JSON canónico e integración opcional con `AssistantCore`. No añade memoria persistente, emoción, voz real ni UI multi-personaje.
 
+Phase 7 — Avatar System está DEFINIDA y aprobada arquitectónicamente mediante PR #7, con merge commit `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La fase todavía no está implementada; la definición establece los contratos, lifecycle, máquina visual, concurrencia, seguridad y límites para una futura implementación desacoplada del renderer.
+
 ## Principios
 
 Seguridad, integridad del proyecto, correctitud, estabilidad, baja latencia, mantenibilidad, experiencia de usuario, coste y nuevas capacidades, en ese orden.
@@ -41,7 +43,7 @@ Instalar las dependencias y ejecutar:
 
 ## Próximo paso
 
-Phase 7 está definida documentalmente en `phase/07-avatar-system` y pendiente de revisión externa. No implementar Phase 7 hasta que su alcance, contratos, criterios de aceptación y riesgos hayan sido aprobados.
+Implementar Phase 7 en una rama separada siguiendo la definición aprobada. No iniciar Phase 8 hasta cerrar, revisar y mergear la implementación de Phase 7.
 
 Los proveedores reales de STT/TTS se evaluarán mediante un spike comparativo independiente y ADR-007; no forman parte del cierre de Phase 4.
 
