@@ -13,11 +13,11 @@ Waifu Assistant es un proyecto incremental y seguro de asistente personal de esc
 - No avanzar a otra fase hasta que la fase activa cumpla todos sus criterios de aceptación.
 - Las tecnologías listadas como candidatas deben evaluarse antes de convertirse en decisiones.
 
-## Alcance actual: Phase 5 — Streaming Voice & Interruptions
+## Alcance actual: checkpoint post-merge de Phase 5
 
-Phase 5 está autorizada para implementación únicamente en `phase/05-streaming-voice`. La rama `main` permanece en el cierre de Phase 4; no hacer merge ni iniciar Phase 6.
+Phase 5 — Streaming Voice & Interruptions está cerrada y mergeada en `main` mediante PR #5, con merge commit `1f076df8e880c273abe261142aab9757c541d73e`. La rama de fase queda como histórico de implementación. No iniciar Phase 6 hasta que su definición, alcance, contratos, criterios de aceptación y riesgos sean revisados y aprobados.
 
-La fase activa agrega streaming de captura/STT/TTS, playback incremental, backpressure, interrupciones, supersede, coordinación específica de voz, cancelación jerárquica, métricas y mocks deterministas. Mantener fuera los providers reales, el LLM real y cualquier API de procesos o shell.
+Phase 5 agregó streaming de captura/STT/TTS, playback incremental, backpressure, interrupciones, supersede, coordinación específica de voz, cancelación jerárquica, métricas y mocks deterministas. Los providers reales, el LLM real y cualquier API de procesos o shell permanecen fuera de alcance.
 
 Phase 3 — Realtime Engine está cerrada y mergeada en `main`.
 
