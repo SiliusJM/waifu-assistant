@@ -130,6 +130,8 @@ El adapter debe devolver `truncated`, `contentType`, `bytesRead`, `redirectCount
 
 La recomendación del spike es no elegir todavía un modo definitivo. La siguiente prueba controlada debe comparar Playwright local efímero contra un WebDriver/BaaS remoto con egress restringido. La decisión debe basarse en aislamiento probado, no únicamente en ergonomía de API.
 
+Para el experimento local, el provider no puede usar el perfil principal del navegador del usuario. Debe crear un contexto/perfil efímero con un directorio temporal dedicado, mantener habilitado el sandbox del navegador y no desactivar mecanismos de aislamiento para facilitar la automatización. El experimento debe comprobar que el provider no obtiene acceso arbitrario al filesystem y que, ante cierre normal, timeout y crash, se limpian el perfil temporal, sockets y procesos que el harness haya creado. También debe documentar qué aislamiento real proporciona la opción local en Windows y qué controles adicionales serían necesarios para producción. No se elige todavía el mecanismo definitivo de sandbox ni el modelo final de ejecución.
+
 ### 4.3 Lifecycle, capabilities y cancelación
 
 El provider futuro debe declarar capabilities para:
@@ -145,6 +147,14 @@ El provider futuro debe declarar capabilities para:
 Playwright documenta `BrowserContext.close()` y `browser.close()` como cleanup explícito, y su API HTTP admite `AbortSignal`. No se debe asumir que todas las acciones de página tienen la misma semántica de abort: el spike debe probar abort durante navegación, wait, click, upload, download y shutdown, incluyendo el caso en que cerrar context/page sea la única cancelación física disponible.
 
 Credenciales y storage state permanecerán fuera de la primera prueba. La documentación de Playwright advierte que los archivos de estado autenticado pueden contener cookies y headers utilizables para suplantación; no deben entrar en Git, logs ni persistencia del asistente.
+
+### 4.4 Egress de todas las solicitudes del navegador
+
+La defensa SSRF del BrowserProvider no puede limitarse a la URL principal de navegación. La política de egress debe aplicarse a todas las solicitudes generadas por el navegador, incluyendo como mínimo navegación, redirects, subrecursos, imágenes, scripts, iframes, XHR/fetch y WebSockets cuando el provider los soporte. Navegar a una URL pública no autoriza automáticamente que sus recursos secundarios alcancen una red privada o interna.
+
+El experimento debe demostrar, para cada modo evaluado —browser local, remoto, BaaS y self-hosted cuando corresponda—, la validación del destino efectivo, el bloqueo de destinos internos, el comportamiento ante DNS rebinding y múltiples respuestas A/AAAA, la diferencia entre la IP validada y la IP realmente utilizada, y el comportamiento efectivo del egress. Una política de navegación no se considera demostrada solo porque `page.goto()` o `navigate()` pase la validación.
+
+Si se usa routing o interceptación de requests, el spike debe documentar sus límites y cualquier bypass posible, incluyendo Service Workers u otros mecanismos que puedan evitar la intercepción. La solución definitiva de red queda abierta entre interceptación, proxy/egress gateway, aislamiento de red o una combinación de mecanismos; ninguna opción se convierte todavía en decisión definitiva.
 
 ## 5. Seguridad que debe demostrar el spike
 
@@ -163,6 +173,12 @@ El spike futuro necesita fixtures y pruebas aisladas, no una integración en `sr
 - DNS con múltiples A/AAAA, cambio de respuesta y DNS rebinding;
 - diferencia entre IP validada y IP usada por el socket/browser;
 - fallo cerrado si el proxy/browser remoto no permite verificar el egress.
+- una página pública que genere solicitudes secundarias hacia destinos internos;
+- redirects y subrecursos hacia destinos internos;
+- XHR/fetch hacia una red privada;
+- WebSocket hacia un destino interno cuando sea soportado;
+- bypasses mediante Service Worker u otros mecanismos de red;
+- evidencia de que el egress efectivo continúa bloqueando destinos internos en browser local, remoto, BaaS y self-hosted;
 
 ### Datos y autoridad
 
@@ -179,6 +195,9 @@ El spike futuro necesita fixtures y pruebas aisladas, no una integración en `sr
 - symlink/junction y path traversal en el harness aislado;
 - comprobación de que el provider no requiere shell, `child_process`, `exec`, `spawn`, PowerShell o código generado;
 - crash/timeout/shutdown que libera sesión, página, sockets y temporales.
+- perfil principal frente a perfil efímero y directorio temporal dedicado;
+- sandbox del navegador habilitado, sin desactivar mecanismos de aislamiento;
+- cleanup del perfil temporal, sockets y procesos creados por el harness tras crash y timeout.
 
 ## 6. Límites iniciales propuestos
 
@@ -246,6 +265,15 @@ Antes de implementar contratos productivos deben existir pruebas controladas que
 - redirects y DNS rebinding sin alcanzar red interna;
 - extracción determinista, truncamiento y contenido no HTML rechazado de forma segura;
 - aislamiento de browser contexts/sesiones y cleanup tras crash;
+- página pública con solicitudes secundarias hacia destinos internos;
+- redirects, subrecursos e iframes hacia destinos internos;
+- XHR/fetch y WebSocket hacia red privada cuando sean soportados;
+- bypasses mediante Service Worker u otros mecanismos de red;
+- evidencia de que el egress efectivo bloquea destinos internos, no solo que `page.goto()`/`navigate()` valide la navegación;
+- comparación del egress local frente a remoto/BaaS/self-hosted;
+- diferencia entre IP validada e IP usada, incluyendo DNS rebinding y múltiples A/AAAA;
+- perfil principal frente a perfil efímero, sandbox habilitado y ausencia de acceso arbitrario al filesystem;
+- cleanup del perfil temporal tras crash/timeout;
 - cancelación física o degradación bounded de cada operación de browser;
 - downloads/uploads con tamaño, tipo, destino y path policy;
 - ausencia de secretos en logs y de autoridad en `WebData`;
