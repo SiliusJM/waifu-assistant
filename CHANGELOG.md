@@ -1,3 +1,19 @@
+## Phase 8 — Internet & Browser architecture decision gate
+
+### Added
+
+- Matriz consolidada de evidencia restante y límites explícitos de Phase 8.
+- Borrador de arquitectura con gate previo a producción.
+- ADR-012 que establece una frontera de egress inferior como requisito obligatorio para cualquier BrowserProvider futuro.
+
+### Status / limitations
+
+- PR #15 revisado y mergeado a `main`; merge commit `8709da3cf3957f1f16163a9baecdff7ecb1c7cbd`.
+- `browserContext.route()` queda descartado como boundary SSRF/egress único por el redirect público→interno observado.
+- El proxy/egress boundary queda como candidato provisional respaldado por la evidencia, no como selección productiva.
+- Service Worker real, HTTPS controlado, DNS rebinding real, browser remoto, aislamiento de red/host, crash cleanup seguro y Search con credenciales continúan pendientes.
+- No se implementaron providers productivos ni cambios en `src/`.
+
 ## Phase 8 — Internet & Browser egress hardening
 
 ### Added
