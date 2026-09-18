@@ -1,3 +1,17 @@
+## Phase 8 — Internet & Browser HTTPS/TLS evidence
+
+### Added
+
+- Evaluación de la viabilidad de un fixture HTTPS/TLS reproducible con Playwright/Chromium ya provisionado.
+- Registro explícito de la limitación del entorno para emitir y confiar un certificado X.509 efímero sin `ignoreHTTPSErrors`, cambios en trust store, shell/OpenSSL, APIs de proceso o dependencias adicionales.
+
+### Status / limitations
+
+- PR #21 revisado y mergeado a `main`; merge commit `0288137f8b0eb5601d4a84060cd1091ad9aaef18`.
+- HTTPS público→HTTPS, HTTPS→HTTP, HTTPS→interno y CONNECT/WebSocket sobre TLS permanecen `NOT EXECUTED / LIMITATION`.
+- Chromium inicia y cleanup normal pasa, pero esto no constituye evidencia de handshake TLS ni de egress HTTPS.
+- ADR-012 permanece provisional y el decision-gate no se cierra.
+
 ## Phase 8 — Internet & Browser DNS/socket evidence
 
 ### Added
