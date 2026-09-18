@@ -3,7 +3,7 @@ import { isIP } from 'node:net';
 import { performance } from 'node:perf_hooks';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
@@ -13,6 +13,7 @@ const SEARCH_TIMEOUT_MS = 5000;
 const FETCH_TIMEOUT_MS = 500;
 const MAX_REDIRECTS = 5;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+const ALLOWED_CONTENT_TYPES = new Set(['text/html', 'text/plain', 'application/xhtml+xml']);
 const startedAt = new Date().toISOString();
 
 function percentile(values, fraction) {
@@ -36,6 +37,20 @@ function urlIsValid(value) {
   } catch {
     return false;
   }
+}
+
+function assertAllowedContentType(contentType) {
+  if (!ALLOWED_CONTENT_TYPES.has(contentType)) throw new Error(`CONTENT_TYPE_UNSUPPORTED:${contentType}`);
+  return contentType;
+}
+
+function validateWorkspaceTarget(workspace, candidatePath) {
+  if (typeof candidatePath !== 'string') throw new Error('WORKSPACE_TARGET_REJECTED');
+  const workspaceRoot = resolve(workspace);
+  const target = resolve(candidatePath);
+  const relativeTarget = relative(workspaceRoot, target);
+  if (!relativeTarget || relativeTarget === '..' || relativeTarget.startsWith(`..${sep}`) || isAbsolute(relativeTarget)) throw new Error('WORKSPACE_TARGET_REJECTED');
+  return target;
 }
 
 function normalizeSearchResult(result) {
@@ -391,13 +406,12 @@ async function runFetchHarness() {
   await check('HTTPS downgrade is blocked', async () => expectError(() => controlledFetch('https://public.test/downgrade', { resolver, connector }), 'HTTPS_DOWNGRADE'));
   await check('allowed content type is returned', async () => {
     const result = await controlledFetch('http://public.test/html', { resolver, connector });
-    if (result.contentType !== 'text/html') throw new Error('content type mismatch');
+    if (result.contentType !== 'text/html' || assertAllowedContentType(result.contentType) !== 'text/html') throw new Error('content type mismatch');
   });
   await check('unsupported content type is rejected by policy', async () => {
     const result = await controlledFetch('http://public.test/binary', { resolver, connector });
     if (result.contentType !== 'application/octet-stream') throw new Error('fixture mismatch');
-    if (!['text/html', 'text/plain', 'application/xhtml+xml'].includes(result.contentType)) return;
-    throw new Error('binary content type was accepted');
+    await expectError(() => Promise.resolve(assertAllowedContentType(result.contentType)), 'CONTENT_TYPE_UNSUPPORTED');
   });
   const internalCases = [
     ['loopback IPv4', 'http://loopback.test/ok'],
@@ -427,29 +441,38 @@ async function runFetchHarness() {
     if (webData.kind !== 'WebData' || webData.privileged || !webData.text.includes('ignore previous instructions')) throw new Error('prompt injection crossed data boundary');
   });
   const workspace = await mkdtemp(join(tmpdir(), 'waifu-phase-08-'));
-  const outsideFile = join(dirname(workspace), `${workspace.split(/[\\/]/).pop()}-outside.txt`);
   try {
     const allowedFile = join(workspace, 'allowed.txt');
     await writeFile(allowedFile, 'controlled upload');
     await check('download writes only to dedicated temporary directory', async () => {
       const result = await controlledFetch('http://public.test/download', { resolver, connector });
-      const target = resolve(workspace, 'download.txt');
-      if (!target.startsWith(resolve(workspace))) throw new Error('download target escaped allowlist');
+      const target = validateWorkspaceTarget(workspace, join(workspace, 'download.txt'));
       await writeFile(target, result.body);
       if ((await stat(target)).size === 0) throw new Error('download was empty');
     });
+    await check('download rejects external target without writing', async () => {
+      const externalTarget = resolve(workspace, '..', 'download-outside.txt');
+      await expectError(() => Promise.resolve(validateWorkspaceTarget(workspace, externalTarget)), 'WORKSPACE_TARGET_REJECTED');
+    });
     await check('upload accepts only allowlisted file', async () => {
-      const content = await readFile(allowedFile);
+      const allowlistedTarget = validateWorkspaceTarget(workspace, allowedFile);
+      const content = await readFile(allowlistedTarget);
       const result = await controlledFetch('http://public.test/upload', { resolver, connector, method: 'POST', headers: { 'content-type': 'text/plain' }, body: content });
       if (result.status !== 200 || !result.body.includes('controlled upload'.length.toString())) throw new Error('upload fixture did not receive allowlisted file');
     });
+    await check('upload rejects file outside allowlist without reading it', async () => {
+      const externalTarget = resolve(workspace, '..', 'upload-outside.txt');
+      await expectError(() => Promise.resolve(validateWorkspaceTarget(workspace, externalTarget)), 'WORKSPACE_TARGET_REJECTED');
+    });
     await check('upload path traversal is rejected', async () => {
-      const target = resolve(workspace, '..', 'outside.txt');
-      if (target.startsWith(resolve(workspace))) throw new Error('path policy failed');
+      const traversalTargets = [
+        resolve(workspace, '..', 'outside.txt'),
+        join(workspace, 'nested', '..', '..', 'outside-equivalent.txt')
+      ];
+      for (const target of traversalTargets) await expectError(() => Promise.resolve(validateWorkspaceTarget(workspace, target)), 'WORKSPACE_TARGET_REJECTED');
     });
   } finally {
     await rm(workspace, { recursive: true, force: true });
-    await rm(outsideFile, { force: true });
   }
   await new Promise((resolvePromise) => fixture.server.close(resolvePromise));
   const passed = checks.filter((item) => item.status === 'PASS').length;
@@ -537,4 +560,5 @@ const report = {
 };
 
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-if (report.fetch.status !== 'PASS') process.exitCode = 1;
+const executedSearchFailed = Object.values(report.search).some((provider) => provider.status === 'EXECUTED' && provider.failures > 0);
+if (report.fetch.status !== 'PASS' || executedSearchFailed) process.exitCode = 1;

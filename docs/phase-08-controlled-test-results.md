@@ -17,6 +17,8 @@ node scripts/phase-08-controlled-tests/run.mjs
 
 El harness usa únicamente APIs estándar de Node.js y fixtures locales. Las respuestas completas de proveedores no se guardan. Los resultados externos solo se ejecutan con la credencial correspondiente y con `PHASE_08_RUN_EXTERNAL=1` como opt-in explícito.
 
+El exit code del harness es `1` si Fetch falla o si algún provider Search con estado `EXECUTED` informa `failures > 0`. Los providers `NOT EXECUTED` y las suites Browser `NOT EXECUTED` no provocan fallo.
+
 ## 1. Fuentes oficiales revisadas
 
 Antes de la ejecución se revisó la documentación vigente disponible para:
@@ -51,13 +53,15 @@ Cuando existan credenciales locales, el harness registrará únicamente por cons
 - truncamiento y bytes acotados;
 - utilidad definida previamente por dominio esperado o términos de relevancia.
 
+La métrica `relevant` del harness es únicamente una heurística: marca una coincidencia si aparece un dominio esperado o un término textual configurado en título, snippet o URL. No es evaluación semántica, accuracy ni un relevance score definitivo; no debe usarse para declarar un provider mejor.
+
 Los cuerpos completos, API keys y headers privados no se persisten.
 
 ## 3. Fetch controlado
 
 El harness levantó un servidor HTTP local de fixtures y un transporte controlado que separa hostname lógico, direcciones resueltas y destino efectivo. La URL pública lógica se mapea al fixture loopback únicamente para probar la política; por eso esta evidencia no se presenta como pinning de red de producción.
 
-Resultado: **27/27 comprobaciones PASS**.
+Resultado: **29/29 comprobaciones PASS**.
 
 Se demostraron:
 
@@ -68,12 +72,14 @@ Se demostraron:
 - redirect único y cadena limitada a cinco saltos;
 - loop de redirects limitado;
 - downgrade HTTPS → HTTP rechazado;
-- content type HTML permitido y binario identificado como no permitido por la policy del harness;
+- content type HTML permitido mediante `assertAllowedContentType` y binario rechazado por esa policy con error codificado;
 - URLs `file:`, `data:`, `javascript:` y userinfo rechazadas;
 - WebData conservado como dato no privilegiado;
-- download hacia directorio temporal dedicado;
-- upload desde archivo allowlisted;
-- rechazo de path traversal por la policy de destino.
+- download hacia directorio temporal dedicado después de `validateWorkspaceTarget`;
+- download externo rechazado por la misma policy sin escribir fuera del temporal;
+- upload desde archivo allowlisted después de validar el target;
+- upload fuera del workspace rechazado sin leerlo;
+- dos variantes de path traversal rechazadas por `validateWorkspaceTarget` sin escribir fuera del temporal.
 
 ## 4. SSRF, DNS y egress controlado
 
