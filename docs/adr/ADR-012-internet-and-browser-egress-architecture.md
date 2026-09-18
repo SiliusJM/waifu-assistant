@@ -31,6 +31,7 @@ AssistantCore
 - Egress boundary: `19 PASS`, `0 FAIL`, `2 NOT EXECUTED`; `internalHits=0`.
 - Hardening: ocho canales ejecutados con `PASS` individual y `internalHits=0`; el fixture adicional de Service Worker en `localhost` obtuvo `PASS` con observación y bloqueo individual.
 - DNS rebinding/socket pinning: `SIMULATED`/`NOT EXECUTED` para socket real, sin pinning demostrado.
+- DNS/socket egress controlado: el fixture local observó `public.test` → `127.0.0.2` y `socket.remoteAddress=127.0.0.2`; bloqueó `internal.test` → `127.0.0.3` antes de conectar con `internalHits=0`. El cambio controlado `127.0.0.2 → 127.0.0.3` para `rebind.test` permanece `SIMULATED` y no demuestra DNS rebinding público ni pinning productivo.
 - HTTPS público→HTTPS, HTTPS→HTTP y HTTPS→interno: `NOT EXECUTED`; no existe fixture TLS seguro y reproducible en este entorno.
 - Browser remoto y crash cleanup: `NOT EXECUTED`.
 - Browser local: contexto efímero, sandbox solicitado y cleanup normal; sin prueba de aislamiento OS-level.
