@@ -1,5 +1,18 @@
 # Changelog
 
+## Phase 8 — Internet & Browser provider and sandbox spike
+
+### Added
+
+- Spike documental para comparar providers de búsqueda, transporte de fetch y opciones de browser/sandbox.
+- Estrategia de pruebas para SSRF, DNS rebinding, egress de solicitudes secundarias, Service Workers, perfiles efímeros, sandbox y cleanup.
+- Límites experimentales y decisiones todavía abiertas antes de integración productiva.
+
+### Status
+
+- PR #10 revisado y mergeado a `main`; merge commit `bb29fb303c83eeed2c73b7d4944479756c2362ea`.
+- No se integraron providers, browser automation, dependencias ni código de producción.
+
 ## Phase 8 — Internet & Browser definition
 
 ### Added
