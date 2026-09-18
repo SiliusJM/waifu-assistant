@@ -17,7 +17,7 @@
 
 ### Status
 
-- Implementación pendiente de revisión externa en `phase/06-personality-system`; no mergeada a `main`.
+- Phase 6 revisada, corregida y mergeada a `main` mediante PR #6.
 
 ### Fixed
 
