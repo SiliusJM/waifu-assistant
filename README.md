@@ -4,7 +4,7 @@ Asistente personal de escritorio desarrollado de forma incremental y segura.
 
 ## Estado
 
-Phase 8 — Internet & Browser está definida y aprobada únicamente a nivel arquitectónico. La definición fue revisada y mergeada a `main` mediante PR #9 (`ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`). No se han añadido browser automation, providers reales, dependencias, UI, persistencia ni código de producción. La implementación requiere todavía los spikes y decisiones técnicas definidos en la fase.
+Phase 8 — Internet & Browser está definida y aprobada a nivel arquitectónico y su spike de providers/sandbox está completado. La definición fue revisada y mergeada a `main` mediante PR #9 (`ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`) y el spike mediante PR #10 (`bb29fb303c83eeed2c73b7d4944479756c2362ea`). No se han añadido browser automation, providers reales, dependencias, UI, persistencia ni código de producción. El siguiente paso requiere pruebas controladas antes de tomar decisiones definitivas.
 
 Documentacion de Phase 8:
 
