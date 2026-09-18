@@ -44,11 +44,13 @@ El coste es una capa de adaptación y una decisión posterior sobre manifests, c
 - Persistir estado visual, conversaciones, assets descargados o preferencias.
 - Crear selector multi-personaje o cambio dinámico.
 
-## Aprobaciones pendientes
+## Decisiones futuras de implementación
 
-- Snapshot compuesto único con `state = reaction`, `baseState` como única fuente de restauración y política latest-wins con secuencia global.
-- Contrato de `AvatarProviderCapabilities` expuesto por `initialize()` y validado por el runtime.
-- Política explícita para providers interrumpibles y no interrumpibles: una operación activa, un pendiente máximo, latest-wins y degradación no bloqueante.
-- Contrato de fallback cuando el renderer no esté disponible.
-- Primer renderer y estrategia de assets en una fase de implementación posterior.
-- Owner de los adaptadores de eventos y campos de identidad expuestos a UI.
+La definición queda aprobada. Permanecen para la fase de implementación o futuros spikes las decisiones sobre:
+
+- contrato concreto de fallback cuando el renderer no esté disponible;
+- primer renderer y estrategia de assets;
+- owner de los adaptadores de eventos;
+- campos de identidad expuestos a la futura UI.
+
+Las decisiones aprobadas de esta definición incluyen el snapshot compuesto, `baseState` como única fuente de restauración, secuencia global, `AvatarProviderCapabilities` y la política para providers interrumpibles y no interrumpibles.
