@@ -1,6 +1,6 @@
 # ADR-008: Streaming Voice & Interruptions
 
-- Estado: implementado en revisión en `phase/05-streaming-voice`.
+- Estado: aceptado e implementado; Phase 5 fue revisada y mergeada en `main` mediante PR #5.
 - Fecha: 2026-09-18.
 
 ## Contexto
