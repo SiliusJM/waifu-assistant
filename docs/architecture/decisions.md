@@ -2,7 +2,7 @@
 
 Las decisiones relevantes se registran como ADRs para preservar contexto y facilitar migraciones.
 
-- ADR-011: definicion desacoplada de Internet & Browser, con search, fetch y browser separados, contenido web no confiable y autorizacion mediante ToolManager; no implementada.
+- ADR-011: definición desacoplada de Internet & Browser, con search, fetch y browser separados, contenido web no confiable y autorización mediante ToolManager; aceptada como definición arquitectónica, no implementada.
 
 - ADR-001: abstracción de proveedor de IA y OmniRoute opcional.
 - ADR-002: toolchain TypeScript estricto para Phase 1.
