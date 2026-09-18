@@ -2,7 +2,7 @@
 
 ## Estado
 
-Provisional / `decision-gate`. No es una decisión final ni autoriza implementación productiva. Preparado en `phase/08-internet-browser-architecture-decision` después del merge de PR #14.
+Provisional / `decision-gate`. No es una decisión final ni autoriza implementación productiva. Se mantiene vigente tras las actualizaciones posteriores de evidencia de Phase 8. Service Worker tiene evidencia `PASS` en localhost; HTTPS sigue `NOT EXECUTED`; DNS/socket pinning sigue `SIMULATED`/`NOT EXECUTED`, y no existe selección productiva definitiva.
 
 ## Contexto
 
