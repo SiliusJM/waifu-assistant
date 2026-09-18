@@ -6,7 +6,7 @@ Phase 8 — Internet & Browser (definición, spikes y controlled/external tests 
 
 ## Status
 
-Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #6. El merge quedó registrado en `532c956e2a407b9e9e540584947a24739490bb03`. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7; el merge quedó registrado en `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La implementación de Phase 7 fue revisada, corregida y mergeada mediante PR #8; el merge quedó registrado en `417a30deca884f55057164475b08b2521d47347d`. La definición de Phase 8 fue revisada y mergeada mediante PR #9; el merge quedó registrado en `ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`. El spike de providers y sandbox fue revisado y mergeado mediante PR #10; el merge quedó registrado en `bb29fb303c83eeed2c73b7d4944479756c2362ea`. Los controlled tests fueron revisados y mergeados mediante PR #11; el merge quedó registrado en `35045dcf9bcd9ff6b31c9bb7908af7872daae5a3`. La ejecución externa fue revisada y mergeada mediante PR #12; el merge quedó registrado en `4be0966603feeb97ad04cb86ea1f1c95f08d1d82`. El egress boundary spike fue revisado y mergeado mediante PR #13; el merge quedó registrado en `cd22a2fd8f8b979c5ef32ecdb63f66ff50a94079`. El egress hardening fue revisado y mergeado mediante PR #14; el merge quedó registrado en `9dab02d72e710e691121da27489474d1ed4ccf3b`. El architecture decision gate fue revisado y mergeado mediante PR #15; el merge quedó registrado en `8709da3cf3957f1f16163a9baecdff7ecb1c7cbd`.
+Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #6. El merge quedó registrado en `532c956e2a407b9e9e540584947a24739490bb03`. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7; el merge quedó registrado en `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La implementación de Phase 7 fue revisada, corregida y mergeada mediante PR #8; el merge quedó registrado en `417a30deca884f55057164475b08b2521d47347d`. La definición de Phase 8 fue revisada y mergeada mediante PR #9; el merge quedó registrado en `ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`. El spike de providers y sandbox fue revisado y mergeado mediante PR #10; el merge quedó registrado en `bb29fb303c83eeed2c73b7d4944479756c2362ea`. Los controlled tests fueron revisados y mergeados mediante PR #11; el merge quedó registrado en `35045dcf9bcd9ff6b31c9bb7908af7872daae5a3`. La ejecución externa fue revisada y mergeada mediante PR #12; el merge quedó registrado en `4be0966603feeb97ad04cb86ea1f1c95f08d1d82`. El egress boundary spike fue revisado y mergeado mediante PR #13; el merge quedó registrado en `cd22a2fd8f8b979c5ef32ecdb63f66ff50a94079`. El egress hardening fue revisado y mergeado mediante PR #14; el merge quedó registrado en `9dab02d72e710e691121da27489474d1ed4ccf3b`. El architecture decision gate fue revisado y mergeado mediante PR #15; el merge quedó registrado en `8709da3cf3957f1f16163a9baecdff7ecb1c7cbd`. La evidencia ejecutable del gate fue revisada y mergeada mediante PR #16; el merge quedó registrado en `068bef145b2a0092f806c98e0dfd623b54bb33c9`.
 
 ## Completed
 
@@ -63,6 +63,7 @@ Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #
 - DNS rebinding sigue siendo una simulación controlada, no pinning real.
 - Egress hardening por canal: 14 PASS, 0 FAIL, 6 NOT EXECUTED y 1 SIMULATED; `internalHits=[]`.
 - Egress architecture decision gate: ADR-012 provisional; `browserContext.route()` queda descartado como boundary único y cualquier BrowserProvider futuro deberá usar una frontera de egress inferior. La selección concreta sigue abierta.
+- Gate evidence: Service Worker real en localhost `PASS`, con request generada, proxy observado, destino `127.0.0.1`, bloqueo e `internalHits=0`.
 - No se seleccionó todavía proxy productivo, aislamiento de red, browser remoto ni combinación definitiva.
 
 ## In Progress
@@ -77,13 +78,13 @@ Ninguno. El architecture decision gate fue documentado y mergeado; la implementa
 - Browser remoto y DNS rebinding real requieren entornos aislados apropiados.
 - El redirect público → interno demuestra que `browserContext.route()` no debe tratarse como frontera completa de egress/SSRF.
 - El egress boundary proxy fixture bloqueó el mismo caso con `internalHits=0`, pero esto no demuestra todavía aislamiento de red del host ni pinning real de sockets.
-- Service Worker mantiene una frontera especial de interception; el fixture egress no pudo ejecutarlo y la arquitectura definitiva debe probar ese camino en un entorno apropiado.
+- El fixture egress original no pudo ejecutar Service Worker, pero el nuevo gate fixture en localhost sí demostró una request de Service Worker observada y bloqueada; todavía falta confirmar el comportamiento en el browser/provider elegido.
 
 ## Next
 
 Sin introducir código de producción todavía:
-1. Probar el boundary inferior en un entorno con Service Worker realmente ejecutable y registrar si `internalHits` permanece en cero por canal.
-2. Ejecutar una prueba controlada de HTTPS→HTTP y revisar el comportamiento de WebSocket/CONNECT con TLS donde corresponda.
+1. Ejecutar pruebas HTTPS controladas y registrar el comportamiento del boundary.
+2. Probar una prueba controlada de HTTPS→HTTP y revisar el comportamiento de WebSocket/CONNECT con TLS donde corresponda.
 3. Probar el mecanismo con resolución efectiva y DNS rebinding real en un entorno aislado; mantener la simulación separada.
 4. Repetir Search con credenciales temporales para Brave, Tavily y Exa y medir las 20 consultas.
 5. Evaluar browser remoto y crash cleanup seguro.
@@ -95,7 +96,7 @@ La definición arquitectónica, el spike de providers/sandbox, los controlled te
 
 La evidencia Fetch/SSRF/DNS/policies es 29/29 PASS en fixtures controlados. El experimento browser local ejecutó 19 comprobaciones: 17 PASS, 1 FAIL y 1 NOT EXECUTED. El FAIL es una evidencia negativa deliberada: el redirect público → interno alcanzó el fixture interno pese al routing configurado. Por tanto, `browserContext.route()` no debe considerarse suficiente para una frontera de egress/SSRF de producción.
 
-Search real, browser remoto, Service Worker en el egress fixture, DNS rebinding real, HTTPS→HTTP, aislamiento de red/host y crash cleanup seguro continúan pendientes. ADR-012 mantiene la fase en `decision-gate`; no hay selección definitiva de provider, browser, sandbox o egress, y no hay implementación de producción.
+Search real, browser remoto, DNS rebinding real, HTTPS→HTTP, aislamiento de red/host y crash cleanup seguro continúan pendientes. Service Worker ya tiene evidencia PASS en el fixture localhost, pero debe confirmarse para el browser/provider elegido. ADR-012 mantiene la fase en `decision-gate`; no hay selección definitiva de provider, browser, sandbox o egress, y no hay implementación de producción.
 
 ## Known Risks
 
