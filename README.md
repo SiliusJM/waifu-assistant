@@ -4,12 +4,14 @@ Asistente personal de escritorio desarrollado de forma incremental y segura.
 
 ## Estado
 
-Phase 8 — Internet & Browser está definida y aprobada a nivel arquitectónico y su spike de providers/sandbox está completado. La definición fue revisada y mergeada a `main` mediante PR #9 (`ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`) y el spike mediante PR #10 (`bb29fb303c83eeed2c73b7d4944479756c2362ea`). No se han añadido browser automation, providers reales, dependencias, UI, persistencia ni código de producción. El siguiente paso requiere pruebas controladas antes de tomar decisiones definitivas.
+Phase 8 — Internet & Browser está definida y aprobada a nivel arquitectónico y su spike de providers/sandbox y controlled tests está completado. La definición fue revisada y mergeada a `main` mediante PR #9 (`ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`), el spike mediante PR #10 (`bb29fb303c83eeed2c73b7d4944479756c2362ea`) y los controlled tests mediante PR #11 (`35045dcf9bcd9ff6b31c9bb7908af7872daae5a3`). La evidencia actual incluye 29/29 comprobaciones controladas de Fetch/SSRF/DNS/policies pasando, pero Search y Browser siguen `NOT EXECUTED` por falta de credenciales/entorno. No se han añadido browser automation, providers reales, dependencias, UI, persistencia ni código de producción.
 
 Documentacion de Phase 8:
 
 - `docs/phases/phase-08-internet-and-browser.md`: definicion, seguridad, lifecycle y criterios; sin implementacion.
 - `docs/adr/ADR-011-internet-and-browser-definition.md`: decision arquitectonica de Internet & Browser.
+- `docs/phase-08-provider-and-sandbox-spike.md`: spike documental de providers, transporte, browser y sandbox.
+- `docs/phase-08-controlled-test-results.md`: resultados del harness controlado y límites de la evidencia.
 
 Phase 3 — Realtime Engine está COMPLETA y mergeada en `main`. La base incluye conversación de texto, tools seguras y un runtime interno de eventos, streaming abstracto, cancelación y concurrencia.
 
@@ -50,7 +52,7 @@ Instalar las dependencias y ejecutar:
 
 ## Próximo paso
 
-La definición de Phase 8 y el spike documental ya fueron revisados y mergeados. El siguiente paso es ejecutar las pruebas controladas del spike antes de seleccionar providers, sandbox, egress y límites definitivos.
+La definición, el spike documental y los controlled tests de Phase 8 ya fueron revisados y mergeados. El siguiente paso es ejecutar, en un entorno aislado y con credenciales temporales cuando corresponda, las pruebas externas de Search y Browser que siguen `NOT EXECUTED`, y después usar esa evidencia para decidir providers, sandbox, egress y límites antes de introducir código de producción.
 
 Los proveedores reales de STT/TTS se evaluarán mediante un spike comparativo independiente y ADR-007; no forman parte del cierre de Phase 4.
 
