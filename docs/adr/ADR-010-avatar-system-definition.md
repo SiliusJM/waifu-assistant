@@ -18,9 +18,13 @@ Separar cinco responsabilidades:
 4. `AvatarProvider` como puerto de renderer;
 5. UI/desktop host y resolución de assets fuera del core.
 
-Los estados visuales iniciales son `IDLE`, `LISTENING`, `SPEAKING` y `REACTION`. `REACTION` conserva un `baseState` para que una reacción no falsifique una interrupción de voz. Los estados `loading`, `error`, `shutting_down` y `stopped` pertenecen al lifecycle técnico, no al estado visual.
+Los estados visuales iniciales son `IDLE`, `LISTENING`, `SPEAKING` y `REACTION`. `REACTION` conserva un `baseState` para que una reacción no falsifique una interrupción de voz. Es una presentación compuesta dentro de la única operación lógica vigente del runtime; no abre una segunda operación concurrente del provider. Al finalizar, `state` vuelve al único valor de verdad `baseState`; no existe `resumeAfterReaction`. Los estados `loading`, `error`, `shutting_down` y `stopped` pertenecen al lifecycle técnico, no al estado visual.
 
-La sincronización usa eventos tipados, correlación, secuencia monotónica y snapshots inmutables. El runtime mantiene como máximo una presentación activa y una pendiente; las actualizaciones visuales obsoletas pueden reemplazarse por latest-wins. No se crea una cola ilimitada.
+La sincronización usa eventos tipados, correlación, snapshots inmutables y una secuencia global asignada por el boundary de normalización. Cada `AvatarSignal` conserva `sourceId` y `sourceSequence` local; el controller usa exclusivamente la secuencia global para ordenar y aplicar latest-wins. El runtime mantiene como máximo una presentación activa y una pendiente; las actualizaciones visuales obsoletas pueden reemplazarse por latest-wins. No se crea una cola ilimitada.
+
+`AvatarProvider.initialize()` expone una instantánea de `AvatarProviderCapabilities`: IDs de `expressions`, IDs de `animations`, `interruptiblePresentation` y `assetKinds` soportados. `AvatarRuntime` valida el snapshot contra esa declaración antes de llamar a `present()`; la capacidad no concede autoridad ni acceso a recursos.
+
+Cualquier estado de lifecycle distinto de `stopped`, incluido `error`, puede iniciar `shutting_down`. Shutdown cancela operaciones, libera recursos y es idempotente; repetirlo durante o después de cleanup no ejecuta una segunda liberación.
 
 Personality System solo aporta metadata controlada (`personalityId`, versión, `CharacterIdentity` para presentación). `PersonalitySnapshot.instructions`, `description` como texto normativo y `VoicePresentationHints` no se convierten en animaciones. Cualquier mapeo futuro debe pertenecer a una política explícita de avatar.
 
@@ -40,7 +44,8 @@ El coste es una capa de adaptación y una decisión posterior sobre manifests, c
 
 ## Aprobaciones pendientes
 
-- Máquina visual con reacción como overlay y política latest-wins.
+- Snapshot compuesto único con `state = reaction`, `baseState` como única fuente de restauración y política latest-wins con secuencia global.
+- Contrato de `AvatarProviderCapabilities` expuesto por `initialize()` y validado por el runtime.
 - Contrato de fallback cuando el renderer no esté disponible.
 - Primer renderer y estrategia de assets en una fase de implementación posterior.
 - Owner de los adaptadores de eventos y campos de identidad expuestos a UI.

@@ -57,7 +57,7 @@ Realtime/Voice/User adapters
        UI / desktop host
 ```
 
-`AvatarController` convierte señales autorizadas y tipadas en un estado visual. `AvatarRuntime` administra lifecycle, cancelación, orden y conexión opcional con el provider. `AvatarProvider` solo presenta snapshots y reporta capacidades/errores. El host de UI contiene ventana, canvas, transporte y permisos de acceso a assets.
+`AvatarController` convierte señales validadas y tipadas en un estado visual. `AvatarRuntime` administra lifecycle, cancelación, orden y conexión opcional con el provider. `AvatarProvider` solo presenta snapshots compuestos y reporta capacidades/errores. `REACTION` no inicia una segunda operación concurrente: el controller produce un único snapshot cuya `state` es `reaction` y cuyo `baseState` conserva `speaking`, `listening` o `idle`. El host de UI contiene ventana, canvas, transporte y permisos de acceso a assets.
 
 El avatar debe ser opcional: el fallo del renderer no bloquea ni cambia el resultado de `AssistantCore`, `RealtimeEngine` o `VoiceService`.
 
@@ -73,7 +73,7 @@ Coordina lifecycle, provider, cancelación de presentaciones y cleanup. Mantiene
 
 ### AvatarProvider
 
-Adaptador del renderer. Presenta un snapshot validado, expone capacidades declaradas y cancela o finaliza operaciones de presentación. No decide estado lógico, permisos ni selección de herramientas.
+Adaptador del renderer. Presenta un snapshot compuesto validado mediante una única operación lógica por runtime, expone capacidades declaradas y cancela o finaliza la presentación vigente. No decide estado lógico, permisos ni selección de herramientas.
 
 ### AvatarPresentationPolicy
 
@@ -102,12 +102,18 @@ type AvatarSignal =
   | {
       readonly type: 'listen_started' | 'listen_stopped' | 'speech_started' | 'speech_stopped' | 'visual_reset';
       readonly correlationId: string;
+      readonly sourceId: string;
+      readonly sourceSequence: number;
+      /** Assigned by the normalization boundary; the controller orders by this value. */
       readonly sequence: number;
       readonly reason?: 'completed' | 'cancelled' | 'interrupted' | 'superseded' | 'failed';
     }
   | {
       readonly type: 'reaction_requested';
       readonly correlationId: string;
+      readonly sourceId: string;
+      readonly sourceSequence: number;
+      /** Assigned by the normalization boundary; the controller orders by this value. */
       readonly sequence: number;
       readonly reactionId: string;
       readonly durationMs?: number;
@@ -123,16 +129,28 @@ interface AvatarPresentationSnapshot {
   readonly intensity?: number;
   readonly sequence: number;
   readonly correlationId?: string;
-  readonly resumeAfterReaction?: AvatarVisualState;
+}
+
+type AvatarAssetKind = 'model' | 'texture' | 'animation' | 'expression' | 'metadata';
+
+interface AvatarProviderCapabilities {
+  readonly expressions: readonly string[];
+  readonly animations: readonly string[];
+  readonly interruptiblePresentation: boolean;
+  readonly assetKinds: readonly AvatarAssetKind[];
 }
 
 interface AvatarProvider {
   readonly name: string;
-  initialize(): Promise<void>;
+  initialize(): Promise<AvatarProviderCapabilities>;
   present(snapshot: AvatarPresentationSnapshot, signal: AbortSignal): Promise<void>;
   shutdown(signal?: AbortSignal): Promise<void>;
 }
 ```
+
+La frontera de normalización asigna `sequence` global monotónica a cada señal después de validar `sourceId` y `sourceSequence`. Cada fuente conserva su contador local para detectar duplicados o saltos, pero el controller nunca compara `sourceSequence` entre fuentes distintas. `AvatarController` usa exclusivamente la `sequence` global para ordenar, descartar señales antiguas y aplicar latest-wins.
+
+`AvatarProvider.initialize()` devuelve una instantánea inmutable de `AvatarProviderCapabilities`. `expressions` y `animations` son IDs que el provider puede presentar; `interruptiblePresentation` indica si puede cancelar la presentación vigente; `assetKinds` enumera las clases de manifest que entiende. `AvatarRuntime` conserva esa instantánea, valida la política contra ella y rechaza o aplica fallback cuando una capacidad no existe. Las capacidades no ejecutan instrucciones ni habilitan permisos.
 
 En una implementación real, todos los valores externos se validarían antes de construir el snapshot. `expressionId` y `animationId` serían IDs del manifest o de una política cerrada, no texto ejecutable ni instrucciones del modelo.
 
@@ -149,7 +167,7 @@ SPEAKING  -> IDLE | LISTENING | REACTION
 REACTION  -> IDLE | LISTENING | SPEAKING
 ```
 
-`REACTION` es una presentación transitoria que conserva `baseState`. Si ocurre durante `SPEAKING`, el avatar puede mostrar una reacción y volver a `SPEAKING` sin detener TTS/playback. La reacción no cambia el estado lógico de voz.
+`REACTION` es una presentación transitoria compuesta que conserva `baseState`. Si ocurre durante `SPEAKING`, el controller reemplaza el snapshot vigente por un único snapshot con `state = reaction` y `baseState = speaking`; no crea una segunda llamada concurrente ni una segunda operación del provider. Al finalizar o cancelarse la reacción, el controller produce el siguiente snapshot con `state = baseState`. `baseState` es la única fuente de verdad para la restauración. La reacción no cambia el estado lógico de voz.
 
 Una transición repetida con el mismo estado y correlación es idempotente y no publica un cambio duplicado. Una solicitud inválida produce un error tipado o se descarta de forma observable, sin mutar parcialmente el estado.
 
@@ -163,7 +181,7 @@ CREATED -> INITIALIZING -> LOADING -> READY
    +----------+-------------+----------+--> SHUTTING_DOWN -> STOPPED
 ```
 
-No se reinicia automáticamente desde `ERROR`; el host debe crear una operación explícita o un runtime nuevo. `SHUTTING_DOWN` cancela presentaciones activas y espera cleanup acotado.
+Todo estado de lifecycle distinto de `STOPPED`, incluido `ERROR`, puede iniciar `SHUTTING_DOWN`. Desde `ERROR`, shutdown debe liberar listeners, timers, provider y presentaciones parciales aunque la inicialización haya fallado. El shutdown es idempotente: una segunda solicitud durante `SHUTTING_DOWN` comparte o espera el mismo cleanup, y una solicitud en `STOPPED` no vuelve a ejecutar recursos. No se reinicia automáticamente desde `ERROR`; el host debe crear una operación explícita o un runtime nuevo.
 
 ## 9. Eventos
 
@@ -225,15 +243,16 @@ No debe consumir `PersonalitySnapshot.instructions`, ni interpretar `description
 
 ## 14. Concurrencia e interrupciones
 
-- Solo una presentación efectiva por runtime; un snapshot pendiente puede ser reemplazado por el más reciente.
-- Una nueva señal de estado cancela la presentación anterior mediante `AbortSignal` y conserva la última secuencia válida.
-- Una reacción durante `SPEAKING` es overlay con `resumeAfterReaction`; no cancela audio.
+- Solo una presentación lógica y una operación `AvatarProvider.present()` efectiva por runtime; un snapshot pendiente puede ser reemplazado por el más reciente.
+- Una nueva señal de estado cancela o reemplaza la presentación anterior mediante `AbortSignal` y conserva la última secuencia global válida.
+- Una reacción durante `SPEAKING` se representa dentro del snapshot compuesto (`state = reaction`, `baseState = speaking`); no inicia un segundo `present()` concurrente ni cancela audio.
+- Al finalizar la reacción, el controller restaura `baseState`; no existe un campo paralelo `resumeAfterReaction`.
 - Una reacción nueva reemplaza la anterior únicamente mediante política latest-wins; no se crea una cola de reacciones en Phase 7.
-- Señales antiguas o con secuencia menor se descartan de forma segura.
+- Señales antiguas se descartan comparando exclusivamente su `sequence` global, asignada en el boundary de normalización; `sourceSequence` solo sirve para diagnóstico y deduplicación local.
 - Shutdown cancela todo y deja el runtime en `STOPPED`.
 - Los eventos duplicados no producen transiciones ni callbacks duplicados.
 
-La ordenación requiere secuencia monotónica por fuente y correlación compartida cuando exista. El avatar no intenta reconstruir una historia completa ni reparar eventos faltantes.
+La ordenación requiere un boundary único de normalización que reciba `sourceId` y `sourceSequence` de cada adaptador, valide la señal y asigne la secuencia global. El avatar no intenta comparar contadores locales de fuentes distintas, reconstruir una historia completa ni reparar eventos faltantes.
 
 ## 15. Synchronization futura
 
