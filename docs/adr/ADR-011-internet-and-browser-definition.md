@@ -37,6 +37,9 @@ Las operaciones son asíncronas y no bloquean `AssistantCore`, `RealtimeEngine` 
 ## Seguridad
 
 - Se validan esquema, URL, redirects, host, tamaño, tipo, destino y número de saltos.
+- Los destinos HTTP(S) que resuelvan a loopback, redes privadas, link-local, multicast, rangos reservados u otros destinos internos se bloquean por defecto; la regla también aplica a cada redirect.
+- La validación considera la resolución DNS efectiva y debe evitar bypasses mediante DNS rebinding, múltiples respuestas DNS o diferencias entre la validación y la conexión.
+- Los rangos concretos y la estrategia técnica de resolución quedan para el spike posterior.
 - `file:`, `data:`, `javascript:`, extensiones, rutas locales y esquemas desconocidos se bloquean por defecto.
 - No se exponen HTML crudo, cookies, tokens, contraseñas, headers privados, formularios completos o prompts internos.
 - No se ejecutan JavaScript arbitrario, shell, `child_process`, `exec`, `spawn`, PowerShell, CMD ni código generado.

@@ -57,7 +57,7 @@ Ninguno. Phase 7 está cerrada y mergeada. El núcleo implementado no incluye re
 
 ## Next
 
-Preparar la definición de Phase 8. No iniciar su implementación hasta que su alcance, contratos, criterios de aceptación y riesgos sean revisados y aprobados.
+La definición de Phase 8 ya está preparada. El siguiente paso es revisar y aprobar su alcance, contratos, criterios de aceptación y riesgos antes de iniciar la implementación.
 
 ## Phase 8 — Internet & Browser
 
