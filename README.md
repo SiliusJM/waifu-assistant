@@ -4,7 +4,7 @@ Asistente personal de escritorio desarrollado de forma incremental y segura.
 
 ## Estado
 
-Phase 8 — Internet & Browser está definida y aprobada a nivel arquitectónico y su spike de providers/sandbox y controlled tests está completado. La definición fue revisada y mergeada a `main` mediante PR #9 (`ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`), el spike mediante PR #10 (`bb29fb303c83eeed2c73b7d4944479756c2362ea`) y los controlled tests mediante PR #11 (`35045dcf9bcd9ff6b31c9bb7908af7872daae5a3`). La evidencia actual incluye 29/29 comprobaciones controladas de Fetch/SSRF/DNS/policies pasando, pero Search y Browser siguen `NOT EXECUTED` por falta de credenciales/entorno. No se han añadido browser automation, providers reales, dependencias, UI, persistencia ni código de producción.
+Phase 8 — Internet & Browser está definida y aprobada a nivel arquitectónico y sus spikes de providers/sandbox, controlled tests y external tests ya fueron revisados y mergeados. La definición fue revisada y mergeada a `main` mediante PR #9 (`ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`), el spike mediante PR #10 (`bb29fb303c83eeed2c73b7d4944479756c2362ea`), los controlled tests mediante PR #11 (`35045dcf9bcd9ff6b31c9bb7908af7872daae5a3`) y la ejecución externa mediante PR #12 (`4be0966603feeb97ad04cb86ea1f1c95f08d1d82`). La evidencia actual incluye 29/29 comprobaciones controladas de Fetch/SSRF/DNS/policies, mientras que la prueba Browser local encontró 17 PASS, 1 FAIL y 1 NOT EXECUTED. Search real, Browser remoto y DNS rebinding real continúan sin ejecutarse. No se han añadido providers de producción, BrowserProvider, egress proxy ni código de producción.
 
 Documentacion de Phase 8:
 
@@ -12,6 +12,7 @@ Documentacion de Phase 8:
 - `docs/adr/ADR-011-internet-and-browser-definition.md`: decision arquitectonica de Internet & Browser.
 - `docs/phase-08-provider-and-sandbox-spike.md`: spike documental de providers, transporte, browser y sandbox.
 - `docs/phase-08-controlled-test-results.md`: resultados del harness controlado y límites de la evidencia.
+- `docs/phase-08-external-test-results.md`: ejecución externa de Search/Browser y limitaciones observadas.
 
 Phase 3 — Realtime Engine está COMPLETA y mergeada en `main`. La base incluye conversación de texto, tools seguras y un runtime interno de eventos, streaming abstracto, cancelación y concurrencia.
 
@@ -52,7 +53,7 @@ Instalar las dependencias y ejecutar:
 
 ## Próximo paso
 
-La definición, el spike documental y los controlled tests de Phase 8 ya fueron revisados y mergeados. El siguiente paso es ejecutar, en un entorno aislado y con credenciales temporales cuando corresponda, las pruebas externas de Search y Browser que siguen `NOT EXECUTED`, y después usar esa evidencia para decidir providers, sandbox, egress y límites antes de introducir código de producción.
+La siguiente etapa no es implementación productiva. Primero se debe convertir la limitación observada del routing del browser en una decisión de seguridad: evaluar un boundary de egress por debajo del browser (por ejemplo, proxy/egress control o aislamiento de red) y comprobar cómo se comporta con redirects y Service Workers. Search real con credenciales temporales y browser remoto/crash cleanup siguen pendientes. Solo después de esa evidencia se documentarán decisiones definitivas antes de introducir herramientas de producción.
 
 Los proveedores reales de STT/TTS se evaluarán mediante un spike comparativo independiente y ADR-007; no forman parte del cierre de Phase 4.
 
