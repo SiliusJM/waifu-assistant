@@ -41,15 +41,9 @@ Instalar las dependencias y ejecutar:
 
 ## Próximo paso
 
-La implementación de Phase 6 está en `phase/06-personality-system` y pendiente de revisión externa. No hacer merge a `main` ni iniciar Phase 7 automáticamente.
+Preparar la definición de Phase 7 — Avatar System. No implementar Phase 7 hasta que su alcance, contratos, criterios de aceptación y riesgos hayan sido revisados y aprobados.
 
 Los proveedores reales de STT/TTS se evaluarán mediante un spike comparativo independiente y ADR-007; no forman parte del cierre de Phase 4.
-
-## Phase 6 - Personality System
-
-La implementación se encuentra en `phase/06-personality-system`, basada en `origin/main`, pendiente de revisión externa. Incluye perfiles declarativos validados, catálogo cerrado de traits/reglas, compilación determinista, snapshots inmutables, registro multi-perfil en memoria e integración opcional con `AssistantCore`. No está mergeada a `main`.
-
-Documentación: `docs/phases/phase-06-personality-system.md` y `docs/adr/ADR-009-personality-system.md`.
 
 ## Documentación
 
