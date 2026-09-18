@@ -87,8 +87,8 @@ Sin introducir código de producción todavía:
 1. Ejecutar pruebas HTTPS controladas para HTTPS→HTTPS, HTTPS→HTTP y HTTPS→interno, y registrar el comportamiento del boundary.
 2. Probar el mecanismo con resolución efectiva y DNS rebinding real en un entorno aislado; mantener la simulación separada.
 3. Repetir Search con credenciales temporales para Brave, Tavily y Exa y medir las 20 consultas.
-5. Evaluar browser remoto y crash cleanup seguro.
-6. Cerrar el `decision-gate` de ADR-012 con evidencia reproducible antes de implementar `WebSearchProvider`, `WebFetchProvider` o `BrowserProvider`.
+4. Evaluar browser remoto y crash cleanup seguro.
+5. Cerrar el `decision-gate` de ADR-012 con evidencia reproducible antes de implementar `WebSearchProvider`, `WebFetchProvider` o `BrowserProvider`.
 
 ## Phase 8 — Internet & Browser
 
