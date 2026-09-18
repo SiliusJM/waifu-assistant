@@ -2,7 +2,7 @@
 
 ## Estado
 
-Aceptada para implementación en Phase 6; implementación en revisión externa en `phase/06-personality-system`. No mergeada.
+Aceptada e implementada. Phase 6 fue revisada y mergeada en `main` mediante PR #6 con merge commit `532c956e2a407b9e9e540584947a24739490bb03`.
 
 ## Contexto
 
