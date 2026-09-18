@@ -83,16 +83,15 @@ Ninguno. El architecture decision gate fue documentado y mergeado; la implementa
 ## Next
 
 Sin introducir código de producción todavía:
-1. Ejecutar pruebas HTTPS controladas y registrar el comportamiento del boundary.
-2. Probar una prueba controlada de HTTPS→HTTP y revisar el comportamiento de WebSocket/CONNECT con TLS donde corresponda.
-3. Probar el mecanismo con resolución efectiva y DNS rebinding real en un entorno aislado; mantener la simulación separada.
-4. Repetir Search con credenciales temporales para Brave, Tavily y Exa y medir las 20 consultas.
+1. Ejecutar pruebas HTTPS controladas para HTTPS→HTTPS, HTTPS→HTTP y HTTPS→interno, y registrar el comportamiento del boundary.
+2. Probar el mecanismo con resolución efectiva y DNS rebinding real en un entorno aislado; mantener la simulación separada.
+3. Repetir Search con credenciales temporales para Brave, Tavily y Exa y medir las 20 consultas.
 5. Evaluar browser remoto y crash cleanup seguro.
 6. Cerrar el `decision-gate` de ADR-012 con evidencia reproducible antes de implementar `WebSearchProvider`, `WebFetchProvider` o `BrowserProvider`.
 
 ## Phase 8 — Internet & Browser
 
-La definición arquitectónica, el spike de providers/sandbox, los controlled tests, la ejecución externa, el egress boundary spike y el egress hardening fueron revisados y mergeados a `main` mediante PR #9, PR #10, PR #11, PR #12, PR #13 y PR #14, respectivamente. El alcance actual sigue siendo preproducción.
+La definición arquitectónica, el spike de providers/sandbox, los controlled tests, la ejecución externa, el egress boundary spike, el egress hardening, el decision-gate y la evidencia ejecutable fueron revisados y mergeados a `main` mediante PR #9, PR #10, PR #11, PR #12, PR #13, PR #14, PR #15 y PR #16, respectivamente. El alcance actual sigue siendo preproducción.
 
 La evidencia Fetch/SSRF/DNS/policies es 29/29 PASS en fixtures controlados. El experimento browser local ejecutó 19 comprobaciones: 17 PASS, 1 FAIL y 1 NOT EXECUTED. El FAIL es una evidencia negativa deliberada: el redirect público → interno alcanzó el fixture interno pese al routing configurado. Por tanto, `browserContext.route()` no debe considerarse suficiente para una frontera de egress/SSRF de producción.
 
