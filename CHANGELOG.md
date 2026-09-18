@@ -25,6 +25,10 @@
 - Preference overrides normalizados y validados en runtime con fallback seguro.
 - `identity.description` conservado como metadata del snapshot, sin compilarse como instrucción normativa.
 
+### Status
+
+- Phase 7 definida y aprobada arquitectónicamente; la implementación de producción todavía no ha comenzado.
+
 Todos los cambios relevantes del proyecto se documentarán aquí.
 
 ## [Unreleased]
@@ -32,6 +36,7 @@ Todos los cambios relevantes del proyecto se documentarán aquí.
 ### Phase 7 - Avatar System definition
 
 - Añadida definición arquitectónica documental para una capa de presentación desacoplada.
+- Definición revisada, corregida y aprobada mediante PR #7; merge commit `c30ccd3bff298c37cc1dd12a01ec775074b83b02`.
 - No se añadieron código de producción, dependencias de renderizado, providers, assets, UI ni cambios funcionales.
 
 ### Added
