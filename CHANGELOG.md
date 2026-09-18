@@ -1,3 +1,26 @@
+## Phase 8 — Internet & Browser egress hardening
+
+### Added
+
+- Harness de hardening con evidencia independiente por canal para navegación, redirects, image, script, stylesheet, iframe, `fetch`/XHR y WebSocket.
+- Resultados explícitos `PASS`/`FAIL`/`NOT EXECUTED`/`SIMULATED`, sin convertir ausencia de Service Worker, HTTPS, browser remoto o crash cleanup en éxito.
+- Cleanup normal de BrowserContext, browser, proxy, fixture y directorio temporal verificado.
+
+### Security / limitations
+
+- Hardening: 14 PASS, 0 FAIL, 6 NOT EXECUTED y 1 SIMULATED; `internalHits=[]`.
+- Service Worker: NOT EXECUTED porque Chromium no expuso `navigator.serviceWorker` para el origen controlado.
+- HTTPS público→HTTPS, HTTPS→HTTP y HTTPS→interno: NOT EXECUTED por ausencia de fixture TLS reproducible.
+- DNS rebinding: SIMULATED; no se afirma resolución real, pinning de socket ni protección completa.
+- Browser remoto: NOT EXECUTED por falta de entorno/credenciales configurados.
+- Crash cleanup: NOT EXECUTED; no se usaron APIs de terminación de procesos, shell ni `child_process`.
+- El baseline con `browserContext.route()` conserva el FAIL conocido del redirect público → interno.
+
+### Status
+
+- PR #14 revisado y mergeado a `main`; merge commit `9dab02d72e710e691121da27489474d1ed4ccf3b`.
+- No se añadieron cambios en `src/`, manifests, lockfiles, APIs de procesos ni código productivo.
+
 # Changelog
 
 ## Phase 8 — Internet & Browser egress boundary spike
