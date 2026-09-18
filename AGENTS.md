@@ -15,11 +15,11 @@ Waifu Assistant es un proyecto incremental y seguro de asistente personal de esc
 
 ## Alcance actual: Phase 8 - Internet & Browser
 
-La definición arquitectónica de Phase 8 fue revisada y aprobada mediante PR #9 y mergeada a `main` en `ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`. El spike de providers y sandbox fue revisado y mergeado mediante PR #10 en `bb29fb303c83eeed2c73b7d4944479756c2362ea`. Los controlled tests del spike fueron revisados y mergeados mediante PR #11 en `35045dcf9bcd9ff6b31c9bb7908af7872daae5a3`.
+La definición arquitectónica de Phase 8 fue revisada y aprobada mediante PR #9 y mergeada a `main` en `ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`. El spike de providers y sandbox fue revisado y mergeado mediante PR #10 en `bb29fb303c83eeed2c73b7d4944479756c2362ea`. Los controlled tests del spike fueron revisados y mergeados mediante PR #11 en `35045dcf9bcd9ff6b31c9bb7908af7872daae5a3`. La ejecución externa fue revisada y mergeada mediante PR #12 en `4be0966603feeb97ad04cb86ea1f1c95f08d1d82`.
 
-La fase continúa sin implementación productiva: no se implementan browser automation, Playwright, Puppeteer, Selenium, WebView, providers reales, scraping, UI, Electron/Vue, persistencia, cookies, credenciales, downloads/uploads, APIs de procesos ni shell. Los controlled tests aportan evidencia local sobre Fetch/SSRF/DNS/policies, pero Search real y Browser real continúan pendientes de ejecución en entornos apropiados.
+La fase continúa sin implementación productiva. Los tests externos aportan evidencia real del entorno browser, pero también muestran que `browserContext.route()` no constituye por sí solo una frontera completa de egress/SSRF: un redirect público → interno alcanzó el fixture interno. Service Worker requiere tratamiento separado. Search real, browser remoto, DNS rebinding real y crash cleanup seguro continúan pendientes.
 
-La definición separa `WebSearchProvider`, `WebFetchProvider` y `BrowserProvider`. Todo acceso futuro deberá pasar por `ToolManager`, tratar el contenido web como dato no confiable, usar permisos `auto`/`confirm`/`block`, aplicar `AbortSignal` y mantener concurrencia acotada. La aprobación de esta definición y los controlled tests no constituye implementación ni habilita navegación real.
+La definición separa `WebSearchProvider`, `WebFetchProvider` y `BrowserProvider`. Todo acceso futuro deberá pasar por `ToolManager`, tratar el contenido web como dato no confiable, usar permisos `auto`/`confirm`/`block`, aplicar `AbortSignal` y mantener concurrencia acotada. La evidencia externa no constituye implementación ni selección definitiva de browser o egress.
 
 ## Historial de Phase 7 — Avatar System
 
