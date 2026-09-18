@@ -2,7 +2,7 @@
 
 ## Estado
 
-Propuesta para revisión humana. Phase 7 está únicamente definida en `phase/07-avatar-system`; no hay implementación ni decisión tecnológica definitiva.
+Aceptada como definición arquitectónica. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7 con merge commit `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. No hay implementación de producción ni decisión tecnológica definitiva sobre renderer.
 
 ## Contexto
 
