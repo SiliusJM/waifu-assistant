@@ -6,7 +6,7 @@ Phase 6 — Personality System.
 
 ## Status
 
-IN PROGRESS. Phase 5 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #5. Phase 6 está implementada en `phase/06-personality-system` y aún no está mergeada.
+COMPLETE. Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #6. El merge quedó registrado en `532c956e2a407b9e9e540584947a24739490bb03`.
 
 ## Completed
 
