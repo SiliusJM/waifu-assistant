@@ -34,6 +34,7 @@ AssistantCore
 - HTTPS público→HTTPS, HTTPS→HTTP y HTTPS→interno: `NOT EXECUTED`; no existe fixture TLS seguro y reproducible en este entorno.
 - Browser remoto y crash cleanup: `NOT EXECUTED`.
 - Browser local: contexto efímero, sandbox solicitado y cleanup normal; sin prueba de aislamiento OS-level.
+- Provisioning experimental: Playwright `1.63.0` pudo iniciar Chrome Headless Shell `153.0.8010.12` con sandbox solicitado; esta disponibilidad local no selecciona un browser productivo ni cierra el gate.
 
 ## No decidido
 
