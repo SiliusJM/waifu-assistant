@@ -2,7 +2,7 @@
 
 ## Estado
 
-DEFINICIÓN APROBADA E IMPLEMENTACIÓN EN REVISIÓN. La definición fue revisada, corregida y mergeada mediante PR #7, con merge commit `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La implementación está en `phase/07-avatar-system-implementation`; añade únicamente el núcleo desacoplado, tests y documentación de cierre. No añade renderer, UI, assets reales ni APIs de procesos.
+COMPLETA. La definición fue revisada, corregida y mergeada mediante PR #7, con merge commit `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La implementación fue revisada, corregida y mergeada mediante PR #8, con merge commit `417a30deca884f55057164475b08b2521d47347d`. El núcleo implementado no añade renderer, UI, assets reales ni APIs de procesos.
 
 ## 1. Objetivo
 
