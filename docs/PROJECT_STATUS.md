@@ -43,6 +43,10 @@ IN PROGRESS. Phase 5 fue revisada técnicamente, corregida y mergeada en `main` 
 - PR #5 revisado, corregido y mergeado a `main`.
 - Correcciones de métricas de interrupción y políticas de buffering revisadas y cubiertas por pruebas.
 - Tests de Phase 5: 72/72 pasando según la verificación realizada antes del merge.
+- Personality System, catálogo de traits/reglas, validación estricta, policy/compiler, snapshots, registry multi-perfil e integración opcional con `AssistantCore` implementados.
+- PR #6 revisado, corregido y mergeado a `main`.
+- Correcciones de inmutabilidad del registry, validación runtime de overrides y separación de `identity.description` revisadas y cubiertas por pruebas.
+- Tests de Phase 6: 83/83 pasando según la verificación realizada antes del merge.
 
 ## In Progress
 
