@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Phase 8 — Internet & Browser (definición arquitectónica aprobada y mergeada; implementación no iniciada).
+Phase 8 — Internet & Browser (definición y spike documental aprobados y mergeados; implementación no iniciada).
 
 ## Status
 
@@ -57,13 +57,13 @@ Ninguno. La definición de Phase 8 está cerrada y mergeada; su implementación 
 
 ## Next
 
-La definición de Phase 8 está aprobada y mergeada. El siguiente paso es preparar la implementación mediante spikes controlados de provider, host/sandbox, límites y confirmación.
+La definición y el spike de Phase 8 están aprobados y mergeados. El siguiente paso es ejecutar pruebas controladas de providers, egress, sandbox, cancelación, límites y confirmación antes de seleccionar decisiones definitivas.
 
 ## Phase 8 — Internet & Browser
 
 La definición arquitectónica de Phase 8 fue revisada y mergeada a `main` mediante PR #9. El alcance sigue siendo documental: separa búsqueda, fetch y browser; define lifecycle, permisos, prompt injection, privacidad, concurrencia e integración con `ToolManager`. No hay código de producción, dependencias, providers reales, automatización, UI, persistencia ni APIs de procesos.
 
-Phase 8 no se considera implementada. La siguiente etapa requiere spikes de provider/sandbox, límites y confirmación antes de introducir herramientas reales.
+Phase 8 no se considera implementada. El spike documental está cerrado; la siguiente etapa requiere pruebas controladas antes de introducir herramientas reales.
 
 ## Known Risks
 
