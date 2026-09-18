@@ -2,7 +2,7 @@
 
 ## Estado
 
-Definición y arquitectura únicamente. Esta propuesta vive en `phase/07-avatar-system`, creada desde `origin/main` en `09305490f93f11d1c1c59627b9d095dd84d06b2e`. Phase 7 todavía no está implementada, no añade código de producción, dependencias ni assets, y no está mergeada a `main`.
+DEFINICIÓN APROBADA. La propuesta fue revisada, corregida y mergeada mediante PR #7, con merge commit `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. Phase 7 todavía no está implementada y la definición no añade código de producción, dependencias ni assets.
 
 ## 1. Objetivo
 
