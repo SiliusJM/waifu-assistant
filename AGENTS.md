@@ -13,11 +13,11 @@ Waifu Assistant es un proyecto incremental y seguro de asistente personal de esc
 - No avanzar a otra fase hasta que la fase activa cumpla todos sus criterios de aceptación.
 - Las tecnologías listadas como candidatas deben evaluarse antes de convertirse en decisiones.
 
-## Alcance actual: definición de Phase 7 - Avatar System
+## Alcance actual: implementación de Phase 7 - Avatar System
 
-Phase 6 — Personality System está cerrada y mergeada en `main` mediante PR #6, con merge commit `532c956e2a407b9e9e540584947a24739490bb03`. No iniciar Phase 7 hasta que su definición, alcance, contratos, criterios de aceptación y riesgos sean revisados y aprobados.
+Phase 6 — Personality System está cerrada y mergeada en `main` mediante PR #6, con merge commit `532c956e2a407b9e9e540584947a24739490bb03`. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7, con merge commit `c30ccd3bff298c37cc1dd12a01ec775074b83b02`.
 
-La rama `phase/07-avatar-system` contiene únicamente definición y documentación arquitectónica. No implementar Avatar System, no añadir dependencias, providers, assets, Electron, Vue, Three.js, Live2D, VTube Studio, UI, persistencia o código de producción hasta aprobación externa.
+La rama `phase/07-avatar-system` contiene la definición histórica de la fase y ya fue mergeada. La implementación de Phase 7 debe comenzar en una rama de implementación separada y seguir exactamente la definición aprobada. No elegir ni añadir renderer concreto, UI, assets, persistencia o capacidades fuera de alcance sin una decisión de fase correspondiente.
 
 Phase 6 implementó únicamente personalidad declarativa: perfiles, validación estricta, política, compilación determinista, snapshots por interacción, registro multi-perfil en memoria, JSON canónico, hints de voz abstractos, logging seguro y tests. No implementó agente, tools nuevas, permisos, seguridad, memoria persistente, emoción, voz real, LLM real, UI, hot reload ni APIs de procesos.
 
@@ -34,6 +34,8 @@ Los proveedores reales de STT/TTS no fueron seleccionados ni integrados. ADR-007
 La definición, alcance, contratos, criterios de aceptación y riesgos de Phase 5 ya fueron revisados y aprobados para esta implementación.
 
 La definición, alcance, contratos, criterios de aceptación y riesgos de Phase 6 fueron revisados y aprobados antes de su implementación.
+
+La definición, alcance, contratos, criterios de aceptación y riesgos de Phase 7 fueron revisados, corregidos y aprobados mediante PR #7 antes de iniciar su implementación.
 
 ## Arquitectura y seguridad
 
