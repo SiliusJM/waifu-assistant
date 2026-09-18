@@ -4,6 +4,7 @@ import { createLogger, type Logger } from '../shared/logger.js';
 import { VoiceError, type VoiceErrorCode } from './voice-errors.js';
 import { RuntimeVoiceOperation } from './voice-operation.js';
 import { VoiceSession } from './voice-session.js';
+import { StreamingVoiceService } from './streaming-voice-service.js';
 import { CANONICAL_AUDIO_FORMAT } from './voice-types.js';
 import type {
   AudioArtifact,
@@ -23,6 +24,13 @@ import type {
   STTProvider,
   TTSProvider,
 } from './voice-types.js';
+import type {
+  StreamingSynthesisRequest,
+  StreamingTranscriptionRequest,
+  StreamingVoiceOperationHandle,
+  StreamingVoiceOperationOptions,
+  StreamingVoiceSynthesisHandle,
+} from './streaming-types.js';
 
 type CanonicalAudioFormat = typeof CANONICAL_AUDIO_FORMAT;
 
@@ -119,6 +127,7 @@ export class VoiceService {
   private readonly defaultTimeoutMs?: number;
   private readonly timeouts: VoiceServiceOptions;
   private readonly logger: Logger;
+  private readonly streaming?: StreamingVoiceService;
 
   constructor(options: VoiceServiceOptions) {
     this.input = options.input;
@@ -130,6 +139,14 @@ export class VoiceService {
     this.timeouts = options;
     this.logger = options.logger ?? createLogger();
     this.events = new EventBus<VoiceEventMap>();
+    if (options.streaming) {
+      this.streaming = new StreamingVoiceService({
+        ...options.streaming,
+        defaultTimeoutMs: options.streaming.defaultTimeoutMs ?? options.defaultTimeoutMs,
+        events: this.events,
+        logger: options.streaming.logger ?? this.logger,
+      });
+    }
     if (!Number.isInteger(this.streamCapacity) || this.streamCapacity < 1) {
       throw new VoiceError('Voice stream capacity must be a positive integer.', 'VOICE_CONFIGURATION_ERROR');
     }
@@ -161,6 +178,30 @@ export class VoiceService {
     const operation = this.createOperation<AudioArtifact>(request.sessionId, options);
     void this.runSynthesis(operation, request, options);
     return operation;
+  }
+
+  startStreamingTranscription(
+    request: StreamingTranscriptionRequest,
+    options: StreamingVoiceOperationOptions = {},
+  ): StreamingVoiceOperationHandle<TranscriptionResult> {
+    if (!this.streaming) {
+      throw new VoiceError('Streaming voice providers are not configured.', 'VOICE_CONFIGURATION_ERROR');
+    }
+    return this.streaming.startTranscription(request, options);
+  }
+
+  startStreamingSynthesis(
+    request: StreamingSynthesisRequest,
+    options: StreamingVoiceOperationOptions = {},
+  ): StreamingVoiceSynthesisHandle {
+    if (!this.streaming) {
+      throw new VoiceError('Streaming voice providers are not configured.', 'VOICE_CONFIGURATION_ERROR');
+    }
+    return this.streaming.startSynthesis(request, options);
+  }
+
+  async shutdownStreaming(reason?: string): Promise<void> {
+    await this.streaming?.shutdown(reason);
   }
 
   private validateSessionId(sessionId: string): void {

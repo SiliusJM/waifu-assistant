@@ -5,12 +5,14 @@ import type {
   SynthesisState,
   TranscriptionState,
   VoiceSessionOptions,
+  VoiceMode,
 } from './voice-types.js';
 
 export class VoiceSession {
   readonly voiceSessionId: string;
   readonly sessionId: string;
   readonly correlationId: string;
+  readonly mode: VoiceMode;
   readonly createdAt: string;
   private currentCaptureState: CaptureState = 'idle';
   private currentTranscriptionState: TranscriptionState = 'idle';
@@ -22,6 +24,7 @@ export class VoiceSession {
     this.voiceSessionId = options.voiceSessionId ?? randomUUID();
     this.sessionId = options.sessionId;
     this.correlationId = options.correlationId;
+    this.mode = options.mode ?? 'batch';
     this.createdAt = new Date().toISOString();
   }
 
