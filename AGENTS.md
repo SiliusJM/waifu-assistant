@@ -21,6 +21,8 @@ La fase continúa sin implementación productiva. Los tests externos muestran qu
 
 La revisión consolidada de ADR-012 queda documentada en `docs/phase-08-decision-gate-review.md`: mantiene el gate provisional, conserva el `FAIL` del redirect bajo `browserContext.route()` y separa evidencia controlada, simulada, limitada y pendiente. No selecciona arquitectura ni autoriza providers productivos.
 
+El spike de network/host isolation (`docs/phase-08-network-host-isolation-capability-spike.md`) solo registra capacidades observadas y limitaciones: señales de Hyper-V/Firewall/vEthernet, Windows Sandbox no confirmado, WSL2 sin distribución y ausencia de evidencia OS-level. No habilitar features, crear VMs/switches, modificar Firewall ni cambiar políticas del host durante este checkpoint. ADR-012 continúa en `decision-gate`.
+
 La definición separa `WebSearchProvider`, `WebFetchProvider` y `BrowserProvider`. Todo acceso futuro deberá pasar por `ToolManager`, tratar el contenido web como dato no confiable, usar permisos `auto`/`confirm`/`block`, aplicar `AbortSignal` y mantener concurrencia acotada. La evidencia externa no constituye implementación ni selección definitiva de browser o egress.
 
 ## Historial de Phase 7 — Avatar System
