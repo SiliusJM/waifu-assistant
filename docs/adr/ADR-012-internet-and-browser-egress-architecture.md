@@ -33,6 +33,7 @@ AssistantCore
 - DNS rebinding/socket pinning: `SIMULATED`/`NOT EXECUTED` para socket real, sin pinning demostrado.
 - DNS/socket egress controlado: el fixture local observó `public.test` → `127.0.0.2` y `socket.remoteAddress=127.0.0.2`; bloqueó `internal.test` → `127.0.0.3` antes de conectar con `internalHits=0`. El cambio controlado `127.0.0.2 → 127.0.0.3` para `rebind.test` permanece `SIMULATED` y no demuestra DNS rebinding público ni pinning productivo.
 - HTTPS público→HTTPS, HTTPS→HTTP y HTTPS→interno: `NOT EXECUTED`; no existe fixture TLS seguro y reproducible en este entorno.
+- La subetapa HTTPS/TLS confirmó que Playwright/Chromium puede iniciar en un contexto efímero, pero no existe un mecanismo de emisión y confianza de certificado X.509 efímero compatible con las restricciones actuales. HTTPS público→HTTPS, HTTPS→HTTP, HTTPS→interno y CONNECT/WebSocket sobre TLS permanecen `NOT EXECUTED`; no se usó `ignoreHTTPSErrors`, no se modificó el trust store y no se añadió una dependencia de certificados.
 - Browser remoto y crash cleanup: `NOT EXECUTED`.
 - Browser local: contexto efímero, sandbox solicitado y cleanup normal; sin prueba de aislamiento OS-level.
 - Provisioning experimental: Playwright `1.63.0` pudo iniciar Chrome Headless Shell `153.0.8010.12` con sandbox solicitado; esta disponibilidad local no selecciona un browser productivo ni cierra el gate.
