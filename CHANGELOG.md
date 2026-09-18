@@ -173,6 +173,23 @@
 - PR #14 revisado y mergeado a `main`; merge commit `9dab02d72e710e691121da27489474d1ed4ccf3b`.
 - No se añadieron cambios en `src/`, manifests, lockfiles, APIs de procesos ni código productivo.
 
+## Phase 8 — Remaining Evidence Assessment
+
+### Added
+
+- Auditoría documental consolidada de los criterios restantes de ADR-012.
+- Clasificación explícita de `PASS`, `FAIL`, `LIMITATION`, `NOT EXECUTED` y `SIMULATED` sin reclasificación.
+- Identificación de requisitos para un entorno externo/dedicado capaz de ejecutar HTTPS/TLS, DNS rebinding/pinning real, aislamiento OS/network, browser remoto y crash cleanup.
+
+### Status / limitations
+
+- PR #26 revisado y mergeado a `main`; merge commit `197cd1c24b6b9499f9a96861c7b5902b2d0d8104`.
+- No existe una prueba nueva segura y útil ejecutable en el entorno actual.
+- HTTPS/TLS y Search permanecen bloqueados; DNS rebinding/pinning real, aislamiento OS/network y browser remoto requieren entorno externo/dedicado; crash cleanup no es ejecutable de forma segura en el entorno actual.
+- Cleanup normal/timeout/shutdown permanece `PASS` controlado y no requiere repetición.
+- ADR-012 permanece provisional en `decision-gate`.
+- No se implementaron providers productivos ni cambios en `src/`.
+
 ## Phase 8 — Network/Host Isolation Evidence
 
 ### Added
