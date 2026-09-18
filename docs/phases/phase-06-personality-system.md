@@ -2,7 +2,7 @@
 
 ## Estado
 
-Implementada en la rama `phase/06-personality-system` sobre `origin/main`, pendiente de revisión externa. Esta documentación no declara Phase 6 completa ni mergeada.
+COMPLETA. Implementada en `phase/06-personality-system`, revisada y corregida, y mergeada en `main` mediante PR #6 con merge commit `532c956e2a407b9e9e540584947a24739490bb03`.
 
 ## Objetivo
 
@@ -58,4 +58,6 @@ La suite determinista cubre validación, catálogo, parámetros tipados, compila
 
 ## Criterio de cierre
 
-La implementación queda pendiente de revisión externa y no se debe hacer merge a `main` ni iniciar Phase 7 automáticamente.
+Verificación de cierre: 83/83 tests; build, lint, typecheck, `npm run check` y `git diff --check` OK; regresión de Phase 1–5 incluida. Las correcciones de revisión externa cubrieron inmutabilidad del registry, validación runtime de overrides y separación de `identity.description` como metadata no normativa.
+
+Phase 6 queda cerrada y mergeada en `main`. No iniciar Phase 7 hasta que su definición, alcance, contratos, criterios de aceptación y riesgos sean revisados y aprobados.
