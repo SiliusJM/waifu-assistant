@@ -104,6 +104,7 @@ export class RuntimeVoiceOperation<T> implements VoiceOperationHandle<T> {
       correlationId: this.correlationId,
       sequence: ++this.sequence,
       occurredAt: new Date().toISOString(),
+      monotonicMs: performance.now(),
       type,
       payload,
     } as VoiceEventEnvelope<K>;

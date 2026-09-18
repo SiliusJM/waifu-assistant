@@ -1,5 +1,6 @@
 import type { Logger } from '../shared/logger.js';
 import type { VoiceSession } from './voice-session.js';
+import type { StreamingVoiceProviders } from './streaming-types.js';
 
 export const AUDIO_ENCODINGS = ['pcm_s16le', 'wav', 'mp3', 'opus'] as const;
 export type AudioEncoding = (typeof AUDIO_ENCODINGS)[number];
@@ -22,6 +23,17 @@ export interface AudioChunk {
   readonly sequence: number;
   readonly capturedAt: string;
 }
+
+export type VoiceMode = 'batch' | 'streaming';
+
+export type VoiceTerminationReason =
+  | 'completed'
+  | 'cancelled'
+  | 'timeout'
+  | 'interrupted'
+  | 'superseded'
+  | 'shutdown'
+  | 'failed';
 
 export interface AudioArtifact {
   readonly data: Uint8Array;
@@ -112,8 +124,36 @@ export interface VoiceEventPayloadMap {
   };
   readonly audio_output_started: { readonly format: AudioFormat; readonly byteLength: number };
   readonly audio_output_stopped: { readonly reason: 'completed' | 'cancelled' | 'failed' };
+  readonly audio_chunk_received: {
+    readonly source: 'capture' | 'tts';
+    readonly sequence: number;
+    readonly byteLength: number;
+    readonly format: AudioFormat;
+    readonly timestampMs: number;
+  };
+  readonly transcription_final: { readonly text: string };
+  readonly tts_chunk_ready: {
+    readonly sequence: number;
+    readonly byteLength: number;
+    readonly format: AudioFormat;
+    readonly timestampMs: number;
+  };
+  readonly playback_started: { readonly deviceId: string; readonly format: AudioFormat };
+  readonly playback_progress: {
+    readonly deviceId: string;
+    readonly sequence: number;
+    readonly playedBytes: number;
+    readonly bufferedBytes: number;
+  };
+  readonly interruption_requested: { readonly reason: Extract<VoiceTerminationReason, 'interrupted' | 'superseded'> };
+  readonly interruption_completed: { readonly reason: Extract<VoiceTerminationReason, 'interrupted' | 'superseded'> };
+  readonly operation_superseded: { readonly replacementOperationId: string };
   readonly voice_completed: { readonly state: 'completed' };
-  readonly voice_cancelled: { readonly state: 'cancelled'; readonly reason?: string };
+  readonly voice_cancelled: {
+    readonly state: 'cancelled';
+    readonly reason?: string;
+    readonly reasonCode?: Exclude<VoiceTerminationReason, 'completed' | 'failed'>;
+  };
   readonly voice_failed: { readonly state: 'failed'; readonly code: string; readonly message: string };
 }
 
@@ -125,6 +165,7 @@ export interface VoiceEventEnvelope<K extends VoiceEventType = VoiceEventType> {
   readonly correlationId: string;
   readonly sequence: number;
   readonly occurredAt: string;
+  readonly monotonicMs: number;
   readonly type: K;
   readonly payload: VoiceEventPayloadMap[K];
 }
@@ -139,7 +180,11 @@ export type VoiceEvent = {
 
 export type VoiceOperationResult<T> =
   | { readonly status: 'completed'; readonly value: T }
-  | { readonly status: 'cancelled'; readonly reason?: string }
+  | {
+      readonly status: 'cancelled';
+      readonly reason?: string;
+      readonly reasonCode?: Exclude<VoiceTerminationReason, 'completed' | 'failed'>;
+    }
   | { readonly status: 'failed'; readonly code: string; readonly message: string };
 
 export interface VoiceOperationHandle<T> {
@@ -158,6 +203,7 @@ export interface VoiceSessionOptions {
   readonly sessionId: string;
   readonly voiceSessionId?: string;
   readonly correlationId: string;
+  readonly mode?: VoiceMode;
 }
 
 export interface VoiceTranscriptionRequest {
@@ -188,4 +234,5 @@ export interface VoiceServiceOptions extends VoiceTimeoutOptions {
   readonly streamCapacity?: number;
   readonly defaultTimeoutMs?: number;
   readonly logger?: Logger;
+  readonly streaming?: StreamingVoiceProviders;
 }

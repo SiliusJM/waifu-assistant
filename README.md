@@ -8,6 +8,8 @@ Phase 3 — Realtime Engine está COMPLETA y mergeada en `main`. La base incluye
 
 Phase 4 — Voice Service está COMPLETA y mergeada en `main` mediante PR #4, con merge commit `1ec4384dc529ed303e85413e7969a3896c741a69`. Incluye contratos desacoplados de audio, STT, TTS y reproducción, `VoiceService`, `VoiceSession`, `VoiceError`, lifecycle, cancelación, timeout por etapa, cleanup, logging seguro, eventos correlacionados y mocks deterministas. Los proveedores reales de voz no fueron seleccionados ni integrados.
 
+Phase 5 — Streaming Voice & Interruptions está implementada en `phase/05-streaming-voice` y pendiente de revisión externa. Añade streaming de audio/STT/TTS, playback incremental, backpressure, interruption/supersede, coordinación por sesión/dispositivo, cancelación jerárquica y métricas. No está mergeada en `main`.
+
 ## Principios
 
 Seguridad, integridad del proyecto, correctitud, estabilidad, baja latencia, mantenibilidad, experiencia de usuario, coste y nuevas capacidades, en ese orden.
@@ -37,7 +39,7 @@ Instalar las dependencias y ejecutar:
 
 ## Próximo paso
 
-Realizar el checkpoint post-merge de Phase 4 y preparar la definición de Phase 5 — Streaming Voice & Interruptions. No implementar Phase 5 hasta que su alcance, contratos, criterios de aceptación y riesgos hayan sido revisados y aprobados.
+Revisar externamente la implementación de Phase 5. No hacer merge a `main` ni iniciar Phase 6 automáticamente.
 
 Los proveedores reales de STT/TTS se evaluarán mediante un spike comparativo independiente y ADR-007; no forman parte del cierre de Phase 4.
 
@@ -54,3 +56,4 @@ Los proveedores reales de STT/TTS se evaluarán mediante un spike comparativo in
 - `docs/phases/phase-02-tool-system.md`: alcance y criterios de aceptación de Phase 2.
 - `docs/phases/phase-03-realtime-engine.md`: alcance, criterios y cierre de Phase 3.
 - `docs/phases/phase-04-voice-service.md`: alcance, contratos, seguridad y criterios de Phase 4.
+- `docs/phases/phase-05-streaming-voice-and-interruptions.md`: alcance, contratos, seguridad y verificación de Phase 5.

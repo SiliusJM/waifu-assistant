@@ -50,6 +50,8 @@ Verificación reportada para la rama de Phase 4:
 
 ## Resultado
 
+El diseño de Phase 5 fue revisado y aprobado posteriormente; su implementación se realiza únicamente en la rama `phase/05-streaming-voice` y no altera el cierre de Phase 4 en `main`.
+
 Phase 4 está COMPLETA y mergeada en `main` mediante PR #4, con merge commit `1ec4384dc529ed303e85413e7969a3896c741a69`.
 
-Los proveedores reales de STT/TTS siguen fuera del alcance de esta implementación y serán evaluados mediante un spike comparativo posterior. No se inicia Phase 5 hasta revisar y aprobar su definición, alcance, contratos y criterios de aceptación.
+Los proveedores reales de STT/TTS siguen fuera del alcance de esta implementación y serán evaluados mediante un spike comparativo posterior. Phase 5 se implementa en su propia rama y no altera este cierre.
