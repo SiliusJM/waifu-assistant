@@ -110,7 +110,7 @@ No se instaló una distribución, no se ejecutó Chromium en WSL2 y no se midió
 
 Las comprobaciones de solo lectura demostraron únicamente:
 
-- Windows 10 Pro build `26200`, arquitectura de 64 bits.
+- Se observaron build `26200` y arquitectura de 64 bits, pero la identificación exacta de Windows permanece `LIMITATION` por señales inconsistentes.
 - La sesión actual no tiene privilegios administrativos observables.
 - Los cmdlets Hyper-V están instalados/disponibles, pero su uso administrativo/consulta fue rechazado por permisos.
 - Servicios Hyper-V/HNS y Firewall relevantes están en ejecución.
