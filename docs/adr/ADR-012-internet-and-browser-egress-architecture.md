@@ -47,6 +47,8 @@ La misma revisión conserva como evidencia negativa el redirect público→inter
 
 Esta clasificación no cambia la decisión provisional: no selecciona proxy, gateway, browser local/remoto, Playwright productivo, sandbox, aislamiento de red ni provider.
 
+El spike de capacidad de network/host isolation confirmó señales de Hyper-V (cmdlets, servicios y adaptador virtual), pero la sesión actual no es administrativa y no puede administrar/confirmar VMs o switches. `WindowsSandbox.exe` no está presente en la ruta consultada y su feature no pudo verificarse sin elevación; WSL2 reporta versión 2 pero no tiene una distribución instalada. No se habilitó ningún componente ni se obtuvo evidencia OS-level. La capacidad observada no cambia el `decision-gate` ni selecciona un mecanismo.
+
 ## No decidido
 
 Este ADR no decide:
