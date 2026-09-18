@@ -6,7 +6,7 @@ Phase 8 — Internet & Browser (definición y spike documental aprobados y merge
 
 ## Status
 
-Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #6. El merge quedó registrado en `532c956e2a407b9e9e540584947a24739490bb03`. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7; el merge quedó registrado en `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La implementación de Phase 7 fue revisada, corregida y mergeada mediante PR #8; el merge quedó registrado en `417a30deca884f55057164475b08b2521d47347d`. La definición de Phase 8 fue revisada y mergeada mediante PR #9; el merge quedó registrado en `ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`.
+Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #6. El merge quedó registrado en `532c956e2a407b9e9e540584947a24739490bb03`. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7; el merge quedó registrado en `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La implementación de Phase 7 fue revisada, corregida y mergeada mediante PR #8; el merge quedó registrado en `417a30deca884f55057164475b08b2521d47347d`. La definición de Phase 8 fue revisada y mergeada mediante PR #9; el merge quedó registrado en `ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`. El spike de providers y sandbox fue revisado y mergeado mediante PR #10; el merge quedó registrado en `bb29fb303c83eeed2c73b7d4944479756c2362ea`.
 
 ## Completed
 
@@ -61,7 +61,7 @@ La definición y el spike de Phase 8 están aprobados y mergeados. El siguiente 
 
 ## Phase 8 — Internet & Browser
 
-La definición arquitectónica de Phase 8 fue revisada y mergeada a `main` mediante PR #9. El alcance sigue siendo documental: separa búsqueda, fetch y browser; define lifecycle, permisos, prompt injection, privacidad, concurrencia e integración con `ToolManager`. No hay código de producción, dependencias, providers reales, automatización, UI, persistencia ni APIs de procesos.
+La definición arquitectónica de Phase 8 y el spike de providers/sandbox fueron revisados y mergeados a `main` mediante PR #9 y PR #10, respectivamente. El alcance sigue siendo documental: separa búsqueda, fetch y browser; define lifecycle, permisos, prompt injection, privacidad, concurrencia e integración con `ToolManager`. No hay código de producción, dependencias, providers reales, automatización, UI, persistencia ni APIs de procesos.
 
 Phase 8 no se considera implementada. El spike documental está cerrado; la siguiente etapa requiere pruebas controladas antes de introducir herramientas reales.
 
