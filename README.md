@@ -4,7 +4,7 @@ Asistente personal de escritorio desarrollado de forma incremental y segura.
 
 ## Estado
 
-Phase 8 — Internet & Browser esta definida unicamente a nivel arquitectonico en la rama `phase/08-internet-browser`. No se han anadido browser automation, providers reales, dependencias, UI, persistencia ni codigo de produccion. Su implementacion requiere una aprobacion posterior.
+Phase 8 — Internet & Browser está definida y aprobada únicamente a nivel arquitectónico. La definición fue revisada y mergeada a `main` mediante PR #9 (`ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`). No se han añadido browser automation, providers reales, dependencias, UI, persistencia ni código de producción. La implementación requiere todavía los spikes y decisiones técnicas definidos en la fase.
 
 Documentacion de Phase 8:
 
@@ -50,7 +50,7 @@ Instalar las dependencias y ejecutar:
 
 ## Próximo paso
 
-La definición de Phase 8 ya está preparada. El siguiente paso es revisarla y aprobar su alcance, contratos, criterios de aceptación y riesgos antes de iniciar la implementación.
+La definición de Phase 8 ya fue revisada, aprobada y mergeada. El siguiente paso es preparar su implementación mediante los spikes de provider, host/sandbox, límites y confirmaciones definidos en la fase, sin introducir todavía decisiones no aprobadas.
 
 Los proveedores reales de STT/TTS se evaluarán mediante un spike comparativo independiente y ADR-007; no forman parte del cierre de Phase 4.
 
