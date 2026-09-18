@@ -1,3 +1,18 @@
+## Phase 8 — Internet & Browser architecture gate evidence
+
+### Added
+
+- Fixture ejecutable de Service Worker real en localhost atravesando el boundary de egress.
+- Evidencia individual de request generada, observación por proxy, destino, bloqueo e `internalHits=0`.
+
+### Status / limitations
+
+- PR #16 revisado y mergeado a `main`; merge commit `068bef145b2a0092f806c98e0dfd623b54bb33c9`.
+- Service Worker gate: PASS en el fixture localhost.
+- HTTPS, DNS rebinding real/socket pinning, aislamiento OS-level/host, browser remoto, crash cleanup y Search real continúan pendientes.
+- ADR-012 permanece provisional; todavía no se selecciona proxy, browser, sandbox ni aislamiento definitivo.
+- No se implementaron providers productivos ni cambios en `src/`.
+
 ## Phase 8 — Internet & Browser architecture decision gate
 
 ### Added
