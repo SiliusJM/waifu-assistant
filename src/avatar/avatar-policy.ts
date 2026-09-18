@@ -9,10 +9,14 @@ import type {
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
+export function isControlledAvatarId(value: string): boolean {
+  return ID_PATTERN.test(value);
+}
+
 function validateMapping(mapping: AvatarPresentationMapping | undefined): AvatarPresentationMapping | undefined {
   if (!mapping) return undefined;
   for (const id of [mapping.expressionId, mapping.animationId]) {
-    if (id !== undefined && !ID_PATTERN.test(id)) {
+    if (id !== undefined && !isControlledAvatarId(id)) {
       throw new AvatarError('Avatar presentation IDs must use the controlled identifier format.', 'AVATAR_CONFIGURATION_ERROR');
     }
   }

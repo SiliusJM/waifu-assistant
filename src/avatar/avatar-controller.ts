@@ -2,6 +2,7 @@ import { AvatarPresentationPolicy } from './avatar-policy.js';
 import type {
   AvatarBaseState,
   AvatarCharacterProfile,
+  AvatarControllerPreparation,
   AvatarControllerResult,
   AvatarLifecycleState,
   AvatarPresentationSnapshot,
@@ -41,36 +42,56 @@ export class AvatarController {
     this.runtimeId = options.runtimeId;
     this.profile = Object.freeze({ ...options.characterProfile });
     this.policy = options.policy ?? new AvatarPresentationPolicy();
-    this.snapshot = this.createSnapshot(0, undefined);
+    this.snapshot = this.createSnapshot('IDLE', 'IDLE', 0, undefined);
   }
 
   get lifecycleState(): AvatarLifecycleState { return this.lifecycle; }
   get currentSnapshot(): AvatarPresentationSnapshot { return this.snapshot; }
+  get visualState(): AvatarVisualState { return this.state; }
+  get baseVisualState(): AvatarBaseState { return this.baseState; }
+  get lastGlobalSequence(): number { return this.lastSequence; }
 
   setLifecycleState(state: AvatarLifecycleState): void {
     this.lifecycle = state;
   }
 
-  apply(signal: AvatarSignal): AvatarControllerResult {
+  prepare(signal: AvatarSignal): AvatarControllerPreparation {
     if (this.lifecycle !== 'READY') return { accepted: false, reason: 'lifecycle' };
-    if (!Number.isSafeInteger(signal.sequence) || signal.sequence <= 0) {
-      return { accepted: false, reason: 'old_signal' };
-    }
+    if (!Number.isSafeInteger(signal.sequence) || signal.sequence <= 0) return { accepted: false, reason: 'old_signal' };
     if (signal.sequence < this.lastSequence) return { accepted: false, reason: 'old_signal' };
     if (signal.sequence === this.lastSequence) return { accepted: false, reason: 'duplicate' };
 
     const next = this.nextState(signal);
-    if (!next) {
-      this.lastSequence = signal.sequence;
-      return { accepted: false, reason: 'invalid_transition' };
-    }
+    if (!next) return { accepted: false, reason: 'invalid_transition', signal };
+    const snapshot = this.createSnapshot(
+      next.state,
+      next.baseState,
+      signal.sequence,
+      signal.correlationId,
+      signal.type === 'reaction_requested' ? signal.reactionId : undefined,
+    );
+    return Object.freeze({ accepted: true, signal, previous: this.snapshot, snapshot });
+  }
 
-    const previous = this.snapshot;
-    this.state = next.state;
-    this.baseState = next.baseState;
-    this.lastSequence = signal.sequence;
-    this.snapshot = this.createSnapshot(signal.sequence, signal.correlationId, signal.type === 'reaction_requested' ? signal.reactionId : undefined);
-    return { accepted: true, previous, snapshot: this.snapshot };
+  commit(preparation: AvatarControllerPreparation & { readonly accepted: true }, snapshot = preparation.snapshot): AvatarControllerResult {
+    if (this.lifecycle !== 'READY') return { accepted: false, reason: 'lifecycle' };
+    if (preparation.signal.sequence <= this.lastSequence) {
+      return { accepted: false, reason: preparation.signal.sequence === this.lastSequence ? 'duplicate' : 'old_signal' };
+    }
+    this.state = snapshot.state;
+    this.baseState = snapshot.baseState;
+    this.lastSequence = preparation.signal.sequence;
+    this.snapshot = snapshot;
+    return { accepted: true, previous: preparation.previous, snapshot };
+  }
+
+  apply(signal: AvatarSignal): AvatarControllerResult {
+    const preparation = this.prepare(signal);
+    if (!preparation.accepted) {
+      if (preparation.reason === 'invalid_transition' && preparation.signal) this.lastSequence = preparation.signal.sequence;
+      return preparation;
+    }
+    return this.commit(preparation);
   }
 
   private nextState(signal: AvatarSignal): { readonly state: AvatarVisualState; readonly baseState: AvatarBaseState } | undefined {
@@ -91,13 +112,19 @@ export class AvatarController {
     return { state: target, baseState: target };
   }
 
-  private createSnapshot(sequence: number, correlationId?: string, reactionId?: string): AvatarPresentationSnapshot {
-    const mapping = this.policy.resolve(this.profile, this.state, this.baseState, reactionId);
+  private createSnapshot(
+    state: AvatarVisualState,
+    baseState: AvatarBaseState,
+    sequence: number,
+    correlationId?: string,
+    reactionId?: string,
+  ): AvatarPresentationSnapshot {
+    const mapping = this.policy.resolve(this.profile, state, baseState, reactionId);
     return freezeSnapshot({
       runtimeId: this.runtimeId,
       characterId: this.profile.characterId,
-      state: this.state,
-      baseState: this.baseState,
+      state,
+      baseState,
       ...mapping,
       sequence,
       ...(correlationId ? { correlationId } : {}),

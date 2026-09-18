@@ -3,12 +3,13 @@ import { EventBus } from '../realtime/event-bus.js';
 import { createLogger, type Logger } from '../shared/logger.js';
 import { AvatarController } from './avatar-controller.js';
 import { AvatarError, isAbortError } from './avatar-errors.js';
-import { AvatarPresentationPolicy } from './avatar-policy.js';
+import { AvatarPresentationPolicy, isControlledAvatarId } from './avatar-policy.js';
 import type {
   AvatarEvent,
   AvatarEventMap,
   AvatarEventPayloadMap,
   AvatarLifecycleState,
+  AvatarAssetKind,
   AvatarPresentationSnapshot,
   AvatarProviderCapabilities,
   AvatarRuntimeOptions,
@@ -16,13 +17,47 @@ import type {
   AvatarSignalInput,
 } from './avatar-types.js';
 
-function freezeCapabilities(capabilities: AvatarProviderCapabilities): AvatarProviderCapabilities {
-  return Object.freeze({
-    expressions: Object.freeze([...capabilities.expressions]),
-    animations: Object.freeze([...capabilities.animations]),
-    interruptiblePresentation: capabilities.interruptiblePresentation,
-    assetKinds: Object.freeze([...capabilities.assetKinds]),
+const AVATAR_ASSET_KINDS = new Set(['model', 'texture', 'animation', 'expression', 'metadata']);
+
+function freezeCapabilities(value: unknown): AvatarProviderCapabilities {
+  if (!value || typeof value !== 'object') {
+    throw new AvatarError('Avatar provider capabilities must be an object.', 'AVATAR_CONFIGURATION_ERROR');
+  }
+  const candidate = value as Record<string, unknown>;
+  if (!Array.isArray(candidate.expressions) || !Array.isArray(candidate.animations) || !Array.isArray(candidate.assetKinds) || typeof candidate.interruptiblePresentation !== 'boolean') {
+    throw new AvatarError('Avatar provider capabilities have an invalid shape.', 'AVATAR_CONFIGURATION_ERROR');
+  }
+
+  const expressions = validateCapabilityIds(candidate.expressions, 'expressions');
+  const animations = validateCapabilityIds(candidate.animations, 'animations');
+  const assetKinds = candidate.assetKinds.map((kind): AvatarAssetKind => {
+    if (typeof kind !== 'string' || !AVATAR_ASSET_KINDS.has(kind)) {
+      throw new AvatarError('Avatar provider declared an unsupported asset kind.', 'AVATAR_CAPABILITY_ERROR');
+    }
+    return kind as AvatarAssetKind;
   });
+  if (new Set(assetKinds).size !== assetKinds.length) {
+    throw new AvatarError('Avatar provider declared duplicate asset kinds.', 'AVATAR_CONFIGURATION_ERROR');
+  }
+  return Object.freeze({
+    expressions: Object.freeze(expressions),
+    animations: Object.freeze(animations),
+    interruptiblePresentation: candidate.interruptiblePresentation,
+    assetKinds: Object.freeze(assetKinds),
+  });
+}
+
+function validateCapabilityIds(values: unknown[], field: 'expressions' | 'animations'): string[] {
+  const ids = values.map((value) => {
+    if (typeof value !== 'string' || !isControlledAvatarId(value)) {
+      throw new AvatarError(`Avatar provider declared an invalid ${field} ID.`, 'AVATAR_CONFIGURATION_ERROR');
+    }
+    return value;
+  });
+  if (new Set(ids).size !== ids.length) {
+    throw new AvatarError(`Avatar provider declared duplicate ${field} IDs.`, 'AVATAR_CONFIGURATION_ERROR');
+  }
+  return ids;
 }
 
 function abortError(): Error {
@@ -61,6 +96,7 @@ export class AvatarRuntime {
   private readonly shutdownTimeoutMs: number;
   private lifecycle: AvatarLifecycleState = 'CREATED';
   private capabilities?: AvatarProviderCapabilities;
+  private initializationController?: AbortController;
   private active?: ActivePresentation;
   private pending?: AvatarPresentationSnapshot;
   private eventSequence = 0;
@@ -95,19 +131,31 @@ export class AvatarRuntime {
     if (this.lifecycle === 'READY') return;
     if (this.lifecycle !== 'CREATED') throw new AvatarError('Avatar runtime cannot be initialized from its current lifecycle.', 'AVATAR_LIFECYCLE_ERROR');
     this.transition('INITIALIZING');
+    const initializationController = new AbortController();
+    this.initializationController = initializationController;
+    const abortInitialization = (): void => initializationController.abort(signal?.reason);
+    signal?.addEventListener('abort', abortInitialization, { once: true });
     try {
-      const capabilities = await this.provider.initialize(signal);
-      if (signal?.aborted) throw abortError();
+      if (signal?.aborted) abortInitialization();
+      const capabilities = await this.provider.initialize(initializationController.signal);
+      if (initializationController.signal.aborted || !this.isInitializing()) {
+        throw abortError();
+      }
       this.capabilities = freezeCapabilities(capabilities);
+      if (!this.isInitializing()) throw abortError();
       this.transition('LOADING');
+      if (!this.isLoading()) throw abortError();
       this.transition('READY');
       this.publish('avatar_initialized', { provider: this.provider.name });
       this.publish('avatar_ready', { provider: this.provider.name, lifecycle: 'READY' });
     } catch (error) {
       if (!this.isShuttingDown()) this.transition('ERROR');
       const avatarError = isAbortError(error) ? new AvatarError('Avatar initialization was cancelled.', 'AVATAR_CANCELLATION_ERROR', false, error) : this.asAvatarError(error, 'initialize');
-      this.publishError(avatarError, 'initialize');
+      if (!this.isShuttingDown()) this.publishError(avatarError, 'initialize');
       throw avatarError;
+    } finally {
+      signal?.removeEventListener('abort', abortInitialization);
+      if (this.initializationController === initializationController) this.initializationController = undefined;
     }
   }
 
@@ -118,14 +166,27 @@ export class AvatarRuntime {
 
   accept(signal: AvatarSignal): boolean {
     if (this.lifecycle !== 'READY') return false;
-    let result: ReturnType<AvatarController['apply']>;
+    let preparation: ReturnType<AvatarController['prepare']>;
     try {
-      result = this.controller.apply(signal);
+      preparation = this.controller.prepare(signal);
     } catch (error) {
       const avatarError = error instanceof AvatarError ? error : new AvatarError('Avatar state validation failed.', 'AVATAR_STATE_ERROR', false, error);
       this.publishError(avatarError, 'present');
       return false;
     }
+    if (!preparation.accepted) {
+      if (preparation.reason === 'invalid_transition' && preparation.signal) this.controller.apply(preparation.signal);
+      return false;
+    }
+    let snapshot: AvatarPresentationSnapshot;
+    try {
+      snapshot = this.validateCapabilities(preparation.snapshot);
+    } catch (error) {
+      const avatarError = error instanceof AvatarError ? error : new AvatarError('Avatar capability validation failed.', 'AVATAR_CAPABILITY_ERROR', false, error);
+      this.publishError(avatarError, 'present');
+      return false;
+    }
+    const result = this.controller.commit(preparation, snapshot);
     if (!result.accepted) return false;
     this.publish('avatar_state_changed', {
       from: result.previous.state,
@@ -137,14 +198,7 @@ export class AvatarRuntime {
     if (signal.type === 'reaction_requested') {
       this.publish('avatar_reaction_requested', { reactionId: signal.reactionId, sequence: signal.sequence, correlationId: signal.correlationId });
     }
-    try {
-      const snapshot = this.validateCapabilities(result.snapshot);
-      this.schedule(snapshot);
-    } catch (error) {
-      const avatarError = error instanceof AvatarError ? error : new AvatarError('Avatar capability validation failed.', 'AVATAR_CAPABILITY_ERROR', false, error);
-      this.publishError(avatarError, 'present');
-      return false;
-    }
+    this.schedule(snapshot);
     return true;
   }
 
@@ -157,6 +211,7 @@ export class AvatarRuntime {
 
   private async performShutdown(signal?: AbortSignal): Promise<void> {
     this.transition('SHUTTING_DOWN');
+    this.initializationController?.abort(signal?.reason);
     this.pending = undefined;
     this.active?.controller.abort(signal?.reason);
     if (this.active) await this.withTimeout(this.active.promise, this.shutdownTimeoutMs).catch(() => undefined);
@@ -240,6 +295,14 @@ export class AvatarRuntime {
 
   private isShuttingDown(): boolean {
     return this.lifecycle === 'SHUTTING_DOWN' || this.lifecycle === 'STOPPED';
+  }
+
+  private isInitializing(): boolean {
+    return this.lifecycle === 'INITIALIZING';
+  }
+
+  private isLoading(): boolean {
+    return this.lifecycle === 'LOADING';
   }
 
   private publish<K extends keyof AvatarEventPayloadMap>(type: K, payload: AvatarEventPayloadMap[K]): void {

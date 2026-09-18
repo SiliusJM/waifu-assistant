@@ -160,3 +160,16 @@ export type AvatarEvent = {
 export type AvatarControllerResult =
   | { readonly accepted: true; readonly snapshot: AvatarPresentationSnapshot; readonly previous: AvatarPresentationSnapshot }
   | { readonly accepted: false; readonly reason: 'old_signal' | 'duplicate' | 'lifecycle' | 'invalid_transition' };
+
+export type AvatarControllerPreparation =
+  | {
+      readonly accepted: true;
+      readonly signal: AvatarSignal;
+      readonly previous: AvatarPresentationSnapshot;
+      readonly snapshot: AvatarPresentationSnapshot;
+    }
+  | {
+      readonly accepted: false;
+      readonly reason: 'old_signal' | 'duplicate' | 'lifecycle' | 'invalid_transition';
+      readonly signal?: AvatarSignal;
+    };

@@ -7,6 +7,7 @@ import {
   AvatarSignalNormalizer,
   MockAvatarProvider,
   type AvatarCharacterProfile,
+  type AvatarProvider,
   type AvatarProviderCapabilities,
   type AvatarSignalInput,
 } from '../../src/avatar/index.js';
@@ -43,7 +44,7 @@ async function tick(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-function runtime(provider: MockAvatarProvider, options: Partial<ConstructorParameters<typeof AvatarRuntime>[0]> = {}): AvatarRuntime {
+function runtime(provider: AvatarProvider, options: Partial<ConstructorParameters<typeof AvatarRuntime>[0]> = {}): AvatarRuntime {
   return new AvatarRuntime({ runtimeId: 'runtime-1', characterProfile: profile, provider, ...options });
 }
 
@@ -120,6 +121,34 @@ test('interruptible provider aborts active presentation and never overlaps prese
   await avatar.shutdown();
 });
 
+test('initialize and shutdown race cannot publish readiness after shutdown begins', async () => {
+  let resolveInitialize: ((value: AvatarProviderCapabilities) => void) | undefined;
+  let shutdownCount = 0;
+  const provider: AvatarProvider = {
+    name: 'pending-initialize-provider',
+    initialize: () => new Promise<AvatarProviderCapabilities>((resolve) => {
+      resolveInitialize = resolve;
+    }),
+    present: async () => undefined,
+    shutdown: async () => {
+      shutdownCount += 1;
+    },
+  };
+  const avatar = runtime(provider);
+  const lifecycleEvents: string[] = [];
+  avatar.events.subscribe('avatar_initialized', () => lifecycleEvents.push('initialized'));
+  avatar.events.subscribe('avatar_ready', () => lifecycleEvents.push('ready'));
+  const initializePromise = avatar.initialize();
+  await tick();
+  const shutdownPromise = avatar.shutdown();
+  resolveInitialize?.(capabilities(true));
+  await assert.rejects(() => initializePromise, AvatarError);
+  await shutdownPromise;
+  assert.equal(avatar.lifecycleState, 'STOPPED');
+  assert.deepEqual(lifecycleEvents, []);
+  assert.equal(shutdownCount, 1);
+});
+
 test('non-interruptible provider keeps one active operation and latest-wins pending snapshot', async () => {
   const provider = new MockAvatarProvider({ capabilities: capabilities(false), autoComplete: false, ignoreAbort: true });
   const avatar = runtime(provider);
@@ -158,10 +187,70 @@ test('capabilities can reject or strip unsupported controlled IDs', async () => 
   const fallback = runtime(new MockAvatarProvider({ capabilities: { ...capabilities(true), animations: [] } }), { presentationFallback: 'strip-unsupported' });
   await fallback.initialize();
   assert.equal(fallback.submit(signal('visual_reset', 1)), true);
-  assert.equal(fallback.currentSnapshot.animationId, 'idle-loop');
+  assert.equal(fallback.currentSnapshot.animationId, undefined);
   await tick();
   assert.equal(fallback.activePresentation?.animationId, undefined);
   await fallback.shutdown();
+});
+
+test('capability rejection is transactional for unsupported animation and expression IDs', async () => {
+  const animationProvider = new MockAvatarProvider({ capabilities: { ...capabilities(true), animations: [] } });
+  const animationRuntime = runtime(animationProvider);
+  await animationRuntime.initialize();
+  const animationEvents: unknown[] = [];
+  animationRuntime.events.subscribe('avatar_state_changed', (event) => animationEvents.push(event));
+  const initialAnimationSnapshot = animationRuntime.currentSnapshot;
+  assert.equal(animationRuntime.submit(signal('visual_reset', 1)), false);
+  assert.equal(animationRuntime.currentSnapshot, initialAnimationSnapshot);
+  assert.equal(animationRuntime.controller.visualState, 'IDLE');
+  assert.equal(animationRuntime.controller.lastGlobalSequence, 0);
+  assert.equal(animationEvents.length, 0);
+  assert.equal(animationProvider.presentCalls.length, 0);
+  assert.equal(animationRuntime.pendingSnapshot, undefined);
+  assert.equal(animationRuntime.submit(signal('listen_started', 2)), true);
+  assert.equal(animationRuntime.controller.lastGlobalSequence, 2);
+  await animationRuntime.shutdown();
+
+  const expressionProvider = new MockAvatarProvider({ capabilities: { ...capabilities(true), expressions: [] } });
+  const expressionRuntime = runtime(expressionProvider, {
+    characterProfile: { ...profile, stateMappings: { ...profile.stateMappings, IDLE: {} } },
+  });
+  await expressionRuntime.initialize();
+  const expressionEvents: unknown[] = [];
+  expressionRuntime.events.subscribe('avatar_state_changed', (event) => expressionEvents.push(event));
+  const initialExpressionSnapshot = expressionRuntime.currentSnapshot;
+  assert.equal(expressionRuntime.submit(signal('listen_started', 1)), false);
+  assert.equal(expressionRuntime.currentSnapshot, initialExpressionSnapshot);
+  assert.equal(expressionRuntime.controller.visualState, 'IDLE');
+  assert.equal(expressionRuntime.controller.lastGlobalSequence, 0);
+  assert.equal(expressionEvents.length, 0);
+  assert.equal(expressionProvider.presentCalls.length, 0);
+  assert.equal(expressionRuntime.pendingSnapshot, undefined);
+  assert.equal(expressionRuntime.submit(signal('visual_reset', 2)), true);
+  await expressionRuntime.shutdown();
+});
+
+test('malformed provider capabilities fail initialization before READY', async () => {
+  const malformedValues: unknown[] = [
+    { expressions: 'neutral', animations: [], interruptiblePresentation: true, assetKinds: [] },
+    { expressions: ['neutral', 'neutral'], animations: [], interruptiblePresentation: true, assetKinds: [] },
+    { expressions: [], animations: [], interruptiblePresentation: true, assetKinds: ['unsupported'] },
+    { expressions: [], animations: [], interruptiblePresentation: 'yes', assetKinds: [] },
+  ];
+
+  for (const malformed of malformedValues) {
+    const provider: AvatarProvider = {
+      name: 'malformed-provider',
+      initialize: async () => malformed as AvatarProviderCapabilities,
+      present: async () => undefined,
+      shutdown: async () => undefined,
+    };
+    const avatar = runtime(provider);
+    await assert.rejects(() => avatar.initialize(), (error: unknown) => error instanceof AvatarError && (error.code === 'AVATAR_CONFIGURATION_ERROR' || error.code === 'AVATAR_CAPABILITY_ERROR'));
+    assert.equal(avatar.lifecycleState, 'ERROR');
+    assert.equal(avatar.providerCapabilities, undefined);
+    await avatar.shutdown();
+  }
 });
 
 test('avatar production source contains no process, shell, or arbitrary filesystem API', async () => {
