@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-Phase 7 — Avatar System (implementación en revisión en `phase/07-avatar-system-implementation`; todavía no mergeada).
+Phase 7 — Avatar System (implementación completa y mergeada; renderer/host siguen fuera de alcance).
 
 ## Status
 
-Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #6. El merge quedó registrado en `532c956e2a407b9e9e540584947a24739490bb03`. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7; el merge quedó registrado en `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La implementación de Phase 7 está contenida en esta rama y pendiente de revisión/merge.
+Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #6. El merge quedó registrado en `532c956e2a407b9e9e540584947a24739490bb03`. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7; el merge quedó registrado en `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La implementación de Phase 7 fue revisada, corregida y mergeada mediante PR #8; el merge quedó registrado en `417a30deca884f55057164475b08b2521d47347d`.
 
 ## Completed
 
@@ -44,11 +44,11 @@ Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #
 - Correcciones de inmutabilidad del registry, validación runtime de overrides y separación de `identity.description` revisadas y cubiertas por pruebas.
 - Tests de Phase 6: 83/83 pasando según la verificación realizada antes del merge.
 - Núcleo de Avatar System implementado con controller, runtime, provider abstracto, provider mock, snapshots, lifecycle, capabilities, policy cerrada, eventos y errores tipados.
-- Tests de Phase 7 añadidos para lifecycle, estados, REACTION/baseState, ordering, latest-wins, providers interrumpibles/no interrumpibles, shutdown, capabilities y seguridad.
+- Tests de Phase 7 añadidos y endurecidos para lifecycle, estados, REACTION/baseState, ordering, latest-wins, providers interrumpibles/no interrumpibles, shutdown, capabilities, validación runtime de señales y seguridad; cierre verificado con 98/98 tests.
 
 ## In Progress
 
-Implementación de Phase 7 - Avatar System en revisión. El núcleo está creado en la rama de implementación; no incluye renderer, UI, assets reales ni APIs de procesos.
+Ninguno. Phase 7 está cerrada y mergeada. El núcleo implementado no incluye renderer, UI, assets reales ni APIs de procesos.
 
 ## Blocked
 
@@ -57,7 +57,7 @@ Implementación de Phase 7 - Avatar System en revisión. El núcleo está creado
 
 ## Next
 
-Completar revisión y merge de Phase 7. No iniciar Phase 8 antes del cierre formal.
+Preparar la definición de Phase 8. No iniciar su implementación hasta que su alcance, contratos, criterios de aceptación y riesgos sean revisados y aprobados.
 
 ## Known Risks
 
