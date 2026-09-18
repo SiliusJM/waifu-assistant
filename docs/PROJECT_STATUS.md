@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-Phase 7 — Avatar System (definición y arquitectura únicamente).
+Phase 7 — Avatar System (definición arquitectónica aprobada; implementación no iniciada).
 
 ## Status
 
-Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #6. El merge quedó registrado en `532c956e2a407b9e9e540584947a24739490bb03`. Phase 7 está únicamente en definición sobre `phase/07-avatar-system`; no está implementada ni mergeada.
+Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #6. El merge quedó registrado en `532c956e2a407b9e9e540584947a24739490bb03`. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7; el merge quedó registrado en `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. Phase 7 no está implementada.
 
 ## Completed
 
@@ -46,7 +46,7 @@ Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #
 
 ## In Progress
 
-Definición arquitectónica de Phase 7 - Avatar System. La rama no contiene código de producción.
+Preparación de la implementación de Phase 7 - Avatar System. La definición arquitectónica está aprobada y mergeada; la implementación de producción todavía no ha comenzado.
 
 ## Blocked
 
@@ -55,7 +55,7 @@ Definición arquitectónica de Phase 7 - Avatar System. La rama no contiene cód
 
 ## Next
 
-Revisar y aprobar externamente la definición de Phase 7. Después podrá abrirse una implementación separada; no iniciar Phase 8.
+Preparar e implementar Phase 7 en una rama separada siguiendo la definición aprobada. No iniciar Phase 8 hasta cerrar la implementación, revisión y merge de Phase 7.
 
 ## Known Risks
 
