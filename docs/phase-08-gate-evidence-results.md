@@ -2,7 +2,7 @@
 
 ## Estado
 
-Evidencia consolidada de Phase 8 reutilizando los harnesses ya presentes en `main`, con base real `origin/main` `3ce5dd96b7c89fd27f694e564670a3637c010987`. Esta rama revisa y ejecuta la evidencia HTTPS/DNS pendiente; no añade ni recrea el harness del Service Worker.
+Evidencia consolidada de Phase 8 reutilizando los harnesses ya presentes en `main`, con base real `origin/main` `83a0a3a85b80f8a048bb6f702fb8dc42bc015450`. Esta rama revisa y ejecuta la evidencia HTTPS/DNS pendiente; no añade ni recrea el harness del Service Worker.
 
 Esta etapa no implementa providers productivos ni modifica `src/`. Los resultados distinguen evidencia nueva de ejecuciones repetidas y no convierten `NOT EXECUTED` o `SIMULATED` en `PASS`.
 
@@ -77,6 +77,16 @@ La revisión HTTPS/DNS no logró generar evidencia TLS real. Las comprobaciones 
 
 Estos resultados son composición de fixtures experimentales; no seleccionan aún una arquitectura productiva.
 
+## TLS fixture feasibility
+
+Resultado de esta subetapa: `NOT EXECUTED` / `LIMITATION`.
+
+La investigación confirmó que Node.js `v22.18.0` y sus APIs `node:https`/`node:tls` pueden servir TLS únicamente cuando reciben material `key` y `cert`/`pfx`. `node:crypto` permite generar claves y leer certificados X.509, pero no ofrece un emisor X.509 público que resuelva por sí solo la creación reproducible del certificado del servidor. El repositorio no contiene certificados o llaves de fixture y no tiene una dependencia de emisión X.509.
+
+Playwright `1.63.0` está declarado y el paquete está instalado, pero el ejecutable Chromium requerido por los harnesses no está disponible en este entorno. No se ejecutó `playwright install` ni se añadió una dependencia o binario externo. Aun disponiendo del browser, `ignoreHTTPSErrors` o flags equivalentes debilitarían la validación TLS y no son aceptables para esta evidencia; tampoco se usarán OpenSSL por shell, APIs de procesos, una llave privada estática en Git ni cambios permanentes del almacén de confianza de Windows.
+
+Por estas razones no se implementó un fixture TLS parcial o inseguro. No existe evidencia nueva de handshake o navegación HTTPS real en esta subetapa.
+
 ## HTTPS evidence
 
 Esta subetapa intentó cerrar HTTPS sin OpenSSL por shell, APIs de procesos, cambios permanentes del sistema ni debilitamiento de TLS. No se encontró un fixture TLS reproducible y seguro dentro del entorno actual.
@@ -88,6 +98,8 @@ Esta subetapa intentó cerrar HTTPS sin OpenSSL por shell, APIs de procesos, cam
 | HTTPS → destino interno | `NOT EXECUTED` | No se ejecutó request/redirect HTTPS al fixture interno. | El fixture egress disponible es HTTP-only. |
 
 No se fabrican resultados HTTPS. La evidencia Fetch histórica de downgrade bloqueado no equivale a evidencia browser/proxy TLS de esta etapa.
+
+La ejecución de los harnesses existentes confirmó `controlled-tests` con `29/29 PASS` y providers Search en `NOT EXECUTED` por falta de credenciales. Los harnesses que requieren Chromium (`egress-boundary-spike`, `egress-hardening`, `gate-evidence` y `external-tests`) no iniciaron browser porque falta el ejecutable local; esto es una limitación del entorno actual y no modifica sus resultados históricos documentados.
 
 ## DNS/socket evidence
 
