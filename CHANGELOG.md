@@ -1,5 +1,23 @@
 # Changelog
 
+## Phase 8 — Internet & Browser controlled tests
+
+### Added
+
+- Harness reproducible para el corpus de 20 consultas Search y futuras ejecuciones con credenciales opt-in.
+- Fixtures controlados para Fetch, redirects, timeout, cancelación, límites de respuesta y clasificación de destinos.
+- Policies explícitas para tipos de contenido, workspace, downloads/uploads y path traversal.
+- Validación controlada de SSRF, múltiples A/AAAA, IPv4-mapped IPv6, redirects a destinos internos y simulación de DNS rebinding.
+- Reporte de resultados y límites de la evidencia sin afirmar browser pinning ni egress real.
+
+### Status
+
+- PR #11 revisado y mergeado a `main`; merge commit `35045dcf9bcd9ff6b31c9bb7908af7872daae5a3`.
+- Fetch/SSRF/DNS/policies: 29/29 PASS.
+- Brave/Tavily/Exa: NOT EXECUTED por falta de credenciales.
+- Browser local/remoto: NOT EXECUTED por falta de entorno/dependencias.
+- No se integraron providers, browser automation, dependencias ni código de producción.
+
 ## Phase 8 — Internet & Browser provider and sandbox spike
 
 ### Added
