@@ -1,3 +1,20 @@
+## Phase 8 — Internet & Browser host isolation evidence
+
+### Added
+
+- Harness experimental para caracterizar contextos efímeros, storage, acceso `file://`, timeout, shutdown y cleanup temporal.
+- Evidencia de ausencia de storage heredado entre contextos y eliminación verificada del árbol temporal.
+- Registro separado de las limitaciones de filesystem/sandbox OS-level y crash cleanup.
+
+### Status / limitations
+
+- PR #22 revisado y mergeado a `main`; merge commit `3f736d864a94c3139eff70acdc9a5e18417623ae`.
+- Resultado: `7 PASS`, `0 FAIL`, `2 LIMITATION`, `1 NOT EXECUTED`.
+- El rechazo de `file://` es evidencia browser-level, no aislamiento OS-level.
+- `chromiumSandbox=true` es una condición de lanzamiento; su efectividad OS-level permanece sin demostrar.
+- Crash cleanup permanece `NOT EXECUTED / LIMITATION`.
+- ADR-012 permanece provisional.
+
 ## Phase 8 — Internet & Browser HTTPS/TLS evidence
 
 ### Added
