@@ -1,3 +1,17 @@
+## Phase 8 — Internet & Browser consolidated ADR-012 decision-gate review
+
+### Added
+
+- Matriz consolidada de evidencia demostrada, parcial, simulada, limitada y pendiente en `docs/phase-08-decision-gate-review.md`.
+- Revisión de las opciones proxy/egress, aislamiento de red/host, route + proxy, browser local y browser remoto sin puntuación ni selección definitiva.
+
+### Status / limitations
+
+- ADR-012 permanece provisional y en estado `decision-gate`.
+- Se conserva el `FAIL` del redirect público → interno bajo `browserContext.route()`.
+- HTTPS/TLS, DNS rebinding/pinning productivo, aislamiento OS/network, browser remoto, Search real y crash cleanup siguen pendientes o limitados por el entorno.
+- No se implementaron providers productivos ni se añadieron dependencias.
+
 ## Phase 8 — Internet & Browser host isolation evidence
 
 ### Added
