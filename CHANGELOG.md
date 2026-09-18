@@ -1,3 +1,20 @@
+## Phase 8 — Internet & Browser HTTPS + DNS/socket evidence
+
+### Added
+
+- Consolidación de la evidencia HTTPS/DNS pendiente sobre los harnesses existentes.
+- Registro explícito de HTTPS como `NOT EXECUTED` y DNS/socket pinning como `SIMULATED`/`NOT EXECUTED` cuando no pudo demostrarse resolución y socket reales.
+
+### Status / limitations
+
+- PR #17 revisado y mergeado a `main`; merge commit `0183ab6c76379ccda90e9602df3ce13aab0c0225`.
+- Service Worker permanece `PASS` en el fixture localhost.
+- HTTPS público→HTTPS, HTTPS→HTTP y HTTPS→interno: `NOT EXECUTED`.
+- DNS/socket pinning: `SIMULATED`/`NOT EXECUTED`; no se demuestra socket real.
+- Browser remoto, crash cleanup, aislamiento OS-level/host y Search real continúan pendientes.
+- ADR-012 permanece provisional; no se selecciona arquitectura productiva definitiva.
+- No se implementaron providers productivos ni cambios en `src/`.
+
 ## Phase 8 — Internet & Browser architecture gate evidence
 
 ### Added
