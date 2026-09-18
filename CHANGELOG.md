@@ -173,6 +173,22 @@
 - PR #14 revisado y mergeado a `main`; merge commit `9dab02d72e710e691121da27489474d1ed4ccf3b`.
 - No se añadieron cambios en `src/`, manifests, lockfiles, APIs de procesos ni código productivo.
 
+## Phase 8 — Network/Host Isolation Evidence
+
+### Added
+
+- Registro documental de la ejecución de la etapa OS/network y del protocolo para un entorno aislado futuro.
+
+### Status / limitations
+
+- PR #25 revisado y mergeado a `main`; merge commit `d8d07c2a0eac845d593302e5ed19d19c71a12b3a`.
+- Aislamiento OS/network real: `NOT EXECUTED`.
+- Capacidades/permisos actuales: `LIMITATION`.
+- No se produjeron nuevos `PASS` ni `FAIL`.
+- DNS/socket conserva `SIMULATED`/`NOT EXECUTED`; no se presenta como pinning real.
+- ADR-012 continúa provisional en `decision-gate`.
+- No se implementaron providers productivos ni se modificó código de producción.
+
 # Changelog
 
 ## Phase 8 — Internet & Browser egress boundary spike
