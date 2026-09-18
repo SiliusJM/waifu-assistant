@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-Phase 7 — Avatar System (implementación completa y mergeada; renderer/host siguen fuera de alcance).
+Phase 8 — Internet & Browser (definición arquitectónica aprobada y mergeada; implementación no iniciada).
 
 ## Status
 
-Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #6. El merge quedó registrado en `532c956e2a407b9e9e540584947a24739490bb03`. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7; el merge quedó registrado en `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La implementación de Phase 7 fue revisada, corregida y mergeada mediante PR #8; el merge quedó registrado en `417a30deca884f55057164475b08b2521d47347d`.
+Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #6. El merge quedó registrado en `532c956e2a407b9e9e540584947a24739490bb03`. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7; el merge quedó registrado en `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La implementación de Phase 7 fue revisada, corregida y mergeada mediante PR #8; el merge quedó registrado en `417a30deca884f55057164475b08b2521d47347d`. La definición de Phase 8 fue revisada y mergeada mediante PR #9; el merge quedó registrado en `ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`.
 
 ## Completed
 
@@ -48,7 +48,7 @@ Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #
 
 ## In Progress
 
-Ninguno. Phase 7 está cerrada y mergeada. El núcleo implementado no incluye renderer, UI, assets reales ni APIs de procesos.
+Ninguno. La definición de Phase 8 está cerrada y mergeada; su implementación todavía no ha comenzado.
 
 ## Blocked
 
@@ -57,13 +57,13 @@ Ninguno. Phase 7 está cerrada y mergeada. El núcleo implementado no incluye re
 
 ## Next
 
-La definición de Phase 8 ya está preparada. El siguiente paso es revisar y aprobar su alcance, contratos, criterios de aceptación y riesgos antes de iniciar la implementación.
+La definición de Phase 8 está aprobada y mergeada. El siguiente paso es preparar la implementación mediante spikes controlados de provider, host/sandbox, límites y confirmación.
 
 ## Phase 8 — Internet & Browser
 
-La definicion arquitectonica esta preparada en `phase/08-internet-browser`. El alcance es documental: separa busqueda, fetch y browser; define lifecycle, permisos, prompt injection, privacidad, concurrencia e integracion con `ToolManager`. No hay codigo de produccion, dependencias, providers reales, automatizacion, UI, persistencia ni APIs de procesos.
+La definición arquitectónica de Phase 8 fue revisada y mergeada a `main` mediante PR #9. El alcance sigue siendo documental: separa búsqueda, fetch y browser; define lifecycle, permisos, prompt injection, privacidad, concurrencia e integración con `ToolManager`. No hay código de producción, dependencias, providers reales, automatización, UI, persistencia ni APIs de procesos.
 
-La rama no modifica `main`, no abre PR y no convierte Phase 8 en una fase implementada. La implementacion futura requiere aprobacion explicita y un spike de provider/sandbox.
+Phase 8 no se considera implementada. La siguiente etapa requiere spikes de provider/sandbox, límites y confirmación antes de introducir herramientas reales.
 
 ## Known Risks
 
