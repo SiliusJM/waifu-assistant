@@ -2,7 +2,7 @@
 
 ## Estado
 
-Implementada en `phase/05-streaming-voice` y pendiente de revisión externa. No está mergeada en `main`.
+COMPLETA. Implementada en `phase/05-streaming-voice`, revisada y corregida, y mergeada en `main` mediante PR #5 con merge commit `1f076df8e880c273abe261142aab9757c541d73e`.
 
 ## Alcance implementado
 
@@ -34,4 +34,4 @@ Quedan fuera: wake word, barge-in avanzado, RVC, avatar, Electron/Vue, persisten
 
 ## Verificación
 
-La verificación de cierre se ejecuta desde la rama de la fase y debe incluir `build`, `lint`, `typecheck`, `test`, `npm run check`, `git diff --check` y revisión de estado/diff. Phase 5 no se declara completa hasta la revisión externa.
+Verificación de cierre: 72/72 tests; build, lint, typecheck, `npm run check` y `git diff --check` OK; working tree limpio antes del merge. Las correcciones posteriores de revisión externa separaron las métricas de interrupción de captura/playback y formalizaron la validación de políticas de buffering.
