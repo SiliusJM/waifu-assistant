@@ -6,7 +6,7 @@ Phase 5 — Streaming Voice & Interruptions.
 
 ## Status
 
-IN PROGRESS. Phase 4 permanece completa y mergeada en `main`. Phase 5 se implementa en `phase/05-streaming-voice` y queda pendiente de revisión externa; no está mergeada.
+COMPLETE. Phase 5 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #5. El merge quedó registrado en `1f076df8e880c273abe261142aab9757c541d73e`.
 
 ## Completed
 
@@ -35,11 +35,14 @@ IN PROGRESS. Phase 4 permanece completa y mergeada en `main`. Phase 5 se impleme
 - Cancelación, timeout por etapa, cleanup, logging seguro y correlación explícita con `RealtimeEngine` implementados.
 - Tests de Phase 4: 57/57 pasando según la verificación realizada en la rama de la fase.
 - PR #4 revisado técnicamente y mergeado a `main`.
-- Contratos streaming, queues acotadas, coordinación de concurrencia, interruption/supersede, cancelación jerárquica, métricas y mocks de Phase 5 implementados en la rama de la fase.
+- Contratos streaming, queues acotadas, coordinación de concurrencia, interruption/supersede, cancelación jerárquica, métricas y mocks de Phase 5 implementados.
+- PR #5 revisado, corregido y mergeado a `main`.
+- Correcciones de métricas de interrupción y políticas de buffering revisadas y cubiertas por pruebas.
+- Tests de Phase 5: 72/72 pasando según la verificación realizada antes del merge.
 
 ## In Progress
 
-Phase 5 está en revisión técnica. Phase 4 está cerrada en `main`.
+Ninguno. Phase 5 está cerrada y mergeada en `main`.
 
 ## Blocked
 
@@ -48,7 +51,7 @@ Phase 5 está en revisión técnica. Phase 4 está cerrada en `main`.
 
 ## Next
 
-Revisar externamente Phase 5. Después de la revisión, decidir si se abre PR; no hacer merge ni iniciar Phase 6 automáticamente.
+Preparar la definición de Phase 6 — Personality System. No implementar Phase 6 hasta que su alcance, contratos, criterios de aceptación y riesgos hayan sido revisados y aprobados.
 
 ## Known Risks
 
