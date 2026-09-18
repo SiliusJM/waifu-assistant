@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-Phase 7 — Avatar System (definición arquitectónica aprobada; implementación no iniciada).
+Phase 7 — Avatar System (implementación en revisión en `phase/07-avatar-system-implementation`; todavía no mergeada).
 
 ## Status
 
-Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #6. El merge quedó registrado en `532c956e2a407b9e9e540584947a24739490bb03`. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7; el merge quedó registrado en `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. Phase 7 no está implementada.
+Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #6. El merge quedó registrado en `532c956e2a407b9e9e540584947a24739490bb03`. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7; el merge quedó registrado en `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La implementación de Phase 7 está contenida en esta rama y pendiente de revisión/merge.
 
 ## Completed
 
@@ -43,10 +43,12 @@ Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #
 - PR #6 revisado, corregido y mergeado a `main`.
 - Correcciones de inmutabilidad del registry, validación runtime de overrides y separación de `identity.description` revisadas y cubiertas por pruebas.
 - Tests de Phase 6: 83/83 pasando según la verificación realizada antes del merge.
+- Núcleo de Avatar System implementado con controller, runtime, provider abstracto, provider mock, snapshots, lifecycle, capabilities, policy cerrada, eventos y errores tipados.
+- Tests de Phase 7 añadidos para lifecycle, estados, REACTION/baseState, ordering, latest-wins, providers interrumpibles/no interrumpibles, shutdown, capabilities y seguridad.
 
 ## In Progress
 
-Preparación de la implementación de Phase 7 - Avatar System. La definición arquitectónica está aprobada y mergeada; la implementación de producción todavía no ha comenzado.
+Implementación de Phase 7 - Avatar System en revisión. El núcleo está creado en la rama de implementación; no incluye renderer, UI, assets reales ni APIs de procesos.
 
 ## Blocked
 
@@ -55,7 +57,7 @@ Preparación de la implementación de Phase 7 - Avatar System. La definición ar
 
 ## Next
 
-Preparar e implementar Phase 7 en una rama separada siguiendo la definición aprobada. No iniciar Phase 8 hasta cerrar la implementación, revisión y merge de Phase 7.
+Completar revisión y merge de Phase 7. No iniciar Phase 8 antes del cierre formal.
 
 ## Known Risks
 

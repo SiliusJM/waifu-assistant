@@ -19,6 +19,8 @@ Phase 6 — Personality System está cerrada y mergeada en `main` mediante PR #6
 
 La rama `phase/07-avatar-system` contiene la definición histórica de la fase y ya fue mergeada. La implementación de Phase 7 debe comenzar en una rama de implementación separada y seguir exactamente la definición aprobada. No elegir ni añadir renderer concreto, UI, assets, persistencia o capacidades fuera de alcance sin una decisión de fase correspondiente.
 
+La implementación activa se desarrolla únicamente en `phase/07-avatar-system-implementation`. Esta rama contiene el núcleo desacoplado y determinista de Avatar System; todavía no está mergeada a `main`.
+
 Phase 6 implementó únicamente personalidad declarativa: perfiles, validación estricta, política, compilación determinista, snapshots por interacción, registro multi-perfil en memoria, JSON canónico, hints de voz abstractos, logging seguro y tests. No implementó agente, tools nuevas, permisos, seguridad, memoria persistente, emoción, voz real, LLM real, UI, hot reload ni APIs de procesos.
 
 Phase 5 — Streaming Voice & Interruptions está cerrada y mergeada en `main` mediante PR #5, con merge commit `1f076df8e880c273abe261142aab9757c541d73e`. La rama de fase queda como histórico de implementación.
