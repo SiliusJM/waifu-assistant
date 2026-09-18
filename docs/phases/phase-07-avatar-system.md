@@ -347,15 +347,14 @@ La observabilidad debe distinguir estado solicitado, estado aceptado y presentac
 - **Copiar todos los eventos de Realtime/Voice al avatar:** rechazado; aumenta acoplamiento y expone datos innecesarios.
 - **Cola ilimitada de reacciones:** rechazada; puede producir latencia y estados visuales obsoletos. Se propone latest-wins acotado.
 
-## 26. Decisiones que requieren aprobación humana
+## 26. Decisiones futuras fuera de la implementación actual
 
-1. Confirmar la separación `AvatarVisualState` de `AvatarLifecycleState` y el uso de `REACTION` como overlay con `baseState`.
-2. Confirmar política latest-wins para estado/reacciones y ausencia de cola implícita.
-3. Elegir, en una fase futura, el primer renderer/provider y su estrategia de assets.
-4. Definir si `role` y `pronouns` se exponen a una futura UI o quedan solo en metadata.
-5. Aprobar el fallback no-op/degraded cuando no exista renderer.
-6. Definir el owner de los adaptadores que traducen Voice/Realtime events a `AvatarSignal`.
-7. Definir formato de manifest, integridad y almacenamiento cuando exista un spike de assets.
+1. Elegir, en una fase futura, el primer renderer/provider y su estrategia de assets.
+2. Definir el owner de los adaptadores de eventos que traducen Voice/Realtime a `AvatarSignal`.
+3. Definir si `role` y `pronouns` se exponen a una futura UI o quedan solo en metadata.
+4. Aprobar el fallback no-op/degraded concreto cuando exista renderer.
+5. Definir formato de manifest, integridad y almacenamiento cuando exista un spike de assets.
+6. Estas decisiones son futuras y no bloquean el cierre de la implementación actual.
 
 ## 27. Criterios de aceptación de la implementación
 
@@ -380,4 +379,4 @@ En la futura implementación inicial todavía no deben incluirse renderer real, 
 
 ## Conclusión
 
-La definición aprobada deja un boundary pequeño: eventos normalizados entran, una máquina determinista produce snapshots visuales y un provider opcional los presenta. La implementación de esta rama materializa ese boundary sin elegir renderer, assets, UI ni host de escritorio. La revisión y el merge quedan pendientes; no se inicia Phase 8.
+La Phase 7 queda cerrada: la definición aprobada deja un boundary pequeño, eventos normalizados entran, una máquina determinista produce snapshots visuales y un provider opcional los presenta. La implementación fue revisada y mergeada sin elegir renderer, assets, UI ni host de escritorio. Las decisiones de renderer, assets y UI quedan para fases futuras; no se inicia Phase 8 hasta preparar y aprobar su definición.
