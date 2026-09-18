@@ -1,12 +1,8 @@
 # Project Status
 
-## Phase 6 branch status
-
-La rama activa `phase/06-personality-system` implementa Personality System sobre `origin/main` y queda pendiente de revisión externa. No está mergeada a `main`; Phase 6 no debe marcarse como COMPLETE hasta concluir esa revisión.
-
 ## Current Phase
 
-Phase 6 — Personality System (implementación en rama, pendiente de revisión externa).
+Phase 6 — Personality System.
 
 ## Status
 
@@ -50,7 +46,7 @@ IN PROGRESS. Phase 5 fue revisada técnicamente, corregida y mergeada en `main` 
 
 ## In Progress
 
-Phase 6 — Personality System: implementación local completada, pendiente de revisión externa.
+Ninguno. Phase 6 está cerrada y mergeada en `main`.
 
 ## Blocked
 
@@ -59,7 +55,7 @@ Phase 6 — Personality System: implementación local completada, pendiente de r
 
 ## Next
 
-Completar la revisión externa de Phase 6. No hacer merge a `main` ni iniciar Phase 7 automáticamente.
+Preparar la definición de Phase 7 — Avatar System. No implementar Phase 7 hasta que su alcance, contratos, criterios de aceptación y riesgos hayan sido revisados y aprobados.
 
 ## Known Risks
 
