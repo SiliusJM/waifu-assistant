@@ -8,6 +8,7 @@ import {
 import { createContext } from './context.js';
 import { toAssistantResponse, type Response } from './response.js';
 import { Session } from './session.js';
+import type { PersonalitySnapshot } from '../personality/personality-types.js';
 
 export interface AssistantCoreOptions {
   readonly provider: AIProvider;
@@ -17,6 +18,8 @@ export interface AssistantCoreOptions {
 export interface RespondOptions {
   readonly signal?: AbortSignal;
   readonly model?: string;
+  /** A per-interaction immutable snapshot; it never becomes a Session message. */
+  readonly personality?: PersonalitySnapshot;
 }
 
 export class AssistantCore {
@@ -47,12 +50,16 @@ export class AssistantCore {
 
     session.addMessage('user', content);
     const context = createContext(session);
+    const personalityMessages = options.personality?.instructions.map(({ text }) => ({
+      role: 'system' as const,
+      content: text,
+    })) ?? [];
     const request: AIRequest = {
       sessionId: context.sessionId,
-      messages: context.messages.map(({ role, content: messageContent }) => ({
+      messages: [...personalityMessages, ...context.messages.map(({ role, content: messageContent }) => ({
         role,
         content: messageContent,
-      })),
+      }))],
       model: options.model,
     };
 
@@ -60,6 +67,12 @@ export class AssistantCore {
       sessionId: session.id,
       provider: this.provider.name,
       messageCount: request.messages.length,
+      ...(options.personality ? {
+        personalityId: options.personality.personalityId,
+        profileVersion: options.personality.profileVersion,
+        personalitySchemaVersion: options.personality.schemaVersion,
+        personalityFingerprint: options.personality.fingerprint,
+      } : {}),
     });
 
     try {
@@ -86,6 +99,12 @@ export class AssistantCore {
         provider: response.provider,
         model: response.model,
         finishReason: response.finishReason,
+        ...(options.personality ? {
+          personalityId: options.personality.personalityId,
+          profileVersion: options.personality.profileVersion,
+          personalitySchemaVersion: options.personality.schemaVersion,
+          personalityFingerprint: options.personality.fingerprint,
+        } : {}),
       });
       return response;
     } catch (error) {
