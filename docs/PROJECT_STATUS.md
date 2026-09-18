@@ -90,7 +90,7 @@ Sin introducir código de producción todavía:
 
 ## Phase 8 — Internet & Browser
 
-La definición arquitectónica, el spike de providers/sandbox, los controlled tests, la ejecución externa y el egress boundary spike fueron revisados y mergeados a `main` mediante PR #9, PR #10, PR #11, PR #12 y PR #13, respectivamente. El alcance actual sigue siendo preproducción.
+La definición arquitectónica, el spike de providers/sandbox, los controlled tests, la ejecución externa, el egress boundary spike y el egress hardening fueron revisados y mergeados a `main` mediante PR #9, PR #10, PR #11, PR #12, PR #13 y PR #14, respectivamente. El alcance actual sigue siendo preproducción.
 
 La evidencia Fetch/SSRF/DNS/policies es 29/29 PASS en fixtures controlados. El experimento browser local ejecutó 19 comprobaciones: 17 PASS, 1 FAIL y 1 NOT EXECUTED. El FAIL es una evidencia negativa deliberada: el redirect público → interno alcanzó el fixture interno pese al routing configurado. Por tanto, `browserContext.route()` no debe considerarse suficiente para una frontera de egress/SSRF de producción.
 
