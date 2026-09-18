@@ -8,7 +8,7 @@ Phase 3 — Realtime Engine está COMPLETA y mergeada en `main`. La base incluye
 
 Phase 4 — Voice Service está COMPLETA y mergeada en `main` mediante PR #4, con merge commit `1ec4384dc529ed303e85413e7969a3896c741a69`. Incluye contratos desacoplados de audio, STT, TTS y reproducción, `VoiceService`, `VoiceSession`, `VoiceError`, lifecycle, cancelación, timeout por etapa, cleanup, logging seguro, eventos correlacionados y mocks deterministas. Los proveedores reales de voz no fueron seleccionados ni integrados.
 
-Phase 5 — Streaming Voice & Interruptions está implementada en `phase/05-streaming-voice` y pendiente de revisión externa. Añade streaming de audio/STT/TTS, playback incremental, backpressure, interruption/supersede, coordinación por sesión/dispositivo, cancelación jerárquica y métricas. No está mergeada en `main`.
+Phase 5 — Streaming Voice & Interruptions está COMPLETA y mergeada en `main` mediante PR #5, con merge commit `1f076df8e880c273abe261142aab9757c541d73e`. Añade streaming de audio/STT/TTS, playback incremental, backpressure, interruption/supersede, coordinación por sesión/dispositivo, cancelación jerárquica, métricas y mocks deterministas. Los proveedores reales de voz y el LLM real siguen fuera de alcance.
 
 ## Principios
 
@@ -39,7 +39,7 @@ Instalar las dependencias y ejecutar:
 
 ## Próximo paso
 
-Revisar externamente la implementación de Phase 5. No hacer merge a `main` ni iniciar Phase 6 automáticamente.
+Preparar la definición de Phase 6 — Personality System. No implementar Phase 6 hasta que su alcance, contratos, criterios de aceptación y riesgos hayan sido revisados y aprobados.
 
 Los proveedores reales de STT/TTS se evaluarán mediante un spike comparativo independiente y ADR-007; no forman parte del cierre de Phase 4.
 
