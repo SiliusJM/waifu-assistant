@@ -56,6 +56,12 @@ Phase 6 añade una capa declarativa entre la configuración de personalidad y `A
 
 Personality System no es un agente, un motor de seguridad, una capa de permisos, una memoria, un coordinador de voz ni un sistema de tools. No usa APIs de procesos, proveedores reales, LLM real, persistencia, hot reload o UI. Los hints de voz son abstractos y no conocen TTS.
 
+## Avatar System (Phase 7 - definición)
+
+Phase 7 propone una capa de presentación desacoplada con adaptadores de eventos, `AvatarController`, `AvatarRuntime`, snapshots visuales inmutables y un `AvatarProvider` reemplazable. Los estados visuales iniciales son `IDLE`, `LISTENING`, `SPEAKING` y `REACTION`; el lifecycle técnico se mantiene separado. No se ha elegido renderer, host de escritorio, formato de assets ni tecnología 2D/3D.
+
+El avatar consume señales normalizadas y metadata controlada. No importa `RealtimeEngine`, `VoiceService` o `Personality System`, no interpreta instrucciones de personalidad, no ejecuta herramientas y no accede a procesos, shell, filesystem arbitrario, audio crudo o conversaciones. La propuesta está documentada en Phase 7 y ADR-010; no hay implementación.
+
 ## Transversal
 
 Seguridad, permisos, configuración, logging, métricas, manejo de errores, pruebas y cancelación serán responsabilidades explícitas y no detalles implícitos del proveedor.

@@ -29,6 +29,11 @@ Todos los cambios relevantes del proyecto se documentarán aquí.
 
 ## [Unreleased]
 
+### Phase 7 - Avatar System definition
+
+- Añadida definición arquitectónica documental para una capa de presentación desacoplada.
+- No se añadieron código de producción, dependencias de renderizado, providers, assets, UI ni cambios funcionales.
+
 ### Added
 
 - Fundamentos de repositorio y gobierno del proyecto.

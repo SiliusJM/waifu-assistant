@@ -13,9 +13,11 @@ Waifu Assistant es un proyecto incremental y seguro de asistente personal de esc
 - No avanzar a otra fase hasta que la fase activa cumpla todos sus criterios de aceptación.
 - Las tecnologías listadas como candidatas deben evaluarse antes de convertirse en decisiones.
 
-## Alcance actual: checkpoint post-merge de Phase 6
+## Alcance actual: definición de Phase 7 - Avatar System
 
 Phase 6 — Personality System está cerrada y mergeada en `main` mediante PR #6, con merge commit `532c956e2a407b9e9e540584947a24739490bb03`. No iniciar Phase 7 hasta que su definición, alcance, contratos, criterios de aceptación y riesgos sean revisados y aprobados.
+
+La rama `phase/07-avatar-system` contiene únicamente definición y documentación arquitectónica. No implementar Avatar System, no añadir dependencias, providers, assets, Electron, Vue, Three.js, Live2D, VTube Studio, UI, persistencia o código de producción hasta aprobación externa.
 
 Phase 6 implementó únicamente personalidad declarativa: perfiles, validación estricta, política, compilación determinista, snapshots por interacción, registro multi-perfil en memoria, JSON canónico, hints de voz abstractos, logging seguro y tests. No implementó agente, tools nuevas, permisos, seguridad, memoria persistente, emoción, voz real, LLM real, UI, hot reload ni APIs de procesos.
 

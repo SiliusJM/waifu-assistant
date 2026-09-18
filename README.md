@@ -41,7 +41,7 @@ Instalar las dependencias y ejecutar:
 
 ## Próximo paso
 
-Preparar la definición de Phase 7 — Avatar System. No implementar Phase 7 hasta que su alcance, contratos, criterios de aceptación y riesgos hayan sido revisados y aprobados.
+Phase 7 está definida documentalmente en `phase/07-avatar-system` y pendiente de revisión externa. No implementar Phase 7 hasta que su alcance, contratos, criterios de aceptación y riesgos hayan sido aprobados.
 
 Los proveedores reales de STT/TTS se evaluarán mediante un spike comparativo independiente y ADR-007; no forman parte del cierre de Phase 4.
 
@@ -59,3 +59,6 @@ Los proveedores reales de STT/TTS se evaluarán mediante un spike comparativo in
 - `docs/phases/phase-03-realtime-engine.md`: alcance, criterios y cierre de Phase 3.
 - `docs/phases/phase-04-voice-service.md`: alcance, contratos, seguridad y criterios de Phase 4.
 - `docs/phases/phase-05-streaming-voice-and-interruptions.md`: alcance, contratos, seguridad y verificación de Phase 5.
+- `docs/phases/phase-06-personality-system.md`: alcance, contratos, seguridad y verificación de Phase 6.
+- `docs/phases/phase-07-avatar-system.md`: definición y arquitectura propuesta de Phase 7; todavía no implementada.
+- `docs/adr/ADR-010-avatar-system-definition.md`: ADR propuesto para revisión humana.
