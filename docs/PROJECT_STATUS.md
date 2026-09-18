@@ -70,6 +70,7 @@ Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #
 - Evidencia DNS/socket local controlada: `public.test` observó `127.0.0.2` como IP validada, efectiva y `socket.remoteAddress`; `internal.test` fue bloqueado antes del socket con `internalHits=0`; el cambio `127.0.0.2 → 127.0.0.3` permanece `SIMULATED`.
 - Evaluación HTTPS/TLS: Chromium inicia y cierra correctamente en contexto efímero, pero HTTPS→HTTPS, HTTPS→HTTP, HTTPS→interno y CONNECT/WebSocket sobre TLS permanecen `NOT EXECUTED / LIMITATION`; no se creó certificado ni se modificaron trust store, dependencias o APIs de proceso.
 - Evidencia host/browser: `10` checks con `7 PASS`, `0 FAIL`, `2 LIMITATION` y `1 NOT EXECUTED`; storage entre contextos efímeros, timeout, shutdown y cleanup normal pasaron. Filesystem y sandbox OS-level permanecen como `LIMITATION` y crash cleanup como `NOT EXECUTED`.
+- Revisión consolidada de ADR-012 preparada en `docs/phase-08-decision-gate-review.md`; el gate permanece provisional, conserva el `FAIL` de `browserContext.route()` y separa evidencia controlada, simulada, limitada y pendiente.
 
 ## In Progress
 

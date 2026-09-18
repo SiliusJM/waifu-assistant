@@ -39,6 +39,14 @@ AssistantCore
 - Host isolation evidence: contexto efímero sin storage heredado, rechazo browser-level de `file://` desde una página HTTP y cleanup normal/timeout/shutdown con árbol temporal eliminado. El sandbox fue solicitado, pero filesystem/sandbox OS-level y crash cleanup permanecen `LIMITATION`/`NOT EXECUTED`; esta evidencia no cierra el gate ni selecciona Playwright como dependencia productiva.
 - Provisioning experimental: Playwright `1.63.0` pudo iniciar Chrome Headless Shell `153.0.8010.12` con sandbox solicitado; esta disponibilidad local no selecciona un browser productivo ni cierra el gate.
 
+## Revisión consolidada
+
+La revisión consolidada de `docs/phase-08-decision-gate-review.md` clasifica la evidencia sin convertir `FAIL`, `SIMULATED`, `LIMITATION` o `NOT EXECUTED` en `PASS`. Confirma como evidencia reproducible acotada los policies Fetch/SSRF, el bloqueo por proxy fixture de navegación, redirects, subrecursos, fetch/XHR y WebSocket, la relación DNS/IP/socket del fixture local, y el storage/cleanup normal del browser efímero.
+
+La misma revisión conserva como evidencia negativa el redirect público→interno que alcanzó el fixture bajo `browserContext.route()`. Service Worker tiene `PASS` únicamente en el fixture localhost del gate; debe confirmarse para el browser/provider elegido. HTTPS/TLS, DNS rebinding/pinning productivo, aislamiento OS/network, browser remoto, Search real y crash cleanup siguen pendientes o limitados por el entorno.
+
+Esta clasificación no cambia la decisión provisional: no selecciona proxy, gateway, browser local/remoto, Playwright productivo, sandbox, aislamiento de red ni provider.
+
 ## No decidido
 
 Este ADR no decide:
@@ -73,4 +81,5 @@ La consecuencia positiva es que no se inicia producción con una garantía basad
 - `docs/phase-08-architecture-decision-draft.md`
 - `docs/phase-08-egress-boundary-spike.md`
 - `docs/phase-08-egress-hardening-results.md`
+- `docs/phase-08-decision-gate-review.md`
 - `docs/adr/ADR-011-internet-and-browser-definition.md`

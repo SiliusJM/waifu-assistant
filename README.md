@@ -23,6 +23,7 @@ Documentacion de Phase 8:
 - `docs/phase-08-dns-socket-evidence-results.md`: evidencia controlada de DNS, IP efectiva, socket y bloqueo previo a conexión.
 - `docs/phase-08-https-tls-evidence-results.md`: evaluación de viabilidad TLS y limitación reproducible del fixture HTTPS.
 - `docs/phase-08-host-isolation-evidence-results.md`: evidencia experimental de almacenamiento, filesystem browser-level y cleanup.
+- `docs/phase-08-decision-gate-review.md`: revisión consolidada de la matriz y criterios de cierre de ADR-012.
 Phase 3 — Realtime Engine está COMPLETA y mergeada en `main`. La base incluye conversación de texto, tools seguras y un runtime interno de eventos, streaming abstracto, cancelación y concurrencia.
 
 Phase 4 — Voice Service está COMPLETA y mergeada en `main` mediante PR #4, con merge commit `1ec4384dc529ed303e85413e7969a3896c741a69`. Incluye contratos desacoplados de audio, STT, TTS y reproducción, `VoiceService`, `VoiceSession`, `VoiceError`, lifecycle, cancelación, timeout por etapa, cleanup, logging seguro, eventos correlacionados y mocks deterministas. Los proveedores reales de voz no fueron seleccionados ni integrados.
@@ -62,7 +63,7 @@ Instalar las dependencias y ejecutar:
 
 ## Próximo paso
 
-La siguiente etapa no es implementación productiva. El spike de egress ya demostró en un proxy fixture controlado que un boundary inferior puede bloquear redirects y destinos internos con `internalHits=0`, pero aún no demuestra aislamiento de red del host, DNS rebinding real ni HTTPS→HTTP en un fixture TLS. El runtime browser experimental ya fue provisionado y los harnesses locales disponibles fueron repetidos; la evaluación TLS confirmó una limitación del fixture y no produjo evidencia HTTPS. La evidencia de aislamiento browser/host ya caracteriza storage, filesystem browser-level y cleanup normal; el siguiente paso es cerrar las fronteras restantes —si el entorno puede proveer un mecanismo seguro y reproducible de certificado efímero— además de DNS rebinding real, aislamiento OS-level/de red, browser remoto y crash cleanup seguro y documentar la arquitectura definitiva antes de introducir herramientas de producción. Search real con credenciales temporales y browser remoto/crash cleanup siguen pendientes.
+La siguiente etapa no es implementación productiva. La revisión consolidada de ADR-012 mantiene el gate provisional: el proxy fixture demuestra controles inferiores en un entorno local, pero no aislamiento de red del host, DNS rebinding/pinning real ni HTTPS/TLS. El runtime browser experimental ya está provisionado y la evidencia de aislamiento browser/host caracteriza storage, filesystem browser-level y cleanup normal; el siguiente paso es cerrar las fronteras restantes —si existen entornos seguros y reproducibles— además de DNS/socket real, TLS, aislamiento OS-level/de red, browser remoto, crash cleanup seguro y Search con credenciales temporales, antes de documentar una arquitectura definitiva.
 
 Los proveedores reales de STT/TTS se evaluarán mediante un spike comparativo independiente y ADR-007; no forman parte del cierre de Phase 4.
 
