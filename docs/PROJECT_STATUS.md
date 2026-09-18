@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-Phase 8 — Internet & Browser (definición, spike documental y controlled tests aprobados y mergeados; implementación de producción no iniciada).
+Phase 8 — Internet & Browser (definición, spikes y controlled/external tests aprobados y mergeados; implementación de producción no iniciada).
 
 ## Status
 
-Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #6. El merge quedó registrado en `532c956e2a407b9e9e540584947a24739490bb03`. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7; el merge quedó registrado en `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La implementación de Phase 7 fue revisada, corregida y mergeada mediante PR #8; el merge quedó registrado en `417a30deca884f55057164475b08b2521d47347d`. La definición de Phase 8 fue revisada y mergeada mediante PR #9; el merge quedó registrado en `ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`. El spike de providers y sandbox fue revisado y mergeado mediante PR #10; el merge quedó registrado en `bb29fb303c83eeed2c73b7d4944479756c2362ea`. Los controlled tests fueron revisados y mergeados mediante PR #11; el merge quedó registrado en `35045dcf9bcd9ff6b31c9bb7908af7872daae5a3`.
+Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #6. El merge quedó registrado en `532c956e2a407b9e9e540584947a24739490bb03`. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7; el merge quedó registrado en `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La implementación de Phase 7 fue revisada, corregida y mergeada mediante PR #8; el merge quedó registrado en `417a30deca884f55057164475b08b2521d47347d`. La definición de Phase 8 fue revisada y mergeada mediante PR #9; el merge quedó registrado en `ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`. El spike de providers y sandbox fue revisado y mergeado mediante PR #10; el merge quedó registrado en `bb29fb303c83eeed2c73b7d4944479756c2362ea`. Los controlled tests fueron revisados y mergeados mediante PR #11; el merge quedó registrado en `35045dcf9bcd9ff6b31c9bb7908af7872daae5a3`. La ejecución externa fue revisada y mergeada mediante PR #12; el merge quedó registrado en `4be0966603feeb97ad04cb86ea1f1c95f08d1d82`.
 
 ## Completed
 
@@ -49,35 +49,44 @@ Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #
 - Harness reproducible con 20 consultas Search, fixtures de Fetch, SSRF/DNS/redirect/cancelación/límites y policies explícitas de MIME y workspace.
 - Fetch/SSRF/DNS: 29/29 comprobaciones PASS.
 - Search: Brave, Tavily y Exa permanecen `NOT EXECUTED` por falta de credenciales.
-- Browser local/remoto, solicitudes secundarias, Service Workers y sandbox permanecen `NOT EXECUTED` por falta de entorno aislado.
-- DNS rebinding quedó validado únicamente como simulación controlada; no se afirma pinning real de socket/proxy/browser.
-- El harness no añadió dependencias, browser automation productiva, APIs de procesos ni cambios en `src/`.
+- External browser local: 17 PASS, 1 FAIL y 1 NOT EXECUTED; el FAIL observó un redirect público → interno que alcanzó el fixture interno.
+- Egress secundario: se observaron/bloquearon image, script, stylesheet, iframe, fetch/XHR y WebSocket dentro del harness; esta evidencia no equivale a aislamiento de red.
+- Service Worker: comportamiento observado con limitación explícita de routing.
+- Sandbox: se solicitó Chromium con `chromiumSandbox=true` y sin `--no-sandbox`; esto no se considera prueba OS-level de efectividad del sandbox.
+- Browser remoto y DNS rebinding real: `NOT EXECUTED`.
+- Crash cleanup seguro: `NOT EXECUTED`; cleanup normal de context/browser y timeout sí fueron ejecutados.
+- Playwright `1.63.0` fue añadido únicamente como `devDependency` experimental para el harness externo.
+- El harness externo no añadió APIs de procesos, shell, providers productivos ni cambios en `src/`.
 
 ## In Progress
 
-Ninguno. El controlled-test spike está cerrado y mergeado; la implementación productiva de Phase 8 todavía no ha comenzado.
+Ninguno. La evidencia externa fue cerrada y mergeada; la implementación productiva de Phase 8 todavía no ha comenzado.
 
 ## Blocked
 
 - Las métricas de hardware siguen pendientes por el bloqueo de WMI.
 - La selección final de proveedores de STT/TTS requiere pruebas locales comparables de compatibilidad, latencia, calidad, consumo, cancelación y licencias.
 - Search requiere credenciales temporales para ejecutar el benchmark real.
-- Browser requiere un entorno aislado y controlado para probar egress, solicitudes secundarias, Service Workers, sandbox y cleanup.
+- Browser remoto y DNS rebinding real requieren entornos aislados apropiados.
+- El redirect público → interno demuestra que `browserContext.route()` no debe tratarse como frontera completa de egress/SSRF.
+- Service Worker mantiene una frontera especial de interception; la arquitectura definitiva requiere un mecanismo de red/egress inferior o complementario.
 
 ## Next
 
-Ejecutar la siguiente batería controlada en un entorno preparado, sin incorporar todavía código de producción:
-1. Search con credenciales temporales para Brave, Tavily y Exa usando el corpus de 20 consultas y métricas previamente definidas.
-2. Browser local efímero con sandbox habilitado y suite de egress para navegación, redirects, subrecursos, XHR/fetch, WebSockets y Service Workers.
-3. Si se dispone de entorno remoto aislado, repetir las pruebas correspondientes sin asumir que el entorno local y remoto son equivalentes.
-4. Ejecutar pruebas de cleanup, timeout, crash controlado, downloads/uploads y límites.
-5. Solo después de esa evidencia, seleccionar decisiones de provider/browser/sandbox/egress y documentarlas antes de implementar producción.
+Sin introducir código de producción todavía:
+1. Diseñar y probar un boundary de egress inferior al browser para bloquear destinos internos y validar redirects por salto.
+2. Comprobar si ese boundary puede cubrir también solicitudes secundarias y Service Workers.
+3. Repetir Search con credenciales temporales para Brave, Tavily y Exa y medir las 20 consultas.
+4. Ejecutar browser remoto, crash cleanup seguro y DNS rebinding real solo en entornos aislados.
+5. Convertir la evidencia obtenida en una decisión arquitectónica documentada antes de implementar `WebSearchProvider`, `WebFetchProvider` o `BrowserProvider`.
 
 ## Phase 8 — Internet & Browser
 
-La definición arquitectónica, el spike de providers/sandbox y los controlled tests fueron revisados y mergeados a `main` mediante PR #9, PR #10 y PR #11, respectivamente. El alcance actual sigue siendo preproducción: separa búsqueda, fetch y browser; define lifecycle, permisos, prompt injection, privacidad, concurrencia e integración con `ToolManager`; y aporta evidencia local de Fetch/SSRF/DNS/policies.
+La definición arquitectónica, el spike de providers/sandbox, los controlled tests y la ejecución externa fueron revisados y mergeados a `main` mediante PR #9, PR #10, PR #11 y PR #12, respectivamente. El alcance actual sigue siendo preproducción.
 
-No se considera implementada. Search real y Browser real continúan pendientes de ejecución en entornos apropiados. Los 29/29 PASS corresponden a fixtures y políticas controladas; no demuestran pinning de red de producción, egress de navegador ni selección definitiva de providers.
+La evidencia Fetch/SSRF/DNS/policies es 29/29 PASS en fixtures controlados. El experimento browser local ejecutó 19 comprobaciones: 17 PASS, 1 FAIL y 1 NOT EXECUTED. El FAIL es una evidencia negativa deliberada: el redirect público → interno alcanzó el fixture interno pese al routing configurado. Por tanto, `browserContext.route()` no debe considerarse suficiente para una frontera de egress/SSRF de producción.
+
+Search real, browser remoto, DNS rebinding real y crash cleanup seguro continúan pendientes. No hay selección definitiva de provider, browser, sandbox o egress, y no hay implementación de producción.
 
 ## Known Risks
 
