@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] — Phase 8 definition
+## Phase 8 — Internet & Browser definition
 
 ### Added
 
@@ -15,7 +15,7 @@
 
 ### Status
 
-- Definicion documental en `phase/08-internet-browser`; no implementada, no mergeada a `main` y sin PR abierto.
+- Definición documental revisada y mergeada a `main` mediante PR #9; Phase 8 sigue sin implementación de producción.
 
 ## Phase 6 - Personality System
 
