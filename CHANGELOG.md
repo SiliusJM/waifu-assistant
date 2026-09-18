@@ -1,3 +1,18 @@
+## Phase 8 — Network/Host Isolation Capability Spike
+
+### Added
+
+- Spike documental para caracterizar capacidades observadas de Hyper-V, Windows Sandbox, Firewall, interfaces virtuales y WSL2.
+- Registro explícito de límites de permisos y de la diferencia entre capacidad observada y evidencia real de aislamiento OS-level.
+
+### Status / limitations
+
+- PR #24 revisado y mergeado a `main`; merge commit `4ab2bf774fd2d276a824415117a8303eadbab8f8`.
+- Las señales del sistema (`2009`, build `26200`, arquitectura de 64 bits y etiqueta `Pro`) se conservaron como inconsistentes; la identificación exacta del producto/versión queda `LIMITATION`.
+- Se observaron señales de Hyper-V, Firewall, `vEthernet (Default Switch)` y WSL2, pero no se administraron VMs/switches, no se modificaron reglas ni se habilitaron features.
+- Windows Sandbox no quedó confirmado, WSL2 no tiene distribución y no se obtuvo evidencia OS-level de aislamiento de red/filesystem/DNS/socket ni crash cleanup.
+- ADR-012 permanece provisional en `decision-gate`; no se selecciona un mecanismo de aislamiento ni se inicia implementación productiva.
+
 ## Phase 8 — Internet & Browser consolidated ADR-012 decision-gate review
 
 ### Added
