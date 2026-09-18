@@ -8,6 +8,7 @@
 ### Status / limitations
 
 - ADR-012 permanece provisional y en estado `decision-gate`.
+- PR #23 revisado y mergeado a `main`; merge commit `c0ecf47a342f21cddddfb7a2c75905ae9b144698`.
 - Se conserva el `FAIL` del redirect público → interno bajo `browserContext.route()`.
 - HTTPS/TLS, DNS rebinding/pinning productivo, aislamiento OS/network, browser remoto, Search real y crash cleanup siguen pendientes o limitados por el entorno.
 - No se implementaron providers productivos ni se añadieron dependencias.
