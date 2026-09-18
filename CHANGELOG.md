@@ -19,6 +19,12 @@
 
 - Implementación pendiente de revisión externa en `phase/06-personality-system`; no mergeada a `main`.
 
+### Fixed
+
+- Registro de personalidad protegido con copia defensiva y deep-freeze en todos sus accesores.
+- Preference overrides normalizados y validados en runtime con fallback seguro.
+- `identity.description` conservado como metadata del snapshot, sin compilarse como instrucción normativa.
+
 Todos los cambios relevantes del proyecto se documentarán aquí.
 
 ## [Unreleased]

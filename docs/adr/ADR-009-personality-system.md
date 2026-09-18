@@ -18,6 +18,10 @@ Los perfiles usan JSON canónico validado al cargar y pueden coexistir varios pe
 
 La personalidad puede exponer hints abstractos de voz, pero no conoce TTS/STT ni providers concretos. Los límites de seguridad, permisos y tool calling siguen fuera del sistema. No se permite `systemPrompt` libre, evaluación dinámica ni contenido que intente introducir ejecución.
 
+`CharacterIdentity.description` se conserva como metadata inmutable del `PersonalitySnapshot`, pero no se compila a `instructions`. Así el campo descriptivo no puede comportarse como política normativa ni como `systemPrompt`; tampoco tiene autoridad sobre tools, permisos, riesgo o procesos. Los overrides de interacción se normalizan en runtime: valores inválidos vuelven a los valores del perfil y locales no permitidos vuelven al locale por defecto/fallback.
+
+`PersonalityRegistry` realiza copia defensiva y deep-freeze al registrar y cargar perfiles. `get`, `select`, `defaultProfile` y `list` solo exponen datos congelados; cualquier cambio debe pasar por `register` y validación otra vez.
+
 ## Consecuencias
 
 Se obtiene reproducibilidad mediante versiones y fingerprint, snapshots seguros por interacción y una integración pequeña con el core. La política de conflicto es explícita y limitada a personalidad; no crea autoridad sobre seguridad o tools. La evolución futura hacia streaming, realtime, memoria y voz conserva el mismo boundary.

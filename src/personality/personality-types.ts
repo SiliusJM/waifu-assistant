@@ -141,6 +141,8 @@ export interface PersonalitySnapshot {
   readonly personalityId: string;
   readonly profileVersion: string;
   readonly schemaVersion: PersonalitySchemaVersion;
+  /** Identity metadata for presentation/audit; description is not compiled as policy text. */
+  readonly identity: CharacterIdentity;
   readonly instructions: readonly PersonalityInstruction[];
   readonly voiceHints?: VoicePresentationHints;
   readonly fingerprint?: string;

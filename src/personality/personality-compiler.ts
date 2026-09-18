@@ -91,9 +91,10 @@ function stableSerialize(value: unknown): string {
 }
 
 function freezeSnapshot(snapshot: PersonalitySnapshot): PersonalitySnapshot {
+  const identity = Object.freeze({ ...snapshot.identity });
   const instructions = Object.freeze(snapshot.instructions.map((instruction) => Object.freeze({ ...instruction })));
   const voiceHints = snapshot.voiceHints === undefined ? undefined : Object.freeze({ ...snapshot.voiceHints });
-  return Object.freeze({ ...snapshot, instructions, ...(voiceHints === undefined ? {} : { voiceHints }) });
+  return Object.freeze({ ...snapshot, identity, instructions, ...(voiceHints === undefined ? {} : { voiceHints }) });
 }
 
 export class PersonalityCompiler implements PersonalityCompilerContract {
@@ -114,7 +115,6 @@ export class PersonalityCompiler implements PersonalityCompilerContract {
         'The assistant identity name is ' + identity.displayName + '.',
         identity.role ? 'Its role is ' + identity.role + '.' : '',
         identity.pronouns ? 'Use these pronouns when relevant: ' + identity.pronouns + '.' : '',
-        identity.description ? 'Identity description: ' + identity.description : '',
       ].filter(Boolean).join(' '),
     }];
     instructions.push(...resolved.traits.map(traitInstruction));
@@ -135,6 +135,7 @@ export class PersonalityCompiler implements PersonalityCompilerContract {
       personalityId: profile.personalityId,
       profileVersion: profile.profileVersion,
       schemaVersion: profile.schemaVersion,
+      identity,
       instructions: normalized,
       voiceHints: profile.voiceHints,
     };
@@ -143,6 +144,7 @@ export class PersonalityCompiler implements PersonalityCompilerContract {
       personalityId: profile.personalityId,
       profileVersion: profile.profileVersion,
       schemaVersion: profile.schemaVersion,
+      identity,
       instructions: normalized,
       ...(profile.voiceHints === undefined ? {} : { voiceHints: profile.voiceHints }),
       fingerprint,

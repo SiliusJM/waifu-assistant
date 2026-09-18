@@ -30,13 +30,17 @@ PersonalityValidator -> PersonalityPolicy -> PersonalityCompiler
 - `VoicePresentationHints` abstractos, sin conversión a parámetros de un proveedor TTS.
 - `PersonalitySnapshot` con `personalityId`, `profileVersion`, `schemaVersion`, instrucciones ordenadas, hints opcionales y fingerprint.
 
+El snapshot conserva `CharacterIdentity` como metadata inmutable. `displayName`, `role` y `pronouns` pueden participar en la instrucción de identidad; `description` queda fuera de `instructions` y nunca se convierte en texto normativo. Por diseño no puede actuar como `systemPrompt`, autorizar tools, modificar permisos/riesgo ni ejecutar procesos.
+
 El perfil por defecto usa los traits catalogados `warm`, `direct` y `empathetic`. El catálogo inicial también incluye `energetic`, `formal` y `humorous`.
 
 ## Validación y compilación
 
 La validación es estricta: rechaza schema/versiones incompatibles, IDs no controlados, duplicados, rangos inválidos, campos desconocidos, textos fuera de límites, locales inválidos y contenido que intenta introducir instrucciones de ejecución. No existe un campo `systemPrompt` libre ni evaluación dinámica.
 
-El compilador es puro y determinista: aplica la política declarada, ordena por prioridad e ID, deduplica, limita el tamaño total y calcula un fingerprint SHA-256 del resultado. Los snapshots y sus instrucciones quedan congelados para que cambiar un perfil solo afecte interacciones futuras.
+El compilador es puro y determinista: valida y normaliza overrides transitorios, aplica la política declarada, ordena por prioridad e ID, deduplica, limita el tamaño total y calcula un fingerprint SHA-256 del resultado. Los snapshots y sus instrucciones quedan congelados para que cambiar un perfil solo afecte interacciones futuras.
+
+`PersonalityRegistry` hace copia defensiva y deep-freeze al registrar/cargar. Sus accesores devuelven perfiles congelados y `list()` devuelve también una colección congelada; los cambios requieren volver a registrar y validar explícitamente.
 
 ## Persistencia y JSON
 

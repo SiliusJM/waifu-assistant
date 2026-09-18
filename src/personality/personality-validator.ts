@@ -38,14 +38,14 @@ function addIssue(issues: PersonalityValidationIssue[], path: string, code: stri
   issues.push({ path, code, message });
 }
 
-function validateText(value: unknown, path: string, issues: PersonalityValidationIssue[], required: boolean, maxLength = MAX_TEXT_LENGTH): void {
+function validateText(value: unknown, path: string, issues: PersonalityValidationIssue[], required: boolean, maxLength = MAX_TEXT_LENGTH, rejectUnsafe = true): void {
   if (value === undefined && !required) return;
   if (typeof value !== 'string' || (required && value.trim().length === 0)) {
     addIssue(issues, path, 'INVALID_TEXT', required ? 'A non-empty text value is required.' : 'Text must be a string.');
     return;
   }
   if (value.length > maxLength) addIssue(issues, path, 'TEXT_TOO_LONG', 'Text exceeds the maximum length.');
-  if (UNSAFE_CONTENT_PATTERN.test(value)) addIssue(issues, path, 'UNSAFE_CONTENT', 'Text contains an unsupported execution or instruction directive.');
+  if (rejectUnsafe && UNSAFE_CONTENT_PATTERN.test(value)) addIssue(issues, path, 'UNSAFE_CONTENT', 'Text contains an unsupported execution or instruction directive.');
 }
 
 function validateId(value: unknown, path: string, issues: PersonalityValidationIssue[]): void {
@@ -70,7 +70,8 @@ function validateIdentity(value: unknown, issues: PersonalityValidationIssue[]):
   validateText(value.displayName, path + '.displayName', issues, true, 80);
   validateText(value.role, path + '.role', issues, false, 120);
   validateText(value.pronouns, path + '.pronouns', issues, false, 80);
-  validateText(value.description, path + '.description', issues, false, MAX_TEXT_LENGTH);
+  // Description is retained as metadata and is never compiled into normative instructions.
+  validateText(value.description, path + '.description', issues, false, MAX_TEXT_LENGTH, false);
 }
 
 function validateTraits(value: unknown, issues: PersonalityValidationIssue[]): void {

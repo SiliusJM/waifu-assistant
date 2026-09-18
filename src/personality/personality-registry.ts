@@ -18,6 +18,17 @@ function stableSerialize(value: unknown): string {
   return '{' + Object.keys(record).filter((key) => record[key] !== undefined).sort().map((key) => JSON.stringify(key) + ':' + stableSerialize(record[key])).join(',') + '}';
 }
 
+function cloneAndFreeze<T>(value: T): T {
+  if (typeof value !== 'object' || value === null) return value;
+  const clone = structuredClone(value);
+  const freeze = (current: unknown): unknown => {
+    if (typeof current !== 'object' || current === null || Object.isFrozen(current)) return current;
+    for (const nested of Object.values(current as Record<string, unknown>)) freeze(nested);
+    return Object.freeze(current);
+  };
+  return freeze(clone) as T;
+}
+
 export function serializePersonalityProfile(profile: PersonalityProfile): string {
   return stableSerialize(profile);
 }
@@ -52,7 +63,8 @@ export class PersonalityRegistry {
     }
     const previousDefault = this.defaultPersonalityId;
     const wasLoaded = this.profiles.has(profile.personalityId);
-    this.profiles.set(profile.personalityId, profile);
+    const storedProfile = cloneAndFreeze(profile);
+    this.profiles.set(profile.personalityId, storedProfile);
     this.publish('personality_loaded', {
       personalityId: profile.personalityId,
       profileVersion: profile.profileVersion,
@@ -77,7 +89,7 @@ export class PersonalityRegistry {
     }
     const profile = this.validator.assertValid(value);
     this.register(profile, options);
-    return profile;
+    return this.require(profile.personalityId);
   }
 
   get(personalityId: string): PersonalityProfile | undefined {
@@ -85,7 +97,7 @@ export class PersonalityRegistry {
   }
 
   list(): readonly PersonalityProfile[] {
-    return [...this.profiles.values()].sort((left, right) => left.personalityId.localeCompare(right.personalityId));
+    return Object.freeze([...this.profiles.values()].sort((left, right) => left.personalityId.localeCompare(right.personalityId)));
   }
 
   get defaultProfile(): PersonalityProfile {
