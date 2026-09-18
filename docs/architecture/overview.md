@@ -2,7 +2,7 @@
 
 ## Estado
 
-Este documento describe los límites y contratos implementados hasta Phase 4. No representa una implementación completa del asistente.
+Este documento describe los límites y contratos implementados hasta Phase 6. No representa una implementación completa del asistente.
 
 ## Capas
 
@@ -62,4 +62,4 @@ Seguridad, permisos, configuración, logging, métricas, manejo de errores, prue
 
 ## Estado actual
 
-La implementación contiene ciclo de vida de aplicación, AssistantCore, sesión en memoria, proveedores mock/direct, configuración, errores, logging, tools de Phase 2, Realtime Engine de Phase 3 y Voice Service de Phase 4. Voice Service usa únicamente mocks, mantiene el audio en memoria y requiere integración explícita con el llamador. No hay UI, proveedores de voz reales, memoria persistente, herramientas del sistema, routing determinista ni agente autónomo.
+La implementación contiene ciclo de vida de aplicación, AssistantCore, sesión en memoria, proveedores mock/direct, configuración, errores, logging, tools de Phase 2, Realtime Engine de Phase 3, Voice Service/streaming de Phases 4–5 y Personality System de Phase 6. Voice Service usa únicamente mocks y requiere integración explícita con el llamador. Personality System usa perfiles declarativos, validación estricta, compilación determinista y snapshots por interacción. No hay UI, proveedores de voz reales, memoria persistente, herramientas del sistema, routing determinista ni agente autónomo.
