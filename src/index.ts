@@ -45,3 +45,4 @@ export type {
 } from './tools/tool-types.js';
 export * from './realtime/index.js';
 export * from './voice/index.js';
+export * from './avatar/index.js';

@@ -12,7 +12,7 @@ Phase 5 — Streaming Voice & Interruptions está COMPLETA y mergeada en `main` 
 
 Phase 6 — Personality System está COMPLETA y mergeada en `main` mediante PR #6, con merge commit `532c956e2a407b9e9e540584947a24739490bb03`. Añade personalidad declarativa, catálogos controlados, validación estricta, snapshots por interacción, registry multi-perfil, JSON canónico e integración opcional con `AssistantCore`. No añade memoria persistente, emoción, voz real ni UI multi-personaje.
 
-Phase 7 — Avatar System está DEFINIDA y aprobada arquitectónicamente mediante PR #7, con merge commit `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La fase todavía no está implementada; la definición establece los contratos, lifecycle, máquina visual, concurrencia, seguridad y límites para una futura implementación desacoplada del renderer.
+Phase 7 — Avatar System está implementada en la rama `phase/07-avatar-system-implementation` y pendiente de revisión/merge. Incluye contratos, lifecycle, máquina visual, concurrencia bounded, capabilities, eventos, policy cerrada, provider mock y tests; no incluye renderer ni UI.
 
 ## Principios
 
@@ -43,7 +43,7 @@ Instalar las dependencias y ejecutar:
 
 ## Próximo paso
 
-Implementar Phase 7 en una rama separada siguiendo la definición aprobada. No iniciar Phase 8 hasta cerrar, revisar y mergear la implementación de Phase 7.
+Revisar y mergear Phase 7 desde `phase/07-avatar-system-implementation`. No iniciar Phase 8 antes del cierre.
 
 Los proveedores reales de STT/TTS se evaluarán mediante un spike comparativo independiente y ADR-007; no forman parte del cierre de Phase 4.
 
@@ -62,5 +62,5 @@ Los proveedores reales de STT/TTS se evaluarán mediante un spike comparativo in
 - `docs/phases/phase-04-voice-service.md`: alcance, contratos, seguridad y criterios de Phase 4.
 - `docs/phases/phase-05-streaming-voice-and-interruptions.md`: alcance, contratos, seguridad y verificación de Phase 5.
 - `docs/phases/phase-06-personality-system.md`: alcance, contratos, seguridad y verificación de Phase 6.
-- `docs/phases/phase-07-avatar-system.md`: definición y arquitectura propuesta de Phase 7; todavía no implementada.
-- `docs/adr/ADR-010-avatar-system-definition.md`: ADR propuesto para revisión humana.
+- `docs/phases/phase-07-avatar-system.md`: definición, implementación acotada y criterios de Phase 7.
+- `docs/adr/ADR-010-avatar-system-definition.md`: decisión arquitectónica de Avatar System y límites de implementación.

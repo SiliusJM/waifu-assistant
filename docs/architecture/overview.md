@@ -2,7 +2,7 @@
 
 ## Estado
 
-Este documento describe los límites y contratos implementados hasta Phase 6 y la definición arquitectónica aprobada de Phase 7. No representa una implementación completa del asistente.
+Este documento describe los límites y contratos implementados hasta Phase 7. No representa una implementación completa del asistente.
 
 ## Capas
 
@@ -56,9 +56,9 @@ Phase 6 añade una capa declarativa entre la configuración de personalidad y `A
 
 Personality System no es un agente, un motor de seguridad, una capa de permisos, una memoria, un coordinador de voz ni un sistema de tools. No usa APIs de procesos, proveedores reales, LLM real, persistencia, hot reload o UI. Los hints de voz son abstractos y no conocen TTS.
 
-## Avatar System (Phase 7 - definición aprobada)
+## Avatar System (Phase 7 - implementación acotada)
 
-Phase 7 tiene una definición arquitectónica aprobada mediante PR #7 y merge commit `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. Propone una capa de presentación desacoplada con adaptadores de eventos, `AvatarController`, `AvatarRuntime`, snapshots visuales inmutables y un `AvatarProvider` reemplazable. Los estados visuales iniciales son `IDLE`, `LISTENING`, `SPEAKING` y `REACTION`; el lifecycle técnico se mantiene separado. La implementación todavía no existe y no se ha elegido renderer, host de escritorio, formato de assets ni tecnología 2D/3D.
+Phase 7 tiene una definición arquitectónica aprobada mediante PR #7 y merge commit `c30ccd3bff298c37cc1dd12a01ec775074b83b02`, materializada en la rama `phase/07-avatar-system-implementation`. La capa incluye adaptadores de entrada por señales normalizadas, `AvatarController`, `AvatarRuntime`, snapshots visuales inmutables, capabilities y un `AvatarProvider` reemplazable. Los estados visuales son `IDLE`, `LISTENING`, `SPEAKING` y `REACTION`; el lifecycle técnico se mantiene separado. No se ha elegido renderer, host de escritorio, formato de assets ni tecnología 2D/3D.
 
 El avatar consume señales normalizadas y metadata controlada. No importa `RealtimeEngine`, `VoiceService` o `Personality System`, no interpreta instrucciones de personalidad, no ejecuta herramientas y no accede a procesos, shell, filesystem arbitrario, audio crudo o conversaciones.
 

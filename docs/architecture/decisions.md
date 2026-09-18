@@ -10,7 +10,7 @@ Las decisiones relevantes se registran como ADRs para preservar contexto y facil
 - ADR-006: contratos, lifecycle y privacidad del Voice Service para Phase 4.
 - ADR-008: streaming de voz, backpressure, concurrencia e interrupciones para Phase 5.
 - ADR-009: Personality System declarativo, validado y aplicado mediante snapshots por interacción.
-- ADR-010: definición desacoplada del Avatar System, aceptada como definición arquitectónica; la implementación queda para la fase posterior.
+- ADR-010: definición desacoplada del Avatar System, aceptada como definición arquitectónica y materializada por el núcleo de Phase 7 en una rama separada; renderer y host siguen fuera de alcance.
 
 Decisiones futuras previstas, solo cuando exista evidencia:
 

@@ -2,7 +2,7 @@
 
 ## Estado
 
-Aceptada como definición arquitectónica. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7 con merge commit `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. No hay implementación de producción ni decisión tecnológica definitiva sobre renderer.
+Aceptada como definición arquitectónica. La definición de Phase 7 fue revisada, corregida y mergeada mediante PR #7 con merge commit `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La implementación acotada está en `phase/07-avatar-system-implementation` y pendiente de revisión/merge; no existe decisión tecnológica definitiva sobre renderer.
 
 ## Contexto
 
@@ -46,11 +46,13 @@ El coste es una capa de adaptación y una decisión posterior sobre manifests, c
 
 ## Decisiones futuras de implementación
 
-La definición queda aprobada. Permanecen para la fase de implementación o futuros spikes las decisiones sobre:
+La definición queda aprobada y el núcleo de implementación queda limitado a los contratos descritos. Permanecen para futuros spikes las decisiones sobre:
 
 - contrato concreto de fallback cuando el renderer no esté disponible;
 - primer renderer y estrategia de assets;
 - owner de los adaptadores de eventos;
 - campos de identidad expuestos a la futura UI.
+
+La implementación actual no introduce renderer, UI, assets reales, persistencia, providers externos ni APIs de procesos. La política de concurrencia conserva una sola operación `present()` activa; providers interrumpibles reciben abort y providers no interrumpibles mantienen como máximo un snapshot pendiente latest-wins.
 
 Las decisiones aprobadas de esta definición incluyen el snapshot compuesto, `baseState` como única fuente de restauración, secuencia global, `AvatarProviderCapabilities` y la política para providers interrumpibles y no interrumpibles.

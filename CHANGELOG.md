@@ -27,9 +27,22 @@
 
 ### Status
 
-- Phase 7 definida y aprobada arquitectónicamente; la implementación de producción todavía no ha comenzado.
+- Phase 7 definida y aprobada arquitectónicamente; su implementación está en `phase/07-avatar-system-implementation` y pendiente de revisión/merge.
 
 Todos los cambios relevantes del proyecto se documentarán aquí.
+
+## Phase 7 — Avatar System implementation
+
+### Added
+
+- `AvatarController` y `AvatarSignalNormalizer` con estados visuales controlados, snapshots inmutables, `baseState`, correlación y secuencia global.
+- `AvatarRuntime`, lifecycle técnico, eventos acotados, capabilities, policy cerrada, `AvatarProvider` abstracto y `MockAvatarProvider`.
+- Coordinación latest-wins con una sola presentación activa y como máximo un snapshot pendiente, incluyendo providers interrumpibles y no interrumpibles.
+- Suite determinista de Phase 7; verificación total actual: 92/92 tests.
+
+### Security
+
+- Sin renderer, UI, assets reales, persistencia, URLs arbitrarias, filesystem de producción, shell, PowerShell, CMD, `child_process`, `exec` o `spawn`.
 
 ## [Unreleased]
 

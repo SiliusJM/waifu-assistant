@@ -2,7 +2,7 @@
 
 ## Estado
 
-DEFINICIÓN APROBADA. La propuesta fue revisada, corregida y mergeada mediante PR #7, con merge commit `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. Phase 7 todavía no está implementada y la definición no añade código de producción, dependencias ni assets.
+DEFINICIÓN APROBADA E IMPLEMENTACIÓN EN REVISIÓN. La definición fue revisada, corregida y mergeada mediante PR #7, con merge commit `c30ccd3bff298c37cc1dd12a01ec775074b83b02`. La implementación está en `phase/07-avatar-system-implementation`; añade únicamente el núcleo desacoplado, tests y documentación de cierre. No añade renderer, UI, assets reales ni APIs de procesos.
 
 ## 1. Objetivo
 
@@ -57,7 +57,7 @@ Realtime/Voice/User adapters
        UI / desktop host
 ```
 
-`AvatarController` convierte señales validadas y tipadas en un estado visual. `AvatarRuntime` administra lifecycle, cancelación, orden y conexión opcional con el provider. `AvatarProvider` solo presenta snapshots compuestos y reporta capacidades/errores. `REACTION` no inicia una segunda operación concurrente: el controller produce un único snapshot cuya `state` es `reaction` y cuyo `baseState` conserva `speaking`, `listening` o `idle`. El host de UI contiene ventana, canvas, transporte y permisos de acceso a assets.
+`AvatarController` convierte señales validadas y tipadas en un estado visual. `AvatarRuntime` administra lifecycle, cancelación, orden y conexión opcional con el provider. `AvatarProvider` solo presenta snapshots compuestos y reporta capacidades/errores. `REACTION` no inicia una segunda operación concurrente: el controller produce un único snapshot cuya `state` es `REACTION` y cuyo `baseState` conserva `SPEAKING`, `LISTENING` o `IDLE`. El host de UI contiene ventana, canvas, transporte y permisos de acceso a assets.
 
 El avatar debe ser opcional: el fallo del renderer no bloquea ni cambia el resultado de `AssistantCore`, `RealtimeEngine` o `VoiceService`.
 
@@ -94,20 +94,20 @@ Describe un `characterId` estable, metadata de presentación y el manifest de as
 
 Reutiliza el patrón `EventBus` para eventos tipados de lifecycle, estado y renderer. Solo transporta metadata acotada; nunca audio crudo, imágenes, prompts o transcripciones completas.
 
-## 7. Contratos conceptuales
+## 7. Contratos implementados
 
-Los siguientes nombres y formas son una propuesta arquitectónica, no APIs implementadas todavía.
+Los siguientes nombres y formas son los contratos TypeScript implementados por el núcleo de esta fase; no implican un renderer concreto.
 
 ```ts
-type AvatarVisualState = 'idle' | 'listening' | 'speaking' | 'reaction';
+type AvatarVisualState = 'IDLE' | 'LISTENING' | 'SPEAKING' | 'REACTION';
 
 type AvatarLifecycleState =
-  | 'created' | 'initializing' | 'loading' | 'ready'
-  | 'error' | 'shutting_down' | 'stopped';
+  | 'CREATED' | 'INITIALIZING' | 'LOADING' | 'READY'
+  | 'ERROR' | 'SHUTTING_DOWN' | 'STOPPED';
 
 type AvatarSignal =
   | {
-      readonly type: 'listen_started' | 'listen_stopped' | 'speech_started' | 'speech_stopped' | 'visual_reset';
+      readonly type: 'listen_started' | 'listen_stopped' | 'speech_started' | 'speech_stopped' | 'reaction_finished' | 'visual_reset';
       readonly correlationId: string;
       readonly sourceId: string;
       readonly sourceSequence: number;
@@ -130,7 +130,7 @@ interface AvatarPresentationSnapshot {
   readonly runtimeId: string;
   readonly characterId: string;
   readonly state: AvatarVisualState;
-  readonly baseState: 'idle' | 'listening' | 'speaking';
+  readonly baseState: 'IDLE' | 'LISTENING' | 'SPEAKING';
   readonly expressionId?: string;
   readonly animationId?: string;
   readonly intensity?: number;
@@ -149,7 +149,7 @@ interface AvatarProviderCapabilities {
 
 interface AvatarProvider {
   readonly name: string;
-  initialize(): Promise<AvatarProviderCapabilities>;
+  initialize(signal?: AbortSignal): Promise<AvatarProviderCapabilities>;
   present(snapshot: AvatarPresentationSnapshot, signal: AbortSignal): Promise<void>;
   shutdown(signal?: AbortSignal): Promise<void>;
 }
@@ -174,7 +174,7 @@ SPEAKING  -> IDLE | LISTENING | REACTION
 REACTION  -> IDLE | LISTENING | SPEAKING
 ```
 
-`REACTION` es una presentación transitoria compuesta que conserva `baseState`. Si ocurre durante `SPEAKING`, el controller reemplaza el snapshot vigente por un único snapshot con `state = reaction` y `baseState = speaking`; no crea una segunda llamada concurrente ni una segunda operación del provider. Al finalizar o cancelarse la reacción, el controller produce el siguiente snapshot con `state = baseState`. `baseState` es la única fuente de verdad para la restauración. La reacción no cambia el estado lógico de voz.
+`REACTION` es una presentación transitoria compuesta que conserva `baseState`. Si ocurre durante `SPEAKING`, el controller reemplaza el snapshot vigente por un único snapshot con `state = REACTION` y `baseState = SPEAKING`; no crea una segunda llamada concurrente ni una segunda operación del provider. Al finalizar o cancelarse la reacción, el controller produce el siguiente snapshot con `state = baseState`. `baseState` es la única fuente de verdad para la restauración. La reacción no cambia el estado lógico de voz.
 
 Una transición repetida con el mismo estado y correlación es idempotente y no publica un cambio duplicado. Una solicitud inválida produce un error tipado o se descarta de forma observable, sin mutar parcialmente el estado.
 
@@ -357,7 +357,7 @@ La observabilidad debe distinguir estado solicitado, estado aceptado y presentac
 6. Definir el owner de los adaptadores que traducen Voice/Realtime events a `AvatarSignal`.
 7. Definir formato de manifest, integridad y almacenamiento cuando exista un spike de assets.
 
-## 27. Criterios de aceptación para la futura implementación
+## 27. Criterios de aceptación de la implementación
 
 - TypeScript estricto y contratos sin dependencias de Electron/Vue/Three.js/Live2D/VTube Studio.
 - Máquina de estados determinista, transiciones inválidas rechazadas, duplicados idempotentes y secuencias antiguas descartadas.
@@ -380,4 +380,4 @@ En la futura implementación inicial todavía no deben incluirse renderer real, 
 
 ## Conclusión
 
-La definición aprobada deja un boundary pequeño: eventos normalizados entran, una máquina determinista produce snapshots visuales y un provider opcional los presenta. Phase 7 está aprobada a nivel arquitectónico y todavía no está implementada. La implementación debe comenzar en una rama separada y respetar estos contratos y límites; las decisiones de renderer, assets, UI y otros detalles explícitamente futuros se resolverán en sus fases correspondientes.
+La definición aprobada deja un boundary pequeño: eventos normalizados entran, una máquina determinista produce snapshots visuales y un provider opcional los presenta. La implementación de esta rama materializa ese boundary sin elegir renderer, assets, UI ni host de escritorio. La revisión y el merge quedan pendientes; no se inicia Phase 8.
