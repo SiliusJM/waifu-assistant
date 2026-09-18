@@ -6,7 +6,7 @@ Provisional / `decision-gate`. No es una decisión final ni autoriza implementac
 
 ## Contexto
 
-Phase 8 ya tiene definición, spike de providers/sandbox, controlled tests, ejecución externa, egress boundary spike y hardening por canal. La evidencia demuestra que `browserContext.route()` no basta como frontera completa: un redirect público→interno alcanzó el fixture. Un proxy/egress fixture local bloqueó redirects, secundarios y WebSocket con `internalHits=0`, pero Service Worker, HTTPS, DNS rebinding real, browser remoto, aislamiento del host y crash cleanup seguro siguen sin evidencia suficiente.
+Phase 8 ya tiene definición, spike de providers/sandbox, controlled tests, ejecución externa, egress boundary spike y hardening por canal. La evidencia demuestra que `browserContext.route()` no basta como frontera completa: un redirect público→interno alcanzó el fixture. Un proxy/egress fixture local bloqueó redirects, secundarios y WebSocket con `internalHits=0`. Un fixture adicional en `localhost` permitió ejecutar un Service Worker real y demostró observación/bloqueo del destino interno con `internalHits=0`; HTTPS, DNS rebinding real, browser remoto, aislamiento del host y crash cleanup seguro siguen sin evidencia suficiente.
 
 ## Decisión provisional
 
@@ -29,7 +29,7 @@ AssistantCore
 - Fetch/SSRF/DNS: `29/29 PASS` en fixtures controlados.
 - Route baseline: `17 PASS`, `1 FAIL`, `1 NOT EXECUTED`; redirect público→interno con `internalHits=1`.
 - Egress boundary: `19 PASS`, `0 FAIL`, `2 NOT EXECUTED`; `internalHits=0`.
-- Hardening: ocho canales ejecutados con `PASS` individual y `internalHits=0`; Service Worker `NOT EXECUTED`.
+- Hardening: ocho canales ejecutados con `PASS` individual y `internalHits=0`; el fixture adicional de Service Worker en `localhost` obtuvo `PASS` con observación y bloqueo individual.
 - DNS rebinding: `SIMULATED`, sin pinning real.
 - HTTPS, browser remoto y crash cleanup: `NOT EXECUTED`.
 - Browser local: contexto efímero, sandbox solicitado y cleanup normal; sin prueba de aislamiento OS-level.
@@ -50,7 +50,7 @@ Este ADR no decide:
 
 La decisión final requiere evidencia reproducible de:
 
-1. Service Worker que intente acceder a un destino interno y sea observado/bloqueado, o una limitación de provider explícitamente aceptada por threat model.
+1. Service Worker que intente acceder a un destino interno y sea observado/bloqueado. Esta condición está demostrada en el fixture `localhost`; todavía debe confirmarse para el provider/browser elegido.
 2. HTTPS público→HTTPS público, HTTPS→HTTP y HTTPS→interno.
 3. Resolución controlada con múltiples A/AAAA, cambio de respuesta y relación entre IP validada, IP efectiva y socket usado.
 4. `internalHits=0` por navegación, redirects, subrecursos, fetch/XHR, WebSocket y Service Worker.
