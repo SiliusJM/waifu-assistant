@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-Phase 6 — Personality System.
+Phase 7 — Avatar System (definición y arquitectura únicamente).
 
 ## Status
 
-COMPLETE. Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #6. El merge quedó registrado en `532c956e2a407b9e9e540584947a24739490bb03`.
+Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #6. El merge quedó registrado en `532c956e2a407b9e9e540584947a24739490bb03`. Phase 7 está únicamente en definición sobre `phase/07-avatar-system`; no está implementada ni mergeada.
 
 ## Completed
 
@@ -46,7 +46,7 @@ COMPLETE. Phase 6 fue revisada técnicamente, corregida y mergeada en `main` med
 
 ## In Progress
 
-Ninguno. Phase 6 está cerrada y mergeada en `main`.
+Definición arquitectónica de Phase 7 - Avatar System. La rama no contiene código de producción.
 
 ## Blocked
 
@@ -55,7 +55,7 @@ Ninguno. Phase 6 está cerrada y mergeada en `main`.
 
 ## Next
 
-Preparar la definición de Phase 7 — Avatar System. No implementar Phase 7 hasta que su alcance, contratos, criterios de aceptación y riesgos hayan sido revisados y aprobados.
+Revisar y aprobar externamente la definición de Phase 7. Después podrá abrirse una implementación separada; no iniciar Phase 8.
 
 ## Known Risks
 
