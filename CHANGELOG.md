@@ -130,3 +130,20 @@ Todos los cambios relevantes del proyecto se documentarán aquí.
 ### Status
 
 - Implementación revisada y corregida en `phase/05-streaming-voice`; PR #5 mergeado a `main` en `1f076df8e880c273abe261142aab9757c541d73e`. Verificación de cierre: 72/72 tests, build/lint/typecheck/check/diff-check OK.
+
+
+## Phase 6 — Personality System
+
+### Added
+
+- Personalidad declarativa con identidad, traits catalogados, tono, estilo, reglas, límites y locale.
+- Validator estricto, policy/compiler determinista, snapshots inmutables y fingerprint.
+- Registry multi-perfil en memoria, JSON canónico e integración opcional con `AssistantCore`.
+
+### Security
+
+- Sin `systemPrompt` libre, APIs de procesos/shell, autoridad sobre tools/permisos, memoria persistente, providers de voz o LLM real.
+
+### Status
+
+- Implementación revisada y corregida en `phase/06-personality-system`; PR #6 mergeado a `main` en `532c956e2a407b9e9e540584947a24739490bb03`. Verificación de cierre: 83/83 tests, build/lint/typecheck/check/diff-check OK.
