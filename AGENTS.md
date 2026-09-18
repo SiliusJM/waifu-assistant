@@ -31,6 +31,8 @@ Los proveedores reales de STT/TTS no fueron seleccionados ni integrados. ADR-007
 
 La definición, alcance, contratos, criterios de aceptación y riesgos de Phase 5 ya fueron revisados y aprobados para esta implementación.
 
+La definición, alcance, contratos, criterios de aceptación y riesgos de Phase 6 fueron revisados y aprobados antes de su implementación.
+
 ## Arquitectura y seguridad
 
 - Mantener el núcleo desacoplado de proveedores externos mediante interfaces.
