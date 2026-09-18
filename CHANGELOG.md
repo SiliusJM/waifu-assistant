@@ -173,6 +173,21 @@
 - PR #14 revisado y mergeado a `main`; merge commit `9dab02d72e710e691121da27489474d1ed4ccf3b`.
 - No se añadieron cambios en `src/`, manifests, lockfiles, APIs de procesos ni código productivo.
 
+## Phase 8 — Experimental Environment Readiness
+
+### Added
+
+- Checklist operativo para preparar una máquina o sesión dedicada antes de ejecutar la evidencia pendiente de Phase 8.
+- Requisitos de entrada, separación host/entorno aislado, rollback, credenciales temporales y criterios de evidencia por prueba.
+
+### Status / limitations
+
+- PR #27 revisado y mergeado a `main`; merge commit `cdb70f5b6b61464e70492131e63818eacf827328`.
+- No se habilitaron features, no se modificó Firewall, no se crearon VMs ni se instaló software.
+- HTTPS/TLS, DNS rebinding/pinning real, aislamiento OS/network/filesystem, browser remoto, crash cleanup y Search real permanecen pendientes y requieren cumplir el gate de preparación correspondiente.
+- ADR-012 permanece provisional en `decision-gate`.
+- No se implementaron providers productivos ni cambios en `src/`.
+
 ## Phase 8 — Remaining Evidence Assessment
 
 ### Added
