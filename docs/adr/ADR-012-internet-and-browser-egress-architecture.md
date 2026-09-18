@@ -30,8 +30,9 @@ AssistantCore
 - Route baseline: `17 PASS`, `1 FAIL`, `1 NOT EXECUTED`; redirect público→interno con `internalHits=1`.
 - Egress boundary: `19 PASS`, `0 FAIL`, `2 NOT EXECUTED`; `internalHits=0`.
 - Hardening: ocho canales ejecutados con `PASS` individual y `internalHits=0`; el fixture adicional de Service Worker en `localhost` obtuvo `PASS` con observación y bloqueo individual.
-- DNS rebinding: `SIMULATED`, sin pinning real.
-- HTTPS, browser remoto y crash cleanup: `NOT EXECUTED`.
+- DNS rebinding/socket pinning: `SIMULATED`/`NOT EXECUTED` para socket real, sin pinning demostrado.
+- HTTPS público→HTTPS, HTTPS→HTTP y HTTPS→interno: `NOT EXECUTED`; no existe fixture TLS seguro y reproducible en este entorno.
+- Browser remoto y crash cleanup: `NOT EXECUTED`.
 - Browser local: contexto efímero, sandbox solicitado y cleanup normal; sin prueba de aislamiento OS-level.
 
 ## No decidido

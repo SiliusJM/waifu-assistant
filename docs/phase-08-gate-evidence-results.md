@@ -75,6 +75,34 @@ La request fue generada por el Service Worker y el `fetch()` falló como consecu
 
 Estos resultados son composición de fixtures experimentales; no seleccionan aún una arquitectura productiva.
 
+## HTTPS evidence
+
+Esta subetapa intentó cerrar HTTPS sin OpenSSL por shell, APIs de procesos, cambios permanentes del sistema ni debilitamiento de TLS. No se encontró un fixture TLS reproducible y seguro dentro del entorno actual.
+
+| Caso | Resultado | Evidencia | Limitación |
+|---|---|---|---|
+| HTTPS público → HTTPS público | `NOT EXECUTED` | No se inició un servidor TLS reproducible. | Falta certificado temporal in-process seguro. |
+| HTTPS → HTTP | `NOT EXECUTED` | No se siguió un redirect TLS→HTTP. | La política de downgrade permanece abierta. |
+| HTTPS → destino interno | `NOT EXECUTED` | No se ejecutó request/redirect HTTPS al fixture interno. | El fixture egress disponible es HTTP-only. |
+
+No se fabrican resultados HTTPS. La evidencia Fetch histórica de downgrade bloqueado no equivale a evidencia browser/proxy TLS de esta etapa.
+
+## DNS/socket evidence
+
+La evidencia `93.184.216.34 → 10.0.0.9` continúa siendo `SIMULATED`. El harness no pudo controlar simultáneamente resolver, cambio de respuesta, IP validada, IP efectiva y destino real del socket.
+
+| Campo | Resultado actual |
+|---|---|
+| Hostname inicial | Controlado en fixture |
+| IP validada | `93.184.216.34` — simulada |
+| Resolución posterior | `10.0.0.9` — simulada |
+| IP efectiva | `10.0.0.9` — clasificada por policy, no observada en socket real |
+| Socket utilizado | No demostrable (`NOT EXECUTED`) |
+| Decisión del boundary | Bloqueo simulado/controlado |
+| Conexión interna efectiva | `0` en el fixture proxy; no prueba pinning real |
+
+No se marca `PASS` para DNS rebinding/socket pinning. Permanecen pendientes múltiples A/AAAA, cambio de resolución controlado y comparación entre IP validada, IP conectada y conexión efectiva.
+
 ## Search y browser remoto
 
 Brave, Tavily y Exa permanecieron `NOT EXECUTED` por ausencia de credenciales temporales. `BROWSER_REMOTE_ENDPOINT` y `BROWSER_REMOTE_TOKEN` tampoco estaban presentes. No se solicitaron, imprimieron ni almacenaron secretos.
