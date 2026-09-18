@@ -380,4 +380,4 @@ En la futura implementación inicial todavía no deben incluirse renderer real, 
 
 ## Conclusión
 
-La propuesta deja un boundary pequeño: eventos normalizados entran, una máquina determinista produce snapshots visuales y un provider opcional los presenta. Phase 7 no se considera aprobada ni implementada hasta que estas decisiones sean revisadas externamente y aprobadas.
+La definición aprobada deja un boundary pequeño: eventos normalizados entran, una máquina determinista produce snapshots visuales y un provider opcional los presenta. Phase 7 está aprobada a nivel arquitectónico y todavía no está implementada. La implementación debe comenzar en una rama separada y respetar estos contratos y límites; las decisiones de renderer, assets, UI y otros detalles explícitamente futuros se resolverán en sus fases correspondientes.
