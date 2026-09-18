@@ -14,6 +14,7 @@ Documentacion de Phase 8:
 - `docs/phase-08-controlled-test-results.md`: resultados del harness controlado y límites de la evidencia.
 - `docs/phase-08-external-test-results.md`: ejecución externa de Search/Browser y limitaciones observadas.
 - `docs/phase-08-egress-boundary-spike.md`: evidencia experimental del boundary de egress inferior al browser.
+- `docs/phase-08-egress-hardening-results.md`: hardening por canal y límites pendientes.
 
 Phase 3 — Realtime Engine está COMPLETA y mergeada en `main`. La base incluye conversación de texto, tools seguras y un runtime interno de eventos, streaming abstracto, cancelación y concurrencia.
 
