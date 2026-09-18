@@ -1,3 +1,20 @@
+## Phase 8 — Internet & Browser DNS/socket evidence
+
+### Added
+
+- Fixture DNS UDP local para observar resolución A controlada.
+- Instrumentación de IP validada, IP efectiva y `socket.remoteAddress`.
+- Verificación de bloqueo antes de abrir socket para el destino interno.
+- Caso controlado `127.0.0.2 → 127.0.0.3` conservado como `SIMULATED`, sin presentarlo como DNS rebinding real.
+
+### Status / limitations
+
+- PR #20 revisado y mergeado a `main`; merge commit `88c49433ccf4922612c9eeafd7df32d947f35c18`.
+- Resultado: `2 PASS`, `0 FAIL`, `0 NOT EXECUTED`, `1 SIMULATED`; `internalHits=[]`.
+- La evidencia real está limitada al fixture local controlado; no demuestra DNS público cambiante, múltiples A/AAAA, pinning productivo ni aislamiento OS-level.
+- HTTPS, browser remoto y crash cleanup seguro continúan pendientes.
+- ADR-012 permanece provisional.
+
 ## Phase 8 — Internet & Browser experimental browser runtime provisioning
 
 ### Added
