@@ -104,4 +104,4 @@ Todos los cambios relevantes del proyecto se documentarán aquí.
 
 ### Status
 
-- Implementación en `phase/05-streaming-voice`; pendiente de revisión externa y sin merge a `main`.
+- Implementación revisada y corregida en `phase/05-streaming-voice`; PR #5 mergeado a `main` en `1f076df8e880c273abe261142aab9757c541d73e`. Verificación de cierre: 72/72 tests, build/lint/typecheck/check/diff-check OK.
