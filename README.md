@@ -50,7 +50,7 @@ Instalar las dependencias y ejecutar:
 
 ## Próximo paso
 
-La definición de Phase 8 ya fue revisada, aprobada y mergeada. El siguiente paso es preparar su implementación mediante los spikes de provider, host/sandbox, límites y confirmaciones definidos en la fase, sin introducir todavía decisiones no aprobadas.
+La definición de Phase 8 y el spike documental ya fueron revisados y mergeados. El siguiente paso es ejecutar las pruebas controladas del spike antes de seleccionar providers, sandbox, egress y límites definitivos.
 
 Los proveedores reales de STT/TTS se evaluarán mediante un spike comparativo independiente y ADR-007; no forman parte del cierre de Phase 4.
 
