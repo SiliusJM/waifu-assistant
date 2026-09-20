@@ -193,18 +193,21 @@ El procedimiento debe seguir este orden: (A) registrar el contador `nftables` an
 
 Para clasificar `PASS` consolidado, deben cumplirse simultáneamente estas ventanas temporales:
 
-1. DNS sequence 1 (`1.1.1.1`) ocurre antes de la primera request target de Chromium.
-2. La primera request target ocurre antes de DNS sequence 2 (`10.20.0.1`).
-3. La segunda request target ocurre después de DNS sequence 2.
-4. Existe una referencia de reloj suficiente entre Gateway y Browser VM.
-5. El delta `nftables` es mayor que cero y su observación no es anterior al final del lookup del segundo request.
-6. `internalHits=0`.
-7. Existe al menos una request target en cada lanzamiento de Chromium.
-8. Ninguna condición está clasificada como `FAIL`.
+1. DNS sequence 1 (`1.1.1.1`) es anterior o igual al inicio y al fin del lookup de la primera request, con la tolerancia cross-VM aplicada.
+2. La primera request target ocurre antes de DNS sequence 2 (`10.20.0.1`), con la tolerancia aplicada.
+3. DNS sequence 2 ocurre después de que termina la primera request y antes de que inicie la segunda request, con la tolerancia aplicada.
+4. DNS sequence 2 queda asociado a la ventana `domainLookupStart`/`domainLookupEnd` de la segunda request, ampliada por la tolerancia.
+5. Existe una referencia de reloj suficiente entre Gateway y Browser VM.
+6. El delta `nftables` es mayor que cero y su `observedAt` no es anterior al final del lookup del segundo request, con la tolerancia aplicada.
+7. `internalHits=0`.
+8. Existe al menos una request target en cada lanzamiento de Chromium.
+9. Ninguna condición está clasificada como `FAIL`.
 
 Dos lanzamientos de Chromium no garantizan dos consultas DNS. Si Chromium cachea DNS, reutiliza una conexión o no vuelve a resolver, el resultado es `LIMITATION` o `NOT EXECUTED`, nunca `PASS` consolidado.
 
-El evento `page.on('request')` solo registra que el navegador emitió una solicitud; no demuestra cuándo ocurrió el DNS. El harness conserva `request.timing()` y usa `startTime` como tiempo absoluto en milisegundos desde la época; los demás campos de timing son offsets relativos a `startTime`, que se convierten a timestamps ISO absolutos para comparar las ventanas `domainLookupStart`/`domainLookupEnd`. Si el navegador devuelve `-1` o no expone una ventana de lookup utilizable, el resultado es `LIMITATION`/`NOT EXECUTED`, no `PASS`.
+El evento `page.on('request')` solo registra que el navegador emitió una solicitud; no demuestra cuándo ocurrió el DNS. El harness conserva `request.timing()` y usa `startTime` como tiempo absoluto en milisegundos desde la época; los demás campos de timing son offsets relativos a `startTime`, que se convierten a timestamps ISO absolutos para comparar las ventanas `domainLookupStart`/`domainLookupEnd`. También conserva `responseEnd` para demostrar que la primera request terminó antes de DNS sequence 2. Si el navegador devuelve `-1` o no expone una ventana de lookup o un fin de request utilizable, el resultado es `LIMITATION`/`NOT EXECUTED`, no `PASS`.
+
+`maxOffsetMs` es una tolerancia proporcionada por el operador, no calculada por el harness. Se aplica únicamente a comparaciones entre timestamps de Gateway (DNS y `nftables`) y timestamps de Browser VM: DNS1 frente al inicio/fin del lookup 1, request 1 frente a DNS2, fin de request 1 frente a DNS2, DNS2 frente a request 2, DNS2 frente a la ventana del lookup 2 y `egressObservedAt` frente al fin del lookup 2. Las relaciones internas del mismo artefacto browser, como `domainLookupStart <= domainLookupEnd` y `requestAt <= responseEnd`, no reciben tolerancia. Una evidencia que permanece fuera de la ventana incluso tras aplicar `maxOffsetMs` es `FAIL`; no se ajusta ni inventa el valor.
 
 ## 6. Matriz de resultados
 
@@ -215,7 +218,7 @@ El evento `page.on('request')` solo registra que el navegador emitió una solici
 | Navegación real | Chromium emitió la navegación con timestamps y resultado/error registrado | El harness no puede iniciar o el destino viola la política | Hay request, pero no se puede distinguir conexión efectiva | Browser/fixture no disponible |
 | Bloqueo inferior | `nftables` registra drop al destino privado, `internalHits=0` y timestamps compatibles | El paquete llega al destino privado o no se bloquea | Solo se observa timeout browser sin evidencia inferior suficiente | Gateway/artefacto no disponible |
 | IP efectiva/socket | El boundary observa destino/puerto/conexión y se correlaciona con la segunda resolución | El destino efectivo contradice la política o conecta internamente | Playwright no expone socket; solo hay evidencia parcial de paquetes | No hubo conexión observable |
-| Resultado consolidado | Browser + dos respuestas DNS dentro de sus ventanas de lookup + drop inferior están correlacionados | Alguna evidencia contradice el bloqueo o la línea temporal | Falta correlación completa o Chromium no vuelve a resolver | Faltan artefactos o el laboratorio no está disponible |
+| Resultado consolidado | Browser + secuencia DNS ordenada + clock reference + delta positivo de egress están correlacionados con tolerancia explícita | Alguna evidencia contradice el bloqueo o la línea temporal | Falta correlación completa, reloj suficiente o Chromium no vuelve a resolver | Faltan artefactos o el laboratorio no está disponible |
 
 Un `PASS` consolidado demuestra únicamente un rebinding real controlado y bloqueado por el boundary del laboratorio para esta ejecución. No demuestra DNS pinning, protección de un `BrowserProvider` futuro, HTTPS/TLS, Service Worker, WebSocket ni seguridad productiva.
 
@@ -226,6 +229,7 @@ DNS rebinding real tampoco equivale automáticamente a DNS pinning: demuestra qu
 - Playwright no expone directamente la IP DNS ni el socket TCP elegido por Chromium.
 - La evidencia de IP efectiva y bloqueo debe provenir del Gateway, no de una inferencia a partir de `page.goto()`.
 - El `observedAt` de `nftables` es el tiempo de observación/colección del artefacto. No debe presentarse como el timestamp exacto del socket o del paquete.
+- El informe conserva `firstRequestAt`, `firstRequestEnd` y `secondRequestAt` para hacer auditable el orden request 1 → DNS2 → request 2.
 - Dos lanzamientos de Chromium reducen la reutilización deliberada de conexión, pero no son una garantía de que el browser consulte DNS dos veces.
 - La secuencia de DNS del laboratorio debe correlacionarse por timestamps; una respuesta `nslookup` aislada no demuestra qué resolución usó Chromium.
 - La prueba usa HTTP controlado y no cubre HTTPS/TLS.
@@ -254,6 +258,9 @@ Cubren:
 - delta de bytes inconsistente (`FAIL`);
 - referencia de reloj ausente (`LIMITATION`);
 - referencia de reloj inválida (`FAIL`);
+- DNS2 antes de terminar la primera request (`FAIL`);
+- segunda request iniciada antes de DNS2 (`FAIL`);
+- tolerancia `maxOffsetMs` insuficiente para la línea temporal (`FAIL`);
 - timing DNS no disponible en el segundo request (`LIMITATION`);
 - dos requests sin una segunda ventana de lookup demostrable (`LIMITATION`);
 - segunda respuesta DNS fuera de la ventana de lookup del segundo request (`FAIL`);

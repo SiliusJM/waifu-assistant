@@ -115,6 +115,13 @@ function absoluteLookupWindow(request) {
   return { start, end };
 }
 
+function absoluteRequestEnd(request) {
+  const responseEnd = request?.timing?.absolute?.responseEnd;
+  if (typeof responseEnd !== 'string') return null;
+  const timestamp = Date.parse(responseEnd);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
 function correlationDetails(dnsEvidence, egressEvidence, clockEvidence, firstRequest, secondRequest) {
   const clock = clockEvidence ?? {};
   return {
@@ -125,6 +132,7 @@ function correlationDetails(dnsEvidence, egressEvidence, clockEvidence, firstReq
     secondDomainLookupStart: secondRequest?.timing?.absolute?.domainLookupStart ?? null,
     secondDomainLookupEnd: secondRequest?.timing?.absolute?.domainLookupEnd ?? null,
     firstRequestAt: firstRequest?.requestAt ?? null,
+    firstRequestEnd: firstRequest?.timing?.absolute?.responseEnd ?? null,
     secondRequestAt: secondRequest?.requestAt ?? null,
     egressObservedAt: egressEvidence.egressObservedAt ?? null,
     clockGatewayUtc: clock.gatewayUtc ?? null,
@@ -164,7 +172,11 @@ export function correlateBrowserDnsEgress(attempts, dnsEvidence, egressEvidence,
 
   const firstLookup = absoluteLookupWindow(firstRequest);
   const secondLookup = absoluteLookupWindow(secondRequest);
-  if (!firstLookup || !secondLookup) {
+  const firstRequestAtMs = Date.parse(firstRequest?.requestAt ?? '');
+  const secondRequestAtMs = Date.parse(secondRequest?.requestAt ?? '');
+  const firstRequestEndMs = absoluteRequestEnd(firstRequest);
+  if (!firstLookup || !secondLookup || !Number.isFinite(firstRequestAtMs)
+    || !Number.isFinite(secondRequestAtMs) || firstRequestEndMs === null) {
     return {
       status: 'LIMITATION',
       ...correlationDetails(dnsEvidence, egressEvidence, clockEvidence, firstRequest, secondRequest),
@@ -175,7 +187,9 @@ export function correlateBrowserDnsEgress(attempts, dnsEvidence, egressEvidence,
   const firstDnsMs = Date.parse(dnsEvidence.firstDnsAt);
   const secondDnsMs = Date.parse(dnsEvidence.secondDnsAt);
   const egressMs = Date.parse(egressEvidence.egressObservedAt);
-  const timestampsValid = [firstDnsMs, secondDnsMs, egressMs].every(Number.isFinite);
+  const toleranceMs = clock.maxOffsetMs;
+  const timestampsValid = [firstDnsMs, secondDnsMs, egressMs, firstRequestAtMs, secondRequestAtMs, firstRequestEndMs]
+    .every(Number.isFinite);
   if (!timestampsValid) {
     return {
       status: 'FAIL',
@@ -183,21 +197,42 @@ export function correlateBrowserDnsEgress(attempts, dnsEvidence, egressEvidence,
       reason: 'BROWSER_OR_EGRESS_TIMESTAMP_INVALID',
     };
   }
-  if (firstDnsMs < firstLookup.start || firstDnsMs > firstLookup.end) {
+  if (firstRequestEndMs < firstRequestAtMs) {
+    return {
+      status: 'FAIL',
+      ...correlationDetails(dnsEvidence, egressEvidence, clockEvidence, firstRequest, secondRequest),
+      reason: 'FIRST_BROWSER_REQUEST_TIMELINE_INVALID',
+    };
+  }
+  if (firstDnsMs > firstLookup.start + toleranceMs || firstDnsMs > firstLookup.end + toleranceMs) {
     return {
       status: 'FAIL',
       ...correlationDetails(dnsEvidence, egressEvidence, clockEvidence, firstRequest, secondRequest),
       reason: 'FIRST_DNS_RESPONSE_OUTSIDE_BROWSER_LOOKUP_WINDOW',
     };
   }
-  if (secondDnsMs < secondLookup.start || secondDnsMs > secondLookup.end) {
+  if (firstRequestAtMs > secondDnsMs + toleranceMs || firstRequestEndMs < secondDnsMs - toleranceMs) {
+    return {
+      status: 'FAIL',
+      ...correlationDetails(dnsEvidence, egressEvidence, clockEvidence, firstRequest, secondRequest),
+      reason: 'SECOND_DNS_RESPONSE_NOT_AFTER_FIRST_BROWSER_REQUEST',
+    };
+  }
+  if (secondDnsMs > secondRequestAtMs + toleranceMs) {
+    return {
+      status: 'FAIL',
+      ...correlationDetails(dnsEvidence, egressEvidence, clockEvidence, firstRequest, secondRequest),
+      reason: 'SECOND_BROWSER_REQUEST_STARTED_BEFORE_SECOND_DNS',
+    };
+  }
+  if (secondDnsMs < secondLookup.start - toleranceMs || secondDnsMs > secondLookup.end + toleranceMs) {
     return {
       status: 'FAIL',
       ...correlationDetails(dnsEvidence, egressEvidence, clockEvidence, firstRequest, secondRequest),
       reason: 'SECOND_DNS_RESPONSE_OUTSIDE_BROWSER_LOOKUP_WINDOW',
     };
   }
-  if (egressMs < secondLookup.end) {
+  if (egressMs < secondLookup.end - toleranceMs) {
     return {
       status: 'FAIL',
       ...correlationDetails(dnsEvidence, egressEvidence, clockEvidence, firstRequest, secondRequest),

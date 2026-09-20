@@ -48,6 +48,7 @@ const attempts = [
         absolute: {
           domainLookupStart: '2026-09-20T09:59:59.500Z',
           domainLookupEnd: '2026-09-20T10:00:00.500Z',
+          responseEnd: '2026-09-20T10:00:01.500Z',
         },
       },
     }],
@@ -60,6 +61,7 @@ const attempts = [
         absolute: {
           domainLookupStart: '2026-09-20T10:00:01.500Z',
           domainLookupEnd: '2026-09-20T10:00:02.500Z',
+          responseEnd: '2026-09-20T10:00:03.500Z',
         },
       },
     }],
@@ -79,7 +81,7 @@ function test(name, callback) {
   console.log(`PASS ${name}`);
 }
 
-test('correlates valid DNS, browser and egress timestamps', () => {
+test('classifies the strictly ordered DNS, browser and egress timeline as pass', () => {
   const { dns, egress, clock } = validatedFixtures();
   const correlation = correlateBrowserDnsEgress(attempts, dns, egress, clock);
   assert.equal(correlation.status, 'PASS');
@@ -135,10 +137,34 @@ test('rejects DNS sequence two outside the second browser lookup window', () => 
   assert.equal(correlation.status, 'FAIL');
 });
 
+test('rejects DNS sequence two before the first request finishes', () => {
+  const { egress, clock } = validatedFixtures();
+  const earlyDns = structuredClone(dnsAnswers);
+  earlyDns.answers[1].observedAt = '2026-09-20T10:00:00.000Z';
+  const dns = validateDnsEvidence(earlyDns);
+  const correlation = correlateBrowserDnsEgress(attempts, dns, egress, clock);
+  assert.equal(correlation.status, 'FAIL');
+});
+
+test('rejects a second target request started before DNS sequence two', () => {
+  const { dns, egress, clock } = validatedFixtures();
+  const earlySecondRequest = structuredClone(attempts);
+  earlySecondRequest[1].requests[0].requestAt = '2026-09-20T10:00:00.000Z';
+  const correlation = correlateBrowserDnsEgress(earlySecondRequest, dns, egress, clock);
+  assert.equal(correlation.status, 'FAIL');
+});
+
 test('rejects egress observation before the second browser lookup', () => {
   const { dns, clock } = validatedFixtures();
-  const earlyEgress = validateEgressEvidence({ ...egressDrop, observedAt: '2026-09-20T10:00:02.000Z' });
+  const earlyEgress = validateEgressEvidence({ ...egressDrop, observedAt: '2026-09-20T10:00:00.000Z' });
   const correlation = correlateBrowserDnsEgress(attempts, dns, earlyEgress, clock);
+  assert.equal(correlation.status, 'FAIL');
+});
+
+test('rejects a timeline that needs more clock tolerance than provided', () => {
+  const { dns, egress } = validatedFixtures();
+  const strictClock = validateClockReference({ ...clockReference, maxOffsetMs: 0 });
+  const correlation = correlateBrowserDnsEgress(attempts, dns, egress, strictClock);
   assert.equal(correlation.status, 'FAIL');
 });
 
