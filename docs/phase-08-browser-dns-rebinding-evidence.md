@@ -209,6 +209,8 @@ El evento `page.on('request')` solo registra que el navegador emitió una solici
 
 `maxOffsetMs` es una tolerancia proporcionada por el operador, no calculada por el harness. Se aplica únicamente a comparaciones entre timestamps de Gateway (DNS y `nftables`) y timestamps de Browser VM: DNS1 frente al inicio/fin del lookup 1, request 1 frente a DNS2, fin de request 1 frente a DNS2, DNS2 frente a request 2, DNS2 frente a la ventana del lookup 2 y `egressObservedAt` frente al fin del lookup 2. Las relaciones internas del mismo artefacto browser, como `domainLookupStart <= domainLookupEnd` y `requestAt <= responseEnd`, no reciben tolerancia. Una evidencia que permanece fuera de la ventana incluso tras aplicar `maxOffsetMs` es `FAIL`; no se ajusta ni inventa el valor.
 
+En particular, DNS1 es válido únicamente si `firstLookup.start - maxOffsetMs <= firstDnsMs <= firstLookup.end + maxOffsetMs`; no se usa el inicio del lookup como límite superior. DNS2 usa la misma ventana simétrica respecto al lookup 2. Para las relaciones de orden, request 1 debe preceder a DNS2, DNS2 debe seguir al fin de request 1 y preceder a request 2, y `egressObservedAt` debe seguir al fin del lookup 2, siempre con la tolerancia simétrica indicada.
+
 ## 6. Matriz de resultados
 
 | Caso | `PASS` | `FAIL` | `LIMITATION` | `NOT EXECUTED` |

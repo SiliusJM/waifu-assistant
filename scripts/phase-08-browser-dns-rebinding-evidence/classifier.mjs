@@ -204,14 +204,14 @@ export function correlateBrowserDnsEgress(attempts, dnsEvidence, egressEvidence,
       reason: 'FIRST_BROWSER_REQUEST_TIMELINE_INVALID',
     };
   }
-  if (firstDnsMs > firstLookup.start + toleranceMs || firstDnsMs > firstLookup.end + toleranceMs) {
+  if (firstDnsMs < firstLookup.start - toleranceMs || firstDnsMs > firstLookup.end + toleranceMs) {
     return {
       status: 'FAIL',
       ...correlationDetails(dnsEvidence, egressEvidence, clockEvidence, firstRequest, secondRequest),
       reason: 'FIRST_DNS_RESPONSE_OUTSIDE_BROWSER_LOOKUP_WINDOW',
     };
   }
-  if (firstRequestAtMs > secondDnsMs + toleranceMs || firstRequestEndMs < secondDnsMs - toleranceMs) {
+  if (firstRequestAtMs > secondDnsMs + toleranceMs || secondDnsMs < firstRequestEndMs - toleranceMs) {
     return {
       status: 'FAIL',
       ...correlationDetails(dnsEvidence, egressEvidence, clockEvidence, firstRequest, secondRequest),
