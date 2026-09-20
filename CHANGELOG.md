@@ -1,3 +1,24 @@
+## Phase 8 — Browser DNS Rebinding Evidence Harness
+
+### Added
+
+- Harness experimental de Chromium para ejecutar dos lanzamientos separados contra `rebind.test`.
+- Correlación de DNS sequence 1/2 con ventanas `request.timing()`, orden request 1 → DNS2 → request 2 y observación posterior del egress.
+- Artefacto obligatorio de referencia de reloj cross-VM con `maxOffsetMs` aportado por el operador.
+- Evidencia diferencial de `nftables` mediante `packetsBefore/After/Delta` y `bytesBefore/After/Delta`, con `internalHits=0`.
+
+### Security / limitations
+
+- `PASS` consolidado requiere evidencia DNS válida, dos requests target, timing browser utilizable, referencia de reloj, delta de egress positivo y correlación temporal estricta.
+- El harness no implementa `BrowserProvider`, no usa routing Playwright como boundary y no modifica `src/`, dependencias ni políticas del host.
+- 27/27 pruebas deterministas del clasificador pasan; las verificaciones generales del repositorio también pasan.
+- La ejecución real en VirtualBox todavía no se ha realizado.
+- ADR-012 permanece provisional en `decision-gate`.
+
+### Status
+
+- PR #29 revisado y mergeado a `main`; merge commit `30646455dd2b5ab2285cb931a9fa3e32dd88c323`.
+
 ## Phase 8 — DNS Rebinding Real Evidence
 
 ### Added
