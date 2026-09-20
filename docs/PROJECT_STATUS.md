@@ -60,7 +60,7 @@ Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #
 - Egress boundary spike: 19 PASS, 0 FAIL y 2 NOT EXECUTED, con `internalHits=0`.
 - El proxy fixture bloqueó redirects públicos hacia destinos internos y WebSocket interno mediante CONNECT.
 - Service Worker en el egress fixture: NOT EXECUTED; Chromium no expuso `navigator.serviceWorker` para el origen controlado.
-- DNS rebinding sigue siendo una simulación controlada, no pinning real.
+- DNS rebinding controlado real dentro de VirtualBox ya tiene evidencia `PASS`; el rebinding público/productivo, el pinning y la validación IP efectiva justo antes del socket dentro de BrowserProvider siguen pendientes.
 - Egress hardening por canal: 14 PASS, 0 FAIL, 6 NOT EXECUTED y 1 SIMULATED; `internalHits=[]`.
 - Egress architecture decision gate: ADR-012 provisional; `browserContext.route()` queda descartado como boundary único y cualquier BrowserProvider futuro deberá usar una frontera de egress inferior. La selección concreta sigue abierta.
 - Gate evidence: Service Worker real en localhost `PASS`, con request generada, proxy observado, destino `127.0.0.1`, bloqueo e `internalHits=0`.
