@@ -62,6 +62,9 @@ Utiliza el Playwright ya existente en la rama y no añade dependencias. El scrip
 - registra timestamps, hostname, puerto, path, método, tipo de recurso, respuesta y errores de red, sin cuerpos, cookies, headers ni credenciales;
 - cierra cada browser/contexto en `finally`;
 - puede validar artefactos JSON exportados desde el DNS y `nftables` del Gateway;
+- valida realmente `source`, hostname, secuencia, tipo, IP y timestamps ISO del DNS; un campo `status: PASS` preexistente no sirve como bypass;
+- valida realmente la caída de `nftables`, `internalHits`, contador de paquetes y `observedAt`; ese `observedAt` es el momento de observación/colección del artefacto, no el timestamp exacto del socket;
+- correlaciona temporalmente DNS sequence 1 → primera request Chromium → DNS sequence 2 → segunda request Chromium → observación del drop inferior;
 - emite un informe JSON por stdout y, opcionalmente, en una ruta indicada por el operador.
 
 La relanzada de Chromium no demuestra por sí sola que se haya realizado una nueva consulta DNS. Solo permite observar el comportamiento sin reutilizar deliberadamente el mismo proceso. La prueba de que hubo dos resoluciones debe venir del log del DNS del Gateway.
@@ -105,8 +108,8 @@ El formato siguiente es un contrato de intercambio del experimento, no una API p
   "source": "gateway-dns",
   "hostname": "rebind.test",
   "answers": [
-    { "sequence": 1, "type": "A", "address": "1.1.1.1", "observedAt": "<timestamp-real>" },
-    { "sequence": 2, "type": "A", "address": "10.20.0.1", "observedAt": "<timestamp-real>" }
+    { "sequence": 1, "type": "A", "address": "1.1.1.1", "observedAt": "<timestamp-ISO-real>" },
+    { "sequence": 2, "type": "A", "address": "10.20.0.1", "observedAt": "<timestamp-ISO-real-posterior>" }
   ]
 }
 ```
@@ -123,15 +126,16 @@ El harness exige que las dos respuestas A observadas sean exactamente `1.1.1.1` 
   "sourceAddress": "10.20.0.10",
   "destinationAddress": "10.20.0.1",
   "action": "drop",
-  "packets": "<contador-real-mayor-que-cero>",
-  "bytes": "<contador-real>",
-  "internalHits": 0
+  "packets": 12,
+  "bytes": 788,
+  "internalHits": 0,
+  "observedAt": "<timestamp-ISO-real-posterior-a-la-segunda-request>"
 }
 ```
 
-El campo `packets` debe ser un entero real mayor que cero. La evidencia debe demostrar que el intento posterior del browser hacia el destino privado llegó a la frontera inferior y fue descartado. Si el Gateway observa el puerto, protocolo, puerto de origen o una identidad de conexión, esos datos deben conservarse en el artefacto sin incluir secretos.
+Los números del bloque son únicamente la forma del contrato; deben sustituirse por observaciones reales. El campo `packets` debe ser un entero real mayor que cero y `observedAt` debe ser un timestamp ISO válido. La evidencia debe demostrar que el intento posterior del browser hacia el destino privado llegó a la frontera inferior y fue descartado. Si el Gateway observa el puerto, protocolo, puerto de origen o una identidad de conexión, esos datos deben conservarse en el artefacto sin incluir secretos.
 
-La evidencia de `nftables` demuestra el bloqueo en la frontera de red del laboratorio. No expone necesariamente el socket interno de Chromium; la diferencia entre request browser, IP efectiva del paquete y socket debe permanecer explícita en el informe.
+La evidencia de `nftables` demuestra el bloqueo en la frontera de red del laboratorio. `observedAt` indica cuándo se observó o recopiló el artefacto y no pretende ser el instante exacto del paquete ni del socket. La evidencia no expone necesariamente el socket interno de Chromium; la diferencia entre request browser, IP efectiva del paquete y socket debe permanecer explícita en el informe.
 
 ## 5. Secuencia experimental
 
@@ -164,6 +168,16 @@ El Gateway debe demostrar que el intento hacia `10.20.0.1` fue bloqueado en `nft
 - [ ] Si solo existe una consulta, o la segunda navegación no llega al DNS por caché/reutilización, el criterio de rebinding browser queda `LIMITATION` o `NOT EXECUTED`, no `PASS`.
 - [ ] Si Chromium reutiliza una conexión pública y nunca intenta el destino privado, se registra como observación de comportamiento y limitación del experimento; no se inventa un fallo del boundary.
 
+Para clasificar `PASS` consolidado, deben cumplirse simultáneamente estas ventanas temporales:
+
+1. DNS sequence 1 (`1.1.1.1`) ocurre antes de la primera request target de Chromium.
+2. La primera request target ocurre antes de DNS sequence 2 (`10.20.0.1`).
+3. La segunda request target ocurre después de DNS sequence 2.
+4. La observación `nftables` del drop no es anterior a la segunda request target.
+5. Existe al menos una request target en cada lanzamiento de Chromium.
+
+Dos lanzamientos de Chromium no garantizan dos consultas DNS. Si Chromium cachea DNS, reutiliza una conexión o no vuelve a resolver, el resultado es `LIMITATION` o `NOT EXECUTED`, nunca `PASS` consolidado.
+
 ## 6. Matriz de resultados
 
 | Caso | `PASS` | `FAIL` | `LIMITATION` | `NOT EXECUTED` |
@@ -177,10 +191,13 @@ El Gateway debe demostrar que el intento hacia `10.20.0.1` fue bloqueado en `nft
 
 Un `PASS` consolidado demuestra únicamente un rebinding real controlado y bloqueado por el boundary del laboratorio para esta ejecución. No demuestra DNS pinning, protección de un `BrowserProvider` futuro, HTTPS/TLS, Service Worker, WebSocket ni seguridad productiva.
 
+DNS rebinding real tampoco equivale automáticamente a DNS pinning: demuestra que el resolver del laboratorio entregó respuestas distintas y que el boundary bloqueó el destino privado observado; no demuestra que Chromium o un provider valide y fije la IP justo antes del socket.
+
 ## 7. Limitaciones explícitas
 
 - Playwright no expone directamente la IP DNS ni el socket TCP elegido por Chromium.
 - La evidencia de IP efectiva y bloqueo debe provenir del Gateway, no de una inferencia a partir de `page.goto()`.
+- El `observedAt` de `nftables` es el tiempo de observación/colección del artefacto. No debe presentarse como el timestamp exacto del socket o del paquete.
 - Dos lanzamientos de Chromium reducen la reutilización deliberada de conexión, pero no son una garantía de que el browser consulte DNS dos veces.
 - La secuencia de DNS del laboratorio debe correlacionarse por timestamps; una respuesta `nslookup` aislada no demuestra qué resolución usó Chromium.
 - La prueba usa HTTP controlado y no cubre HTTPS/TLS.
@@ -188,6 +205,25 @@ Un `PASS` consolidado demuestra únicamente un rebinding real controlado y bloqu
 - La Gateway `nftables` es la autoridad de seguridad de esta prueba; Playwright route/interception no se usa como boundary.
 - El destino privado utilizado es `10.20.0.1`, la propia Gateway del laboratorio. No representa todos los rangos privados/reservados.
 - Un `PASS` de este harness no cambia ADR-012 a decisión final.
+
+## 9. Pruebas locales del clasificador
+
+Las pruebas deterministas no ejecutan Chromium ni acceden al laboratorio:
+
+```text
+node scripts/phase-08-browser-dns-rebinding-evidence/classifier.test.mjs
+```
+
+Cubren:
+
+- correlación temporal correcta (`PASS`);
+- DNS invertido (`FAIL`);
+- segunda navegación sin segunda request demostrable (`LIMITATION`);
+- `internalHits > 0` (`FAIL`);
+- artefacto preclasificado como `PASS` sin campos reales (`FAIL`);
+- artefactos ausentes (`NOT EXECUTED`).
+
+Estas pruebas no constituyen evidencia de DNS rebinding ni de seguridad de red; solo protegen la clasificación del informe.
 
 ## 8. Seguridad y limpieza
 
@@ -199,7 +235,7 @@ Un `PASS` consolidado demuestra únicamente un rebinding real controlado y bloqu
 - Eliminar los artefactos temporales del Browser VM tras conservar el reporte redacted.
 - Restaurar los contadores/políticas temporales del laboratorio por el procedimiento de la Gateway; el harness no administra nftables.
 
-## 9. Impacto en ADR-012
+## 10. Impacto en ADR-012
 
 El harness prepara evidencia de navegación real sobre el rebinding ya demostrado en el laboratorio. Si se ejecuta con dos resoluciones A correlacionadas y un drop de `nftables`, puede aportar evidencia `PASS` acotada de `DNS real → intento browser → bloqueo inferior`. Si Chromium cachea DNS o no intenta la segunda conexión, el resultado queda `LIMITATION`/`NOT EXECUTED` según la evidencia disponible.
 

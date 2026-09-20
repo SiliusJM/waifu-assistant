@@ -1,13 +1,13 @@
 import { createServer } from 'node:http';
 import { readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
-
-const DEFAULTS = Object.freeze({
-  hostname: 'rebind.test',
-  publicIp: '1.1.1.1',
-  privateIp: '10.20.0.1',
-  timeoutMs: 10_000,
-});
+import {
+  DEFAULTS,
+  classifyOverall,
+  correlateBrowserDnsEgress,
+  validateDnsEvidence,
+  validateEgressEvidence,
+} from './classifier.mjs';
 
 function parseArgs(argv) {
   const options = {
@@ -15,7 +15,7 @@ function parseArgs(argv) {
     dnsEvidencePath: null,
     egressEvidencePath: null,
     reportPath: process.env.PHASE08_REPORT_PATH ?? null,
-    timeoutMs: Number(process.env.PHASE08_NAVIGATION_TIMEOUT_MS ?? DEFAULTS.timeoutMs),
+    timeoutMs: Number(process.env.PHASE08_NAVIGATION_TIMEOUT_MS ?? 10_000),
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -139,62 +139,12 @@ async function runBrowserAttempt(label, targetUrl, controlUrl, timeoutMs) {
 }
 
 async function readEvidence(path, name) {
-  if (!path) return { status: 'NOT EXECUTED', reason: `${name.toUpperCase()}_EVIDENCE_NOT_PROVIDED` };
+  if (!path) return null;
   try {
     return JSON.parse(await readFile(path, 'utf8'));
   } catch (error) {
-    return { status: 'FAIL', reason: `${name.toUpperCase()}_EVIDENCE_UNREADABLE`, detail: error instanceof Error ? error.message : 'READ_FAILED' };
+    return { _readError: `${name.toUpperCase()}_EVIDENCE_UNREADABLE:${error instanceof Error ? error.message : 'READ_FAILED'}` };
   }
-}
-
-function validateDnsEvidence(evidence) {
-  if (!evidence || evidence.status) return evidence;
-  const answers = Array.isArray(evidence.answers) ? evidence.answers : [];
-  const first = answers.find((answer) => answer.sequence === 1 && answer.type === 'A');
-  const second = answers.find((answer) => answer.sequence === 2 && answer.type === 'A');
-  const valid = evidence.source === 'gateway-dns'
-    && evidence.hostname === DEFAULTS.hostname
-    && first?.address === DEFAULTS.publicIp
-    && second?.address === DEFAULTS.privateIp
-    && typeof first?.observedAt === 'string'
-    && typeof second?.observedAt === 'string';
-  return {
-    status: valid ? 'PASS' : 'FAIL',
-    source: evidence.source ?? null,
-    hostname: evidence.hostname ?? null,
-    answers: answers.slice(0, 4),
-    reason: valid ? 'REAL_DNS_SEQUENCE_MATCHED' : 'DNS_SEQUENCE_DID_NOT_MATCH_EXPECTED_LAB_SEQUENCE',
-  };
-}
-
-function validateEgressEvidence(evidence) {
-  if (!evidence || evidence.status) return evidence;
-  const valid = evidence.source === 'gateway-nftables'
-    && evidence.sourceAddress === '10.20.0.10'
-    && evidence.destinationAddress === DEFAULTS.privateIp
-    && evidence.action === 'drop'
-    && Number.isSafeInteger(evidence.packets)
-    && evidence.packets > 0
-    && evidence.internalHits === 0;
-  return {
-    status: valid ? 'PASS' : 'FAIL',
-    source: evidence.source ?? null,
-    sourceAddress: evidence.sourceAddress ?? null,
-    destinationAddress: evidence.destinationAddress ?? null,
-    action: evidence.action ?? null,
-    packets: evidence.packets ?? null,
-    bytes: evidence.bytes ?? null,
-    internalHits: evidence.internalHits ?? null,
-    reason: valid ? 'LOWER_BOUNDARY_DROP_MATCHED' : 'EGRESS_BOUNDARY_EVIDENCE_DID_NOT_MATCH_EXPECTED_DROP',
-  };
-}
-
-function classifyOverall(attempts, dnsEvidence, egressEvidence) {
-  const browserAttempts = attempts.every((attempt) => attempt.controlFixtureLoaded && attempt.targetRequestObserved);
-  if (dnsEvidence.status === 'FAIL' || egressEvidence.status === 'FAIL') return 'FAIL';
-  if (browserAttempts && dnsEvidence.status === 'PASS' && egressEvidence.status === 'PASS') return 'PASS';
-  if (dnsEvidence.status === 'NOT EXECUTED' || egressEvidence.status === 'NOT EXECUTED') return 'NOT EXECUTED';
-  return 'LIMITATION';
 }
 
 async function run(options) {
@@ -211,9 +161,10 @@ async function run(options) {
 
   const dnsEvidence = validateDnsEvidence(await readEvidence(options.dnsEvidencePath, 'dns'));
   const egressEvidence = validateEgressEvidence(await readEvidence(options.egressEvidencePath, 'egress'));
+  const correlation = correlateBrowserDnsEgress(attempts, dnsEvidence, egressEvidence);
   const report = {
     generatedAt: now(),
-    status: classifyOverall(attempts, dnsEvidence, egressEvidence),
+    status: classifyOverall(attempts, dnsEvidence, egressEvidence, correlation),
     target: { hostname: DEFAULTS.hostname, url: options.target.toString() },
     browser: {
       launches: attempts.length,
@@ -226,6 +177,7 @@ async function run(options) {
     attempts,
     dnsEvidence,
     egressEvidence,
+    correlation,
     limitations: [
       'The Gateway DNS and nftables evidence must be exported separately and passed to this harness.',
       'A PASS does not demonstrate DNS pinning or a production BrowserProvider.',
