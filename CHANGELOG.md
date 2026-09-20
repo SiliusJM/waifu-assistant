@@ -1,3 +1,19 @@
+## Phase 8 — DNS Rebinding Real Evidence
+
+### Added
+
+- Evidencia real y reproducible de DNS rebinding controlado dentro del laboratorio VirtualBox.
+- Registro del cambio de `rebind.test` entre `1.1.1.1` y `10.20.0.1` y del bloqueo del intento a `10.20.0.1:22` en el boundary inferior.
+
+### Status / limitations
+
+- PR #28 revisado y mergeado a `main`; merge commit `e0dfefe36844f9c212828a4aeb78751cb42098a0`.
+- `rebind.test` alternó realmente entre una IP pública y la IP privada de la Gateway; la resolución controlada es `PASS`.
+- El intento de socket a `10.20.0.1:22` fue bloqueado y `nftables` registró 12 paquetes / 788 bytes `DROP` en la cadena `input`.
+- La conectividad pública a través de la Gateway permanece `PASS`.
+- Esto no demuestra DNS pinning del BrowserProvider, rebinding público ni validación de IP efectiva justo antes del socket.
+- ADR-012 permanece provisional en `decision-gate`; no se implementan providers productivos.
+
 ## Phase 8 — Network/Host Isolation Capability Spike
 
 ### Added
