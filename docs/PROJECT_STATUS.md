@@ -87,7 +87,7 @@ Ninguno. El architecture decision gate fue documentado y mergeado; la implementa
 - La selección final de proveedores de STT/TTS requiere pruebas locales comparables de compatibilidad, latencia, calidad, consumo, cancelación y licencias.
 - Search requiere credenciales temporales para ejecutar el benchmark real.
 - Browser remoto y DNS rebinding público/productivo requieren entornos/evidencia adicionales; el rebinding controlado real ya fue ejecutado y documentado en VirtualBox.
-- La evidencia DNS/socket actual es real solo dentro del fixture local; no demuestra pinning productivo, múltiples A/AAAA ni DNS público cambiante.
+- La evidencia DNS/socket continúa limitada al fixture local controlado para IP efectiva/socket; el nuevo experimento sí demuestra rebinding DNS controlado real (`rebind.test`) y bloqueo del destino privado, pero no demuestra pinning productivo, DNS público cambiante ni múltiples A/AAAA en un escenario productivo.
 - El fixture HTTPS/TLS sigue bloqueado por la ausencia de un mecanismo de emisión y confianza X.509 efímero compatible con Chromium bajo las restricciones actuales.
 - La evidencia de host isolation no demuestra aislamiento OS-level del filesystem ni efectividad OS-level del sandbox; crash cleanup continúa sin ejecutar.
 - El spike de network/host isolation no confirmó Windows Sandbox ni capacidad administrativa para gestionar VMs/switches; la identificación exacta del producto/versión del sistema operativo permanece `LIMITATION` por señales inconsistentes.
