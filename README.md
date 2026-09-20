@@ -68,7 +68,7 @@ Instalar las dependencias y ejecutar:
 
 ## Próximo paso
 
-La siguiente etapa no es implementación productiva. La revisión consolidada de ADR-012 mantiene el gate provisional: el proxy fixture demuestra controles inferiores en un entorno local, pero no aislamiento de red del host, DNS rebinding/pinning real ni HTTPS/TLS. El runtime browser experimental ya está provisionado y la evidencia de aislamiento browser/host caracteriza storage, filesystem browser-level y cleanup normal; el siguiente paso es cerrar las fronteras restantes —si existen entornos seguros y reproducibles— además de DNS/socket real, TLS, aislamiento OS-level/de red, browser remoto, crash cleanup seguro y Search con credenciales temporales, antes de documentar una arquitectura definitiva.
+La siguiente etapa no es implementación productiva. La revisión consolidada de ADR-012 mantiene el gate provisional: el laboratorio VirtualBox ya demuestra egress controlado y DNS rebinding real dentro del entorno dedicado, pero no demuestra pinning productivo, DNS rebinding público, HTTPS/TLS, aislamiento OS-level de red/filesystem, browser remoto ni crash cleanup seguro. El siguiente paso es integrar el escenario de rebinding con un cliente de navegador real y observar resolución, IP efectiva, socket y decisión del boundary, además de cerrar las demás evidencias pendientes antes de documentar una arquitectura definitiva.
 
 Los proveedores reales de STT/TTS se evaluarán mediante un spike comparativo independiente y ADR-007; no forman parte del cierre de Phase 4.
 
