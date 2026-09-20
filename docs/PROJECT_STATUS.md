@@ -86,7 +86,7 @@ Ninguno. El architecture decision gate fue documentado y mergeado; la implementa
 - Las métricas de hardware siguen pendientes por el bloqueo de WMI.
 - La selección final de proveedores de STT/TTS requiere pruebas locales comparables de compatibilidad, latencia, calidad, consumo, cancelación y licencias.
 - Search requiere credenciales temporales para ejecutar el benchmark real.
-- Browser remoto y DNS rebinding real requieren entornos aislados apropiados.
+- Browser remoto y DNS rebinding público/productivo requieren entornos/evidencia adicionales; el rebinding controlado real ya fue ejecutado y documentado en VirtualBox.
 - La evidencia DNS/socket actual es real solo dentro del fixture local; no demuestra pinning productivo, múltiples A/AAAA ni DNS público cambiante.
 - El fixture HTTPS/TLS sigue bloqueado por la ausencia de un mecanismo de emisión y confianza X.509 efímero compatible con Chromium bajo las restricciones actuales.
 - La evidencia de host isolation no demuestra aislamiento OS-level del filesystem ni efectividad OS-level del sandbox; crash cleanup continúa sin ejecutar.
