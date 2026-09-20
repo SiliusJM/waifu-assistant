@@ -58,15 +58,47 @@ function now() {
   return new Date().toISOString();
 }
 
+const TIMING_FIELDS = [
+  'startTime',
+  'domainLookupStart',
+  'domainLookupEnd',
+  'connectStart',
+  'connectEnd',
+  'requestStart',
+  'responseStart',
+  'responseEnd',
+];
+
+function serializeTiming(request) {
+  let raw;
+  try {
+    raw = request.timing();
+  } catch {
+    return null;
+  }
+  const timing = Object.fromEntries(TIMING_FIELDS.map((field) => [field, raw[field] ?? -1]));
+  const absolute = {};
+  if (Number.isFinite(raw.startTime)) {
+    for (const field of TIMING_FIELDS.slice(1)) {
+      const value = raw[field];
+      absolute[field] = Number.isFinite(value) && value >= 0
+        ? new Date(raw.startTime + value).toISOString()
+        : null;
+    }
+  }
+  return { ...timing, absolute };
+}
+
 function safeRequest(request) {
   const url = new URL(request.url());
   return {
-    at: now(),
+    requestAt: now(),
     hostname: url.hostname,
     port: url.port || (url.protocol === 'http:' ? '80' : '443'),
     path: url.pathname,
     method: request.method(),
     resourceType: request.resourceType(),
+    timing: serializeTiming(request),
   };
 }
 
@@ -105,22 +137,34 @@ async function runBrowserAttempt(label, targetUrl, controlUrl, timeoutMs) {
     browser = await chromium.launch({ headless: true, chromiumSandbox: true });
     context = await browser.newContext();
     const page = await context.newPage();
+    const targetRequests = new Map();
     page.on('request', (request) => {
       const requestInfo = safeRequest(request);
       if (requestInfo.hostname === DEFAULTS.hostname) {
         attempt.requests.push(requestInfo);
+        targetRequests.set(request, requestInfo);
         attempt.targetRequestObserved = true;
       }
     });
     page.on('response', (response) => {
       const url = new URL(response.url());
-      if (url.hostname === DEFAULTS.hostname) attempt.responseStatus = response.status();
+      if (url.hostname === DEFAULTS.hostname) {
+        attempt.responseStatus = response.status();
+        const requestInfo = targetRequests.get(response.request());
+        if (requestInfo) requestInfo.timing = serializeTiming(response.request());
+      }
     });
     page.on('requestfailed', (request) => {
       const url = new URL(request.url());
       if (url.hostname === DEFAULTS.hostname) {
         attempt.navigationError = request.failure()?.errorText ?? 'REQUEST_FAILED';
+        const requestInfo = targetRequests.get(request);
+        if (requestInfo) requestInfo.timing = serializeTiming(request);
       }
+    });
+    page.on('requestfinished', (request) => {
+      const requestInfo = targetRequests.get(request);
+      if (requestInfo) requestInfo.timing = serializeTiming(request);
     });
 
     await page.goto(controlUrl, { waitUntil: 'commit', timeout: timeoutMs });

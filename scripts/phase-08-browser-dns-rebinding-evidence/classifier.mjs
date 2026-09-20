@@ -70,6 +70,30 @@ function firstTargetRequest(attempt) {
   return attempt?.requests?.find((request) => request?.hostname === DEFAULTS.hostname) ?? null;
 }
 
+function absoluteLookupWindow(request) {
+  const absolute = request?.timing?.absolute;
+  if (!absolute || typeof absolute !== 'object') return null;
+  if (typeof absolute.domainLookupStart !== 'string' || typeof absolute.domainLookupEnd !== 'string') return null;
+  const start = Date.parse(absolute.domainLookupStart);
+  const end = Date.parse(absolute.domainLookupEnd);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) return null;
+  return { start, end };
+}
+
+function correlationDetails(dnsEvidence, egressEvidence, firstRequest, secondRequest) {
+  return {
+    firstDnsAt: dnsEvidence.firstDnsAt ?? null,
+    firstDomainLookupStart: firstRequest?.timing?.absolute?.domainLookupStart ?? null,
+    firstDomainLookupEnd: firstRequest?.timing?.absolute?.domainLookupEnd ?? null,
+    secondDnsAt: dnsEvidence.secondDnsAt ?? null,
+    secondDomainLookupStart: secondRequest?.timing?.absolute?.domainLookupStart ?? null,
+    secondDomainLookupEnd: secondRequest?.timing?.absolute?.domainLookupEnd ?? null,
+    firstRequestAt: firstRequest?.requestAt ?? null,
+    secondRequestAt: secondRequest?.requestAt ?? null,
+    egressObservedAt: egressEvidence.egressObservedAt ?? null,
+  };
+}
+
 export function correlateBrowserDnsEgress(attempts, dnsEvidence, egressEvidence) {
   if (!Array.isArray(attempts) || attempts.length < 2) {
     return { status: 'NOT EXECUTED', reason: 'TWO_BROWSER_ATTEMPTS_REQUIRED' };
@@ -86,65 +110,57 @@ export function correlateBrowserDnsEgress(attempts, dnsEvidence, egressEvidence)
   if (!firstRequest || !secondRequest) {
     return {
       status: 'LIMITATION',
-      firstDnsAt: dnsEvidence.firstDnsAt,
-      secondDnsAt: dnsEvidence.secondDnsAt,
-      firstBrowserRequestAt: firstRequest?.at ?? null,
-      secondBrowserRequestAt: secondRequest?.at ?? null,
-      egressObservedAt: egressEvidence.egressObservedAt,
+      ...correlationDetails(dnsEvidence, egressEvidence, firstRequest, secondRequest),
       reason: 'BROWSER_DID_NOT_EXPOSE_TWO_TARGET_REQUESTS',
+    };
+  }
+
+  const firstLookup = absoluteLookupWindow(firstRequest);
+  const secondLookup = absoluteLookupWindow(secondRequest);
+  if (!firstLookup || !secondLookup) {
+    return {
+      status: 'LIMITATION',
+      ...correlationDetails(dnsEvidence, egressEvidence, firstRequest, secondRequest),
+      reason: 'BROWSER_DNS_LOOKUP_TIMING_UNAVAILABLE',
     };
   }
 
   const firstDnsMs = Date.parse(dnsEvidence.firstDnsAt);
   const secondDnsMs = Date.parse(dnsEvidence.secondDnsAt);
-  const firstRequestMs = Date.parse(firstRequest.at);
-  const secondRequestMs = Date.parse(secondRequest.at);
   const egressMs = Date.parse(egressEvidence.egressObservedAt);
-  const timestampsValid = [firstRequestMs, secondRequestMs, egressMs].every(Number.isFinite);
+  const timestampsValid = [firstDnsMs, secondDnsMs, egressMs].every(Number.isFinite);
   if (!timestampsValid) {
-    return { status: 'FAIL', reason: 'BROWSER_OR_EGRESS_TIMESTAMP_INVALID' };
-  }
-  if (firstRequestMs <= firstDnsMs || firstRequestMs >= secondDnsMs) {
     return {
-      status: 'LIMITATION',
-      firstDnsAt: dnsEvidence.firstDnsAt,
-      secondDnsAt: dnsEvidence.secondDnsAt,
-      firstBrowserRequestAt: firstRequest.at,
-      secondBrowserRequestAt: secondRequest.at,
-      egressObservedAt: egressEvidence.egressObservedAt,
-      reason: 'FIRST_BROWSER_REQUEST_OUTSIDE_DNS_WINDOW',
+      status: 'FAIL',
+      ...correlationDetails(dnsEvidence, egressEvidence, firstRequest, secondRequest),
+      reason: 'BROWSER_OR_EGRESS_TIMESTAMP_INVALID',
     };
   }
-  if (secondRequestMs <= secondDnsMs) {
+  if (firstDnsMs < firstLookup.start || firstDnsMs > firstLookup.end) {
     return {
-      status: 'LIMITATION',
-      firstDnsAt: dnsEvidence.firstDnsAt,
-      secondDnsAt: dnsEvidence.secondDnsAt,
-      firstBrowserRequestAt: firstRequest.at,
-      secondBrowserRequestAt: secondRequest.at,
-      egressObservedAt: egressEvidence.egressObservedAt,
-      reason: 'SECOND_BROWSER_REQUEST_NOT_AFTER_SECOND_DNS_ANSWER',
+      status: 'FAIL',
+      ...correlationDetails(dnsEvidence, egressEvidence, firstRequest, secondRequest),
+      reason: 'FIRST_DNS_RESPONSE_OUTSIDE_BROWSER_LOOKUP_WINDOW',
     };
   }
-  if (egressMs < secondRequestMs) {
+  if (secondDnsMs < secondLookup.start || secondDnsMs > secondLookup.end) {
     return {
-      status: 'LIMITATION',
-      firstDnsAt: dnsEvidence.firstDnsAt,
-      secondDnsAt: dnsEvidence.secondDnsAt,
-      firstBrowserRequestAt: firstRequest.at,
-      secondBrowserRequestAt: secondRequest.at,
-      egressObservedAt: egressEvidence.egressObservedAt,
-      reason: 'EGRESS_ARTIFACT_PRECEDES_SECOND_BROWSER_REQUEST',
+      status: 'FAIL',
+      ...correlationDetails(dnsEvidence, egressEvidence, firstRequest, secondRequest),
+      reason: 'SECOND_DNS_RESPONSE_OUTSIDE_BROWSER_LOOKUP_WINDOW',
+    };
+  }
+  if (egressMs < secondLookup.end) {
+    return {
+      status: 'FAIL',
+      ...correlationDetails(dnsEvidence, egressEvidence, firstRequest, secondRequest),
+      reason: 'EGRESS_ARTIFACT_PRECEDES_SECOND_BROWSER_LOOKUP_END',
     };
   }
   return {
     status: 'PASS',
-    firstDnsAt: dnsEvidence.firstDnsAt,
-    secondDnsAt: dnsEvidence.secondDnsAt,
-    firstBrowserRequestAt: firstRequest.at,
-    secondBrowserRequestAt: secondRequest.at,
-    egressObservedAt: egressEvidence.egressObservedAt,
-    reason: 'DNS_BROWSER_EGRESS_TIMELINE_MATCHED',
+    ...correlationDetails(dnsEvidence, egressEvidence, firstRequest, secondRequest),
+    reason: 'DNS_BROWSER_LOOKUP_EGRESS_TIMELINE_MATCHED',
   };
 }
 

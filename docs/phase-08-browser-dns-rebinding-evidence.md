@@ -178,6 +178,8 @@ Para clasificar `PASS` consolidado, deben cumplirse simultáneamente estas venta
 
 Dos lanzamientos de Chromium no garantizan dos consultas DNS. Si Chromium cachea DNS, reutiliza una conexión o no vuelve a resolver, el resultado es `LIMITATION` o `NOT EXECUTED`, nunca `PASS` consolidado.
 
+El evento `page.on('request')` solo registra que el navegador emitió una solicitud; no demuestra cuándo ocurrió el DNS. El harness conserva `request.timing()` y usa `startTime` como tiempo absoluto en milisegundos desde la época; los demás campos de timing son offsets relativos a `startTime`, que se convierten a timestamps ISO absolutos para comparar las ventanas `domainLookupStart`/`domainLookupEnd`. Si el navegador devuelve `-1` o no expone una ventana de lookup utilizable, el resultado es `LIMITATION`/`NOT EXECUTED`, no `PASS`.
+
 ## 6. Matriz de resultados
 
 | Caso | `PASS` | `FAIL` | `LIMITATION` | `NOT EXECUTED` |
@@ -187,7 +189,7 @@ Dos lanzamientos de Chromium no garantizan dos consultas DNS. Si Chromium cachea
 | Navegación real | Chromium emitió la navegación con timestamps y resultado/error registrado | El harness no puede iniciar o el destino viola la política | Hay request, pero no se puede distinguir conexión efectiva | Browser/fixture no disponible |
 | Bloqueo inferior | `nftables` registra drop al destino privado, `internalHits=0` y timestamps compatibles | El paquete llega al destino privado o no se bloquea | Solo se observa timeout browser sin evidencia inferior suficiente | Gateway/artefacto no disponible |
 | IP efectiva/socket | El boundary observa destino/puerto/conexión y se correlaciona con la segunda resolución | El destino efectivo contradice la política o conecta internamente | Playwright no expone socket; solo hay evidencia parcial de paquetes | No hubo conexión observable |
-| Resultado consolidado | Browser + dos respuestas DNS + drop inferior están correlacionados | Alguna evidencia contradice el bloqueo | Falta correlación completa o Chromium no vuelve a resolver | Faltan artefactos o el laboratorio no está disponible |
+| Resultado consolidado | Browser + dos respuestas DNS dentro de sus ventanas de lookup + drop inferior están correlacionados | Alguna evidencia contradice el bloqueo o la línea temporal | Falta correlación completa o Chromium no vuelve a resolver | Faltan artefactos o el laboratorio no está disponible |
 
 Un `PASS` consolidado demuestra únicamente un rebinding real controlado y bloqueado por el boundary del laboratorio para esta ejecución. No demuestra DNS pinning, protección de un `BrowserProvider` futuro, HTTPS/TLS, Service Worker, WebSocket ni seguridad productiva.
 
@@ -206,7 +208,7 @@ DNS rebinding real tampoco equivale automáticamente a DNS pinning: demuestra qu
 - El destino privado utilizado es `10.20.0.1`, la propia Gateway del laboratorio. No representa todos los rangos privados/reservados.
 - Un `PASS` de este harness no cambia ADR-012 a decisión final.
 
-## 9. Pruebas locales del clasificador
+## 8. Pruebas locales del clasificador
 
 Las pruebas deterministas no ejecutan Chromium ni acceden al laboratorio:
 
@@ -221,11 +223,15 @@ Cubren:
 - segunda navegación sin segunda request demostrable (`LIMITATION`);
 - `internalHits > 0` (`FAIL`);
 - artefacto preclasificado como `PASS` sin campos reales (`FAIL`);
-- artefactos ausentes (`NOT EXECUTED`).
+- artefactos ausentes (`NOT EXECUTED`);
+- timing DNS no disponible en el segundo request (`LIMITATION`);
+- dos requests sin una segunda ventana de lookup demostrable (`LIMITATION`);
+- segunda respuesta DNS fuera de la ventana de lookup del segundo request (`FAIL`);
+- observación de egress anterior a la ventana relevante del segundo request (`FAIL`).
 
 Estas pruebas no constituyen evidencia de DNS rebinding ni de seguridad de red; solo protegen la clasificación del informe.
 
-## 8. Seguridad y limpieza
+## 9. Seguridad y limpieza
 
 - No usar perfil principal, cookies, storage state ni credenciales reales.
 - No imprimir cuerpos, headers, tokens, cookies ni query strings innecesarios.
