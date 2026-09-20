@@ -63,7 +63,8 @@ Utiliza el Playwright ya existente en la rama y no añade dependencias. El scrip
 - cierra cada browser/contexto en `finally`;
 - puede validar artefactos JSON exportados desde el DNS y `nftables` del Gateway;
 - valida realmente `source`, hostname, secuencia, tipo, IP y timestamps ISO del DNS; un campo `status: PASS` preexistente no sirve como bypass;
-- valida realmente la caída de `nftables`, `internalHits`, contador de paquetes y `observedAt`; ese `observedAt` es el momento de observación/colección del artefacto, no el timestamp exacto del socket;
+- valida realmente la caída de `nftables`, los contadores diferenciales antes/después, `internalHits` y `observedAt`; ese `observedAt` es el momento de observación/colección del artefacto, no el timestamp exacto del socket;
+- valida una referencia UTC explícita entre Gateway y Browser VM; sin ella la comparación cross-VM queda limitada y no puede producir `PASS` consolidado;
 - correlaciona temporalmente DNS sequence 1 → primera request Chromium → DNS sequence 2 → segunda request Chromium → observación del drop inferior;
 - emite un informe JSON por stdout y, opcionalmente, en una ruta indicada por el operador.
 
@@ -78,22 +79,23 @@ node scripts/phase-08-browser-dns-rebinding-evidence/run.mjs `
   --url http://rebind.test/ `
   --dns-evidence C:\Temp\phase-08-dns-evidence.json `
   --egress-evidence C:\Temp\phase-08-egress-evidence.json `
+  --clock-evidence C:\Temp\phase-08-clock-reference.json `
   --report C:\Temp\phase-08-browser-dns-rebinding-report.json
 ```
 
 La continuación de línea anterior corresponde a PowerShell. También puede ejecutarse en una sola línea:
 
 ```text
-node scripts/phase-08-browser-dns-rebinding-evidence/run.mjs --url http://rebind.test/ --dns-evidence C:\Temp\phase-08-dns-evidence.json --egress-evidence C:\Temp\phase-08-egress-evidence.json --report C:\Temp\phase-08-browser-dns-rebinding-report.json
+node scripts/phase-08-browser-dns-rebinding-evidence/run.mjs --url http://rebind.test/ --dns-evidence C:\Temp\phase-08-dns-evidence.json --egress-evidence C:\Temp\phase-08-egress-evidence.json --clock-evidence C:\Temp\phase-08-clock-reference.json --report C:\Temp\phase-08-browser-dns-rebinding-report.json
 ```
 
-El harness no crea esos dos artefactos del Gateway. Deben ser exportados por el procedimiento del laboratorio, revisados por el operador y copiados a la Browser VM sin secretos. Si no se proporcionan, la navegación se puede observar, pero el resultado consolidado queda `NOT EXECUTED`.
+El harness no crea esos artefactos del Gateway ni la referencia de reloj. Deben ser exportados por el procedimiento del laboratorio, revisados por el operador y copiados a la Browser VM sin secretos. Si no se proporcionan, la navegación se puede observar, pero el resultado consolidado queda `NOT EXECUTED`; la referencia de reloj es obligatoria para `PASS`, aunque DNS y egress estén presentes.
 
 Exit codes:
 
 - `0`: correlación completa `PASS`.
 - `1`: evidencia proporcionada o resultado observado contradice la política (`FAIL`).
-- `2`: evidencia ausente, inválida o capacidad no ejecutada (`NOT EXECUTED`).
+- `2`: evidencia ausente, limitada o capacidad no ejecutada (`LIMITATION`/`NOT EXECUTED`).
 
 ## 4. Formato de evidencia del Gateway
 
@@ -126,16 +128,36 @@ El harness exige que las dos respuestas A observadas sean exactamente `1.1.1.1` 
   "sourceAddress": "10.20.0.10",
   "destinationAddress": "10.20.0.1",
   "action": "drop",
-  "packets": 12,
-  "bytes": 788,
+  "packetsBefore": 100,
+  "packetsAfter": 112,
+  "packetsDelta": 12,
+  "bytesBefore": 7000,
+  "bytesAfter": 7788,
+  "bytesDelta": 788,
   "internalHits": 0,
   "observedAt": "<timestamp-ISO-real-posterior-a-la-segunda-request>"
 }
 ```
 
-Los números del bloque son únicamente la forma del contrato; deben sustituirse por observaciones reales. El campo `packets` debe ser un entero real mayor que cero y `observedAt` debe ser un timestamp ISO válido. La evidencia debe demostrar que el intento posterior del browser hacia el destino privado llegó a la frontera inferior y fue descartado. Si el Gateway observa el puerto, protocolo, puerto de origen o una identidad de conexión, esos datos deben conservarse en el artefacto sin incluir secretos.
+Los números del bloque son únicamente la forma del contrato; deben sustituirse por observaciones reales. `packetsBefore` y `packetsAfter` deben capturarse alrededor de esta ejecución, y `packetsDelta` debe ser exactamente `packetsAfter - packetsBefore` y mayor que cero. Lo mismo aplica a `bytesDelta`. No se debe reutilizar un contador acumulado de una ejecución anterior como si fuera evidencia de esta prueba. La evidencia debe demostrar tráfico adicional durante la ventana experimental y no identificar por sí sola un socket TCP específico.
 
 La evidencia de `nftables` demuestra el bloqueo en la frontera de red del laboratorio. `observedAt` indica cuándo se observó o recopiló el artefacto y no pretende ser el instante exacto del paquete ni del socket. La evidencia no expone necesariamente el socket interno de Chromium; la diferencia entre request browser, IP efectiva del paquete y socket debe permanecer explícita en el informe.
+
+### Referencia de reloj entre VMs
+
+El DNS y `nftables` se ejecutan en la Gateway Ubuntu, mientras que `request.timing()` se captura en la Browser VM Windows. Sus timestamps absolutos pertenecen a relojes distintos. Antes de cada prueba, el operador debe capturar una referencia UTC en ambas VMs y exportarla junto con el momento de observación:
+
+```json
+{
+  "source": "lab-clock-reference",
+  "gatewayUtc": "<timestamp-ISO-real>",
+  "browserUtc": "<timestamp-ISO-real>",
+  "observedAt": "<timestamp-ISO-real>",
+  "maxOffsetMs": 0
+}
+```
+
+El `0` es únicamente el tipo/forma del contrato y debe sustituirse por el entero medido por el operador; el harness no inventa ni calcula `maxOffsetMs`. Si no se proporciona una referencia suficiente, el resultado consolidado queda `LIMITATION` o `NOT EXECUTED`; no puede recibir `PASS` únicamente por comparar timestamps de ambas VMs.
 
 ## 5. Secuencia experimental
 
@@ -146,6 +168,7 @@ La evidencia de `nftables` demuestra el bloqueo en la frontera de red del labora
 - [ ] Chromium/Playwright ya provisionados; no instalar desde el harness.
 - [ ] Perfil principal y storage state no utilizados.
 - [ ] Contador DNS y contadores `nftables` registrados/resetados por el operador.
+- [ ] Referencia UTC capturada en Gateway y Browser VM, con `maxOffsetMs` medido y exportado.
 - [ ] Artefactos de evidencia del Gateway identificados y sin secretos.
 
 ### B. Primer intento browser
@@ -158,7 +181,7 @@ El DNS experimental debe entregar la respuesta A privada `10.20.0.1` en la consu
 
 ### D. Boundary inferior
 
-El Gateway debe demostrar que el intento hacia `10.20.0.1` fue bloqueado en `nftables`, con contador de paquetes y `internalHits=0`. La observación del browser se correlaciona por timestamps; no se asume que un error de Playwright por sí solo prueba el destino privado.
+El procedimiento debe seguir este orden: (A) registrar el contador `nftables` antes de ejecutar el segundo Chromium; (B) ejecutar el segundo Chromium; (C) registrar el contador después; (D) exportar `before`, `after` y el delta calculado. El Gateway debe demostrar que el tráfico adicional hacia `10.20.0.1` fue bloqueado, con `packetsDelta > 0` e `internalHits=0`. La observación del browser se correlaciona por timestamps y referencia de reloj; no se asume que un error de Playwright por sí solo prueba el destino privado.
 
 ### E. Revisión de caché y conexiones
 
@@ -173,8 +196,11 @@ Para clasificar `PASS` consolidado, deben cumplirse simultáneamente estas venta
 1. DNS sequence 1 (`1.1.1.1`) ocurre antes de la primera request target de Chromium.
 2. La primera request target ocurre antes de DNS sequence 2 (`10.20.0.1`).
 3. La segunda request target ocurre después de DNS sequence 2.
-4. La observación `nftables` del drop no es anterior a la segunda request target.
-5. Existe al menos una request target en cada lanzamiento de Chromium.
+4. Existe una referencia de reloj suficiente entre Gateway y Browser VM.
+5. El delta `nftables` es mayor que cero y su observación no es anterior al final del lookup del segundo request.
+6. `internalHits=0`.
+7. Existe al menos una request target en cada lanzamiento de Chromium.
+8. Ninguna condición está clasificada como `FAIL`.
 
 Dos lanzamientos de Chromium no garantizan dos consultas DNS. Si Chromium cachea DNS, reutiliza una conexión o no vuelve a resolver, el resultado es `LIMITATION` o `NOT EXECUTED`, nunca `PASS` consolidado.
 
@@ -224,6 +250,10 @@ Cubren:
 - `internalHits > 0` (`FAIL`);
 - artefacto preclasificado como `PASS` sin campos reales (`FAIL`);
 - artefactos ausentes (`NOT EXECUTED`);
+- delta de paquetes no positivo o inconsistente (`FAIL`);
+- delta de bytes inconsistente (`FAIL`);
+- referencia de reloj ausente (`LIMITATION`);
+- referencia de reloj inválida (`FAIL`);
 - timing DNS no disponible en el segundo request (`LIMITATION`);
 - dos requests sin una segunda ventana de lookup demostrable (`LIMITATION`);
 - segunda respuesta DNS fuera de la ventana de lookup del segundo request (`FAIL`);
@@ -243,6 +273,6 @@ Estas pruebas no constituyen evidencia de DNS rebinding ni de seguridad de red; 
 
 ## 10. Impacto en ADR-012
 
-El harness prepara evidencia de navegación real sobre el rebinding ya demostrado en el laboratorio. Si se ejecuta con dos resoluciones A correlacionadas y un drop de `nftables`, puede aportar evidencia `PASS` acotada de `DNS real → intento browser → bloqueo inferior`. Si Chromium cachea DNS o no intenta la segunda conexión, el resultado queda `LIMITATION`/`NOT EXECUTED` según la evidencia disponible.
+El harness prepara evidencia de navegación real sobre el rebinding ya demostrado en el laboratorio. Solo puede aportar evidencia `PASS` acotada de `DNS real → intento browser → delta de tráfico bloqueado` si además existe una referencia UTC suficiente entre las VMs, el delta de `nftables` es positivo y posterior al segundo lookup, e `internalHits=0`. Si falta el reloj, Chromium cachea DNS o no intenta la segunda conexión, el resultado queda `LIMITATION`/`NOT EXECUTED` según la evidencia disponible.
 
 En ningún caso se debe escribir que el experimento demuestra DNS pinning productivo, una política SSRF completa, un `BrowserProvider` o el cierre de ADR-012.

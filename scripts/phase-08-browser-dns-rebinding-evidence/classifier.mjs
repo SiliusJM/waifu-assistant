@@ -47,8 +47,19 @@ export function validateEgressEvidence(evidence) {
     && evidence.sourceAddress === '10.20.0.10'
     && evidence.destinationAddress === DEFAULTS.privateIp
     && evidence.action === 'drop'
-    && Number.isSafeInteger(evidence.packets)
-    && evidence.packets > 0
+    && Number.isSafeInteger(evidence.packetsBefore)
+    && evidence.packetsBefore >= 0
+    && Number.isSafeInteger(evidence.packetsAfter)
+    && evidence.packetsAfter >= evidence.packetsBefore
+    && Number.isSafeInteger(evidence.packetsDelta)
+    && evidence.packetsDelta === evidence.packetsAfter - evidence.packetsBefore
+    && evidence.packetsDelta > 0
+    && Number.isSafeInteger(evidence.bytesBefore)
+    && evidence.bytesBefore >= 0
+    && Number.isSafeInteger(evidence.bytesAfter)
+    && evidence.bytesAfter >= evidence.bytesBefore
+    && Number.isSafeInteger(evidence.bytesDelta)
+    && evidence.bytesDelta === evidence.bytesAfter - evidence.bytesBefore
     && evidence.internalHits === 0
     && isIsoTimestamp(evidence.observedAt);
   if (!valid) return statusForInvalidEvidence(evidence, 'EGRESS_DROP_OR_TIMESTAMP_INVALID');
@@ -58,11 +69,35 @@ export function validateEgressEvidence(evidence) {
     sourceAddress: evidence.sourceAddress,
     destinationAddress: evidence.destinationAddress,
     action: evidence.action,
-    packets: evidence.packets,
-    bytes: evidence.bytes ?? null,
+    packetsBefore: evidence.packetsBefore,
+    packetsAfter: evidence.packetsAfter,
+    packetsDelta: evidence.packetsDelta,
+    bytesBefore: evidence.bytesBefore,
+    bytesAfter: evidence.bytesAfter,
+    bytesDelta: evidence.bytesDelta,
     internalHits: evidence.internalHits,
     egressObservedAt: evidence.observedAt,
-    reason: 'LOWER_BOUNDARY_DROP_MATCHED',
+    reason: 'LOWER_BOUNDARY_DROP_DELTA_MATCHED',
+  };
+}
+
+export function validateClockReference(evidence) {
+  if (evidence == null) return { status: 'LIMITATION', reason: 'CLOCK_REFERENCE_NOT_PROVIDED' };
+  const valid = evidence.source === 'lab-clock-reference'
+    && isIsoTimestamp(evidence.gatewayUtc)
+    && isIsoTimestamp(evidence.browserUtc)
+    && isIsoTimestamp(evidence.observedAt)
+    && Number.isSafeInteger(evidence.maxOffsetMs)
+    && evidence.maxOffsetMs >= 0;
+  if (!valid) return statusForInvalidEvidence(evidence, 'CLOCK_REFERENCE_INVALID');
+  return {
+    status: 'PASS',
+    source: evidence.source,
+    gatewayUtc: evidence.gatewayUtc,
+    browserUtc: evidence.browserUtc,
+    observedAt: evidence.observedAt,
+    maxOffsetMs: evidence.maxOffsetMs,
+    reason: 'CROSS_VM_CLOCK_REFERENCE_CAPTURED',
   };
 }
 
@@ -80,7 +115,8 @@ function absoluteLookupWindow(request) {
   return { start, end };
 }
 
-function correlationDetails(dnsEvidence, egressEvidence, firstRequest, secondRequest) {
+function correlationDetails(dnsEvidence, egressEvidence, clockEvidence, firstRequest, secondRequest) {
+  const clock = clockEvidence ?? {};
   return {
     firstDnsAt: dnsEvidence.firstDnsAt ?? null,
     firstDomainLookupStart: firstRequest?.timing?.absolute?.domainLookupStart ?? null,
@@ -91,10 +127,15 @@ function correlationDetails(dnsEvidence, egressEvidence, firstRequest, secondReq
     firstRequestAt: firstRequest?.requestAt ?? null,
     secondRequestAt: secondRequest?.requestAt ?? null,
     egressObservedAt: egressEvidence.egressObservedAt ?? null,
+    clockGatewayUtc: clock.gatewayUtc ?? null,
+    clockBrowserUtc: clock.browserUtc ?? null,
+    clockObservedAt: clock.observedAt ?? null,
+    clockMaxOffsetMs: clock.maxOffsetMs ?? null,
   };
 }
 
-export function correlateBrowserDnsEgress(attempts, dnsEvidence, egressEvidence) {
+export function correlateBrowserDnsEgress(attempts, dnsEvidence, egressEvidence, clockEvidence) {
+  const clock = clockEvidence ?? { status: 'LIMITATION' };
   if (!Array.isArray(attempts) || attempts.length < 2) {
     return { status: 'NOT EXECUTED', reason: 'TWO_BROWSER_ATTEMPTS_REQUIRED' };
   }
@@ -104,13 +145,19 @@ export function correlateBrowserDnsEgress(attempts, dnsEvidence, egressEvidence)
   if (dnsEvidence.status === 'FAIL' || egressEvidence.status === 'FAIL') {
     return { status: 'FAIL', reason: 'LOWER_BOUNDARY_ARTIFACT_INVALID' };
   }
+  if (clock.status === 'FAIL') {
+    return { status: 'FAIL', reason: 'CLOCK_REFERENCE_INVALID' };
+  }
+  if (clock.status === 'NOT EXECUTED' || clock.status === 'LIMITATION') {
+    return { status: clock.status, reason: 'CROSS_VM_CLOCK_REFERENCE_INSUFFICIENT' };
+  }
 
   const firstRequest = firstTargetRequest(attempts[0]);
   const secondRequest = firstTargetRequest(attempts[1]);
   if (!firstRequest || !secondRequest) {
     return {
       status: 'LIMITATION',
-      ...correlationDetails(dnsEvidence, egressEvidence, firstRequest, secondRequest),
+      ...correlationDetails(dnsEvidence, egressEvidence, clockEvidence, firstRequest, secondRequest),
       reason: 'BROWSER_DID_NOT_EXPOSE_TWO_TARGET_REQUESTS',
     };
   }
@@ -120,7 +167,7 @@ export function correlateBrowserDnsEgress(attempts, dnsEvidence, egressEvidence)
   if (!firstLookup || !secondLookup) {
     return {
       status: 'LIMITATION',
-      ...correlationDetails(dnsEvidence, egressEvidence, firstRequest, secondRequest),
+      ...correlationDetails(dnsEvidence, egressEvidence, clockEvidence, firstRequest, secondRequest),
       reason: 'BROWSER_DNS_LOOKUP_TIMING_UNAVAILABLE',
     };
   }
@@ -132,34 +179,34 @@ export function correlateBrowserDnsEgress(attempts, dnsEvidence, egressEvidence)
   if (!timestampsValid) {
     return {
       status: 'FAIL',
-      ...correlationDetails(dnsEvidence, egressEvidence, firstRequest, secondRequest),
+      ...correlationDetails(dnsEvidence, egressEvidence, clockEvidence, firstRequest, secondRequest),
       reason: 'BROWSER_OR_EGRESS_TIMESTAMP_INVALID',
     };
   }
   if (firstDnsMs < firstLookup.start || firstDnsMs > firstLookup.end) {
     return {
       status: 'FAIL',
-      ...correlationDetails(dnsEvidence, egressEvidence, firstRequest, secondRequest),
+      ...correlationDetails(dnsEvidence, egressEvidence, clockEvidence, firstRequest, secondRequest),
       reason: 'FIRST_DNS_RESPONSE_OUTSIDE_BROWSER_LOOKUP_WINDOW',
     };
   }
   if (secondDnsMs < secondLookup.start || secondDnsMs > secondLookup.end) {
     return {
       status: 'FAIL',
-      ...correlationDetails(dnsEvidence, egressEvidence, firstRequest, secondRequest),
+      ...correlationDetails(dnsEvidence, egressEvidence, clockEvidence, firstRequest, secondRequest),
       reason: 'SECOND_DNS_RESPONSE_OUTSIDE_BROWSER_LOOKUP_WINDOW',
     };
   }
   if (egressMs < secondLookup.end) {
     return {
       status: 'FAIL',
-      ...correlationDetails(dnsEvidence, egressEvidence, firstRequest, secondRequest),
+      ...correlationDetails(dnsEvidence, egressEvidence, clockEvidence, firstRequest, secondRequest),
       reason: 'EGRESS_ARTIFACT_PRECEDES_SECOND_BROWSER_LOOKUP_END',
     };
   }
   return {
     status: 'PASS',
-    ...correlationDetails(dnsEvidence, egressEvidence, firstRequest, secondRequest),
+    ...correlationDetails(dnsEvidence, egressEvidence, clockEvidence, firstRequest, secondRequest),
     reason: 'DNS_BROWSER_LOOKUP_EGRESS_TIMELINE_MATCHED',
   };
 }

@@ -5,6 +5,7 @@ import {
   DEFAULTS,
   classifyOverall,
   correlateBrowserDnsEgress,
+  validateClockReference,
   validateDnsEvidence,
   validateEgressEvidence,
 } from './classifier.mjs';
@@ -14,6 +15,7 @@ function parseArgs(argv) {
     targetUrl: process.env.PHASE08_REBIND_URL ?? `http://${DEFAULTS.hostname}/`,
     dnsEvidencePath: null,
     egressEvidencePath: null,
+    clockEvidencePath: null,
     reportPath: process.env.PHASE08_REPORT_PATH ?? null,
     timeoutMs: Number(process.env.PHASE08_NAVIGATION_TIMEOUT_MS ?? 10_000),
   };
@@ -23,6 +25,7 @@ function parseArgs(argv) {
     const next = argv[index + 1];
     if (argument === '--dns-evidence') options.dnsEvidencePath = next;
     else if (argument === '--egress-evidence') options.egressEvidencePath = next;
+    else if (argument === '--clock-evidence') options.clockEvidencePath = next;
     else if (argument === '--report') options.reportPath = next;
     else if (argument === '--timeout-ms') options.timeoutMs = Number(next);
     else if (argument === '--url') options.targetUrl = next;
@@ -33,6 +36,7 @@ function parseArgs(argv) {
         '  --timeout-ms N            Navigation timeout; default 10000',
         '  --dns-evidence PATH       Gateway DNS evidence JSON',
         '  --egress-evidence PATH    Gateway nftables evidence JSON',
+        '  --clock-evidence PATH     Cross-VM UTC clock reference JSON',
         '  --report PATH             Write the browser report JSON',
       ].join('\n'));
       process.exitCode = 0;
@@ -205,7 +209,8 @@ async function run(options) {
 
   const dnsEvidence = validateDnsEvidence(await readEvidence(options.dnsEvidencePath, 'dns'));
   const egressEvidence = validateEgressEvidence(await readEvidence(options.egressEvidencePath, 'egress'));
-  const correlation = correlateBrowserDnsEgress(attempts, dnsEvidence, egressEvidence);
+  const clockEvidence = validateClockReference(await readEvidence(options.clockEvidencePath, 'clock'));
+  const correlation = correlateBrowserDnsEgress(attempts, dnsEvidence, egressEvidence, clockEvidence);
   const report = {
     generatedAt: now(),
     status: classifyOverall(attempts, dnsEvidence, egressEvidence, correlation),
@@ -221,9 +226,11 @@ async function run(options) {
     attempts,
     dnsEvidence,
     egressEvidence,
+    clockEvidence,
     correlation,
     limitations: [
       'The Gateway DNS and nftables evidence must be exported separately and passed to this harness.',
+      'A cross-VM clock reference is required for PASS; its maxOffsetMs must come from the operator, not this harness.',
       'A PASS does not demonstrate DNS pinning or a production BrowserProvider.',
       'Two Chromium launches make cache/connection reuse observable but do not guarantee a DNS query; the Gateway DNS evidence must show both A answers.',
       'No HTTPS/TLS, Service Worker, browser-remote, crash-cleanup or Search-provider test is performed by this harness.',
@@ -232,7 +239,7 @@ async function run(options) {
   if (options.reportPath) await writeFile(options.reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   console.log(JSON.stringify(report, null, 2));
   if (report.status === 'FAIL') process.exitCode = 1;
-  else if (report.status === 'NOT EXECUTED') process.exitCode = 2;
+  else if (report.status === 'LIMITATION' || report.status === 'NOT EXECUTED') process.exitCode = 2;
 }
 
 try {
