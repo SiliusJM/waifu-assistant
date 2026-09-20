@@ -28,6 +28,7 @@ Documentacion de Phase 8:
 - `docs/phase-08-network-host-isolation-evidence-results.md`: evidencia de la etapa OS/network, protocolo futuro y límites de ejecución.
 - `docs/phase-08-remaining-evidence-assessment.md`: auditoría consolidada de criterios pendientes y requisitos para el siguiente entorno experimental.
 - `docs/phase-08-experimental-environment-readiness.md`: checklist operativo del entorno dedicado, rollback y evidencia requerida.
+- `docs/phase-08-dns-rebinding-real-evidence.md`: evidencia real de DNS rebinding controlado, bloqueo de destino privado y límites frente a pinning productivo.
 Phase 3 — Realtime Engine está COMPLETA y mergeada en `main`. La base incluye conversación de texto, tools seguras y un runtime interno de eventos, streaming abstracto, cancelación y concurrencia.
 
 Phase 4 — Voice Service está COMPLETA y mergeada en `main` mediante PR #4, con merge commit `1ec4384dc529ed303e85413e7969a3896c741a69`. Incluye contratos desacoplados de audio, STT, TTS y reproducción, `VoiceService`, `VoiceSession`, `VoiceError`, lifecycle, cancelación, timeout por etapa, cleanup, logging seguro, eventos correlacionados y mocks deterministas. Los proveedores reales de voz no fueron seleccionados ni integrados.
