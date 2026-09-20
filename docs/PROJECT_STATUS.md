@@ -104,6 +104,7 @@ Sin introducir código de producción todavía:
 4. Repetir Search con credenciales temporales para Brave, Tavily y Exa y medir las 20 consultas.
 5. Evaluar browser remoto y crash cleanup seguro.
 6. Cerrar el `decision-gate` de ADR-012 con evidencia reproducible antes de implementar `WebSearchProvider`, `WebFetchProvider` o `BrowserProvider`.
+7. Integrar el DNS rebinding controlado con un cliente/browser real para observar `DNS -> IP validada -> navegación -> IP efectiva -> socket -> decisión del boundary`.
 8. Solo en un entorno administrativo/dedicado, evaluar una VM temporal o mecanismo equivalente para demostrar aislamiento de red/host y cleanup sin modificar el host de trabajo.
 
 ## Phase 8 — Internet & Browser
