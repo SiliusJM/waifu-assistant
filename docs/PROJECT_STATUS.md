@@ -75,6 +75,7 @@ Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #
 - Evidencia OS/network documentada en `docs/phase-08-network-host-isolation-evidence-results.md`; la ejecución real quedó `NOT EXECUTED`/`LIMITATION` por falta de un entorno administrativo/dedicado reproducible, sin nuevos `PASS`/`FAIL`.
 - Evaluación consolidada de evidencia restante documentada en `docs/phase-08-remaining-evidence-assessment.md`; no se identificó una nueva prueba segura y útil ejecutable en el entorno actual y los criterios pendientes conservan sus categorías.
 - Checklist de readiness del entorno experimental documentado en `docs/phase-08-experimental-environment-readiness.md`; define requisitos de entrada, rollback y evidencia por prueba sin alterar el host de trabajo.
+- Evidencia real de DNS rebinding controlado documentada en `docs/phase-08-dns-rebinding-real-evidence.md`; `rebind.test` alternó entre `1.1.1.1` y `10.20.0.1`, el intento a `10.20.0.1:22` fue bloqueado y `nftables` registró 12 paquetes/788 bytes DROP.
 
 ## In Progress
 
