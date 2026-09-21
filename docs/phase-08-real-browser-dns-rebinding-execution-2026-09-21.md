@@ -342,3 +342,178 @@ This execution did not modify:
 - ADR-012 decision state
 
 The purpose of this document is evidence capture only.
+
+## 15. Second real-browser execution — diagnostic instrumentation
+
+A second real Browser VM execution was performed after installing the diagnostic-only instrumented run.mjs from the audited local commit. This execution was intentionally run without DNS, egress and clock evidence JSON inputs so that the new Playwright/CDP observations could be isolated before any attempt to consolidate a formal PASS.
+
+The browser report was written to:
+
+    C:\Temp\phase-08-browser-dns-rebinding-report.json
+
+The report itself classified the consolidation as:
+
+    status = NOT EXECUTED
+    dnsEvidence.status = NOT EXECUTED
+    egressEvidence.status = NOT EXECUTED
+    clockEvidence.status = LIMITATION
+    correlation.status = NOT EXECUTED
+
+This is an artifact-input classification, not a statement that Chromium failed to execute.
+
+### 15.1 First Chromium process — public resolution
+
+The first target document request was:
+
+    requestAt = 2026-09-21T23:41:32.151Z
+    hostname = rebind.test
+    port = 80
+    path = /
+    method = GET
+    resourceType = document
+    responseStatus = 409
+    navigationError = null
+    targetRequestObserved = true
+
+Playwright exposed a usable DNS lookup window:
+
+    domainLookupStart = 2026-09-21T23:41:34.867Z
+    domainLookupEnd   = 2026-09-21T23:41:34.872Z
+    connectStart      = 2026-09-21T23:41:34.872Z
+    connectEnd        = 2026-09-21T23:41:34.886Z
+    requestStart      = 2026-09-21T23:41:34.886Z
+    responseStart     = 2026-09-21T23:41:34.914Z
+    responseEnd       = not exposed by the captured Playwright timing object
+
+The CDP instrumentation independently recorded the corresponding response:
+
+    observedAt = 2026-09-21T23:41:34.918Z
+    status = 409
+    remoteIPAddress = 1.1.1.1
+    remotePort = 80
+
+This is the strongest direct observation in this execution: the first Chromium connection to rebind.test exposed remoteIPAddress = 1.1.1.1.
+
+### 15.2 Gateway DNS sequence
+
+The live Gateway DNS log contained:
+
+    2026-09-21T23:41:34.867781Z 10.20.0.10 rebind.test. A -> 1.1.1.1 (sequence=1)
+    2026-09-21T23:41:35.685653Z 10.20.0.10 rebind.test. A -> 10.20.0.1 (sequence=2)
+
+The first DNS answer is temporally aligned with the first Chromium lookup:
+
+    Chromium lookup start = 23:41:34.867Z
+    Gateway DNS sequence 1 = 23:41:34.867781Z
+
+The second DNS answer occurred 17.653 ms after the second target request was observed:
+
+    second Chromium request = 23:41:35.668Z
+    DNS sequence 2         = 23:41:35.685653Z
+
+The second DNS event is real Gateway evidence, but the second Chromium lookup window was unavailable; therefore this execution does not claim that Chromium itself consumed sequence 2.
+
+### 15.3 Second Chromium process — timeout with CDP diagnostics
+
+A separate Chromium process was used for the second attempt.
+
+Observed target request:
+
+    requestAt = 2026-09-21T23:41:35.668Z
+    hostname = rebind.test
+    port = 80
+    path = /
+    method = GET
+    resourceType = document
+    targetRequestObserved = true
+    responseStatus = null
+    navigationError = net::ERR_CONNECTION_TIMED_OUT
+
+Playwright timing was unavailable for the second target request:
+
+    domainLookupStart = -1
+    domainLookupEnd   = -1
+    connectStart      = -1
+    connectEnd        = -1
+    requestStart      = -1
+    responseStart     = -1
+    responseEnd       = -1
+
+The diagnostic instrumentation recorded:
+
+    requestfailed:
+      timestamp = 2026-09-21T23:41:56.730Z
+      errorText = net::ERR_CONNECTION_TIMED_OUT
+
+    CDP Network.loadingFailed:
+      observedAt = 2026-09-21T23:41:56.730Z
+      errorText = net::ERR_CONNECTION_TIMED_OUT
+      canceled = false
+      blockedReason = null
+
+    page.close:
+      2026-09-21T23:41:56.825Z
+
+    browser.disconnected:
+      2026-09-21T23:41:56.845Z
+
+The timeout therefore occurred before the cleanup events. The diagnostic evidence does not attribute the failure to the harness closing the browser.
+
+The report also recorded the harness limitation:
+
+    Playwright does not expose the DNS answer or TCP socket selected by Chromium.
+
+No inference is made from the timeout alone about the second socket's destination IP.
+
+### 15.4 Gateway input-boundary observation
+
+After the browser execution, the Gateway reported the laboratory input drop rule as:
+
+    iifname "enp0s8" counter packets 22 bytes 1456 drop
+
+At the time the restored wa_lab table was first loaded for this session, the same drop rule showed zero packets and zero bytes. However, no separately timestamped pre-run nftables snapshot was persisted immediately before the Browser execution.
+
+Accordingly, the 22 packets / 1456 bytes value is retained as real boundary evidence that traffic from the lab interface reached the Gateway input drop rule, but it is not promoted to a formal phase-08-egress-evidence.json delta artifact and is not treated as an exact per-attempt delta.
+
+The existing forward private-destination rule remained at zero during the final inspection. This is expected for traffic destined to the Gateway's own 10.20.0.1 address: the packet is evaluated by the Gateway's input chain rather than the forward chain.
+
+### 15.5 Clock evidence
+
+No fresh cross-VM clock artifact was successfully captured for this second execution. The harness therefore correctly reported:
+
+    clockEvidence.status = LIMITATION
+    reason = CLOCK_REFERENCE_NOT_PROVIDED
+
+The previously captured maxOffsetMs = 457 reference is not reused to claim a fresh clock correlation for this execution.
+
+### 15.6 Consolidated result of the second execution
+
+    overall = NOT EXECUTED
+    diagnostic browser execution = REAL / OBSERVED
+    formal PASS = NO
+    formal FAIL = NO
+    preserved decision state = LIMITATION
+    ADR-012 = still provisional / decision-gate
+
+What this execution adds beyond the earlier run:
+
+- Direct CDP observation of remoteIPAddress = 1.1.1.1 for the first Chromium connection.
+- Exact correlation between the first Chromium lookup window and Gateway DNS sequence 1.
+- A second real Chromium request that remained pending until net::ERR_CONNECTION_TIMED_OUT.
+- CDP confirmation that the second failure was Network.loadingFailed with canceled = false and no blockedReason.
+- A real Gateway input-drop observation after the experiment.
+
+What it still does not prove:
+
+- That Chromium's second socket connected specifically to 10.20.0.1.
+- A usable second Chromium DNS lookup window.
+- A formal timestamped egress artifact with internalHits=0.
+- A fresh cross-VM clock reference for this execution.
+- DNS pinning by a production BrowserProvider.
+- Any production architecture selection under ADR-012.
+
+## 16. Follow-up decision
+
+No further Browser VM interaction is required merely to document this execution. The next engineering step should be repository-side audit/documentation of these observations before deciding whether another lab execution is justified.
+
+Any future lab run should be narrowly scoped to the remaining missing evidence rather than repeating installation or environment setup.
