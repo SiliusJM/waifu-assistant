@@ -62,6 +62,25 @@ function now() {
   return new Date().toISOString();
 }
 
+function safeUrlDetails(value) {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    return {
+      protocol: url.protocol,
+      hostname: url.hostname,
+      port: url.port || (url.protocol === 'http:' ? '80' : '443'),
+      path: url.pathname,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function cdpTimestamp(event) {
+  return Number.isFinite(event?.timestamp) ? event.timestamp : null;
+}
+
 const TIMING_FIELDS = [
   'startTime',
   'domainLookupStart',
@@ -93,10 +112,10 @@ function serializeTiming(request) {
   return { ...timing, absolute };
 }
 
-function safeRequest(request) {
+function safeRequest(request, requestAt = now()) {
   const url = new URL(request.url());
   return {
-    requestAt: now(),
+    requestAt,
     hostname: url.hostname,
     port: url.port || (url.protocol === 'http:' ? '80' : '443'),
     path: url.pathname,
@@ -133,42 +152,175 @@ async function runBrowserAttempt(label, targetUrl, controlUrl, timeoutMs) {
     navigationError: null,
     controlFixtureLoaded: false,
     targetRequestObserved: false,
+    observations: {
+      playwright: [],
+      cdp: [],
+    },
+    cdpSetupError: null,
+    cleanupStartedAt: null,
     finishedAt: null,
   };
   let browser;
   let context;
+  let page;
+  let cdpSession;
   try {
     browser = await chromium.launch({ headless: true, chromiumSandbox: true });
+    browser.on('disconnected', () => {
+      attempt.observations.playwright.push({
+        event: 'browser.disconnected',
+        timestamp: now(),
+      });
+    });
     context = await browser.newContext();
-    const page = await context.newPage();
+    page = await context.newPage();
+    page.on('close', () => {
+      attempt.observations.playwright.push({
+        event: 'page.close',
+        timestamp: now(),
+      });
+    });
+    page.on('crash', () => {
+      attempt.observations.playwright.push({
+        event: 'page.crash',
+        timestamp: now(),
+      });
+    });
+
+    try {
+      cdpSession = await context.newCDPSession(page);
+      const cdpTargetRequestIds = new Set();
+      cdpSession.on('Network.requestWillBeSent', (event) => {
+        const requestDetails = safeUrlDetails(event.request?.url);
+        const isTarget = requestDetails?.hostname === DEFAULTS.hostname;
+        if (isTarget && event.requestId) cdpTargetRequestIds.add(event.requestId);
+        attempt.observations.cdp.push({
+          event: 'Network.requestWillBeSent',
+          observedAt: now(),
+          protocolTimestamp: cdpTimestamp(event),
+          wallTime: Number.isFinite(event?.wallTime) ? event.wallTime : null,
+          requestId: event.requestId ?? null,
+          loaderId: event.loaderId ?? null,
+          frameId: event.frameId ?? null,
+          type: event.type ?? null,
+          target: isTarget,
+          documentUrl: safeUrlDetails(event.documentURL),
+          request: {
+            ...requestDetails,
+            method: event.request?.method ?? null,
+          },
+          redirectResponseStatus: event.redirectResponse?.status ?? null,
+        });
+      });
+      cdpSession.on('Network.responseReceived', (event) => {
+        const responseDetails = safeUrlDetails(event.response?.url);
+        const isTarget = responseDetails?.hostname === DEFAULTS.hostname
+          || cdpTargetRequestIds.has(event.requestId);
+        attempt.observations.cdp.push({
+          event: 'Network.responseReceived',
+          observedAt: now(),
+          protocolTimestamp: cdpTimestamp(event),
+          requestId: event.requestId ?? null,
+          loaderId: event.loaderId ?? null,
+          frameId: event.frameId ?? null,
+          type: event.type ?? null,
+          target: isTarget,
+          response: {
+            ...responseDetails,
+            status: Number.isFinite(event.response?.status) ? event.response.status : null,
+            mimeType: event.response?.mimeType ?? null,
+            remoteIPAddress: event.response?.remoteIPAddress ?? null,
+            remotePort: Number.isFinite(event.response?.remotePort) ? event.response.remotePort : null,
+          },
+        });
+      });
+      cdpSession.on('Network.loadingFailed', (event) => {
+        attempt.observations.cdp.push({
+          event: 'Network.loadingFailed',
+          observedAt: now(),
+          protocolTimestamp: cdpTimestamp(event),
+          requestId: event.requestId ?? null,
+          type: event.type ?? null,
+          target: cdpTargetRequestIds.has(event.requestId),
+          errorText: event.errorText ?? null,
+          canceled: event.canceled === true,
+          blockedReason: event.blockedReason ?? null,
+          corsErrorStatus: event.corsErrorStatus ?? null,
+          encodedDataLength: Number.isFinite(event.encodedDataLength) ? event.encodedDataLength : null,
+        });
+      });
+      await cdpSession.send('Network.enable');
+    } catch (error) {
+      attempt.cdpSetupError = error instanceof Error ? error.message : 'CDP_SETUP_FAILED';
+    }
+
     const targetRequests = new Map();
     page.on('request', (request) => {
-      const requestInfo = safeRequest(request);
+      const requestAt = now();
+      const requestInfo = safeRequest(request, requestAt);
       if (requestInfo.hostname === DEFAULTS.hostname) {
         attempt.requests.push(requestInfo);
         targetRequests.set(request, requestInfo);
         attempt.targetRequestObserved = true;
+        attempt.observations.playwright.push({
+          event: 'request',
+          timestamp: requestAt,
+          hostname: requestInfo.hostname,
+          port: requestInfo.port,
+          path: requestInfo.path,
+          method: requestInfo.method,
+          resourceType: requestInfo.resourceType,
+        });
       }
     });
     page.on('response', (response) => {
       const url = new URL(response.url());
       if (url.hostname === DEFAULTS.hostname) {
+        const timestamp = now();
         attempt.responseStatus = response.status();
         const requestInfo = targetRequests.get(response.request());
         if (requestInfo) requestInfo.timing = serializeTiming(response.request());
+        attempt.observations.playwright.push({
+          event: 'response',
+          timestamp,
+          hostname: url.hostname,
+          port: url.port || (url.protocol === 'http:' ? '80' : '443'),
+          path: url.pathname,
+          status: response.status(),
+        });
       }
     });
     page.on('requestfailed', (request) => {
       const url = new URL(request.url());
       if (url.hostname === DEFAULTS.hostname) {
-        attempt.navigationError = request.failure()?.errorText ?? 'REQUEST_FAILED';
+        const timestamp = now();
+        const failure = request.failure();
+        attempt.navigationError = failure?.errorText ?? 'REQUEST_FAILED';
         const requestInfo = targetRequests.get(request);
         if (requestInfo) requestInfo.timing = serializeTiming(request);
+        attempt.observations.playwright.push({
+          event: 'requestfailed',
+          timestamp,
+          hostname: url.hostname,
+          port: url.port || (url.protocol === 'http:' ? '80' : '443'),
+          path: url.pathname,
+          failure,
+          errorText: failure?.errorText ?? null,
+        });
       }
     });
     page.on('requestfinished', (request) => {
       const requestInfo = targetRequests.get(request);
-      if (requestInfo) requestInfo.timing = serializeTiming(request);
+      if (requestInfo) {
+        requestInfo.timing = serializeTiming(request);
+        attempt.observations.playwright.push({
+          event: 'requestfinished',
+          timestamp: now(),
+          hostname: requestInfo.hostname,
+          port: requestInfo.port,
+          path: requestInfo.path,
+        });
+      }
     });
 
     await page.goto(controlUrl, { waitUntil: 'commit', timeout: timeoutMs });
@@ -179,6 +331,8 @@ async function runBrowserAttempt(label, targetUrl, controlUrl, timeoutMs) {
       attempt.navigationError = error instanceof Error ? error.message : 'NAVIGATION_FAILED';
     }
   } finally {
+    attempt.cleanupStartedAt = now();
+    if (cdpSession) await cdpSession.detach().catch(() => undefined);
     if (context) await context.close().catch(() => undefined);
     if (browser) await browser.close().catch(() => undefined);
     attempt.finishedAt = now();
