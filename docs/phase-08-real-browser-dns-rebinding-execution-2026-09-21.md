@@ -54,7 +54,7 @@ The DNS service logs each query with an ISO timestamp, client address, hostname,
 
 ## 2. Cross-VM clock reference used by the run
 
-A fresh clock reference was captured immediately before this experimental run and was already present in the Browser VM at:
+A fresh clock reference was captured earlier in the same laboratory session and was already present in the Browser VM at; it was not captured immediately before the browser harness run:
 
 ```text
 C:\Temp\phase-08-clock-reference.json
