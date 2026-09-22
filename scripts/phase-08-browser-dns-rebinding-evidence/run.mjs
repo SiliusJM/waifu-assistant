@@ -1,8 +1,8 @@
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { chromium } from 'playwright';
 import {
   DEFAULTS,
@@ -20,6 +20,7 @@ function parseArgs(argv) {
     egressEvidencePath: null,
     clockEvidencePath: null,
     reportPath: process.env.PHASE08_REPORT_PATH ?? null,
+    retainNetlogDir: null,
     timeoutMs: Number(process.env.PHASE08_NAVIGATION_TIMEOUT_MS ?? 10_000),
   };
 
@@ -30,6 +31,7 @@ function parseArgs(argv) {
     else if (argument === '--egress-evidence') options.egressEvidencePath = next;
     else if (argument === '--clock-evidence') options.clockEvidencePath = next;
     else if (argument === '--report') options.reportPath = next;
+    else if (argument === '--retain-netlog-dir') options.retainNetlogDir = next;
     else if (argument === '--timeout-ms') options.timeoutMs = Number(next);
     else if (argument === '--url') options.targetUrl = next;
     else if (argument === '--help') {
@@ -41,6 +43,7 @@ function parseArgs(argv) {
         '  --egress-evidence PATH    Gateway nftables evidence JSON',
         '  --clock-evidence PATH     Cross-VM UTC clock reference JSON',
         '  --report PATH             Write the browser report JSON',
+        '  --retain-netlog-dir DIR   Opt-in temporary NetLog retention outside the repository',
       ].join('\n'));
       process.exitCode = 0;
       return null;
@@ -57,6 +60,18 @@ function parseArgs(argv) {
   const target = new URL(options.targetUrl);
   if (target.protocol !== 'http:' || target.hostname !== DEFAULTS.hostname) {
     throw new Error('TARGET_MUST_BE_HTTP_REBIND_TEST');
+  }
+  if (options.retainNetlogDir !== null) {
+    if (!options.retainNetlogDir || !isAbsolute(options.retainNetlogDir)) {
+      throw new Error('RETAIN_NETLOG_DIR_MUST_BE_ABSOLUTE');
+    }
+    const repositoryRoot = resolve(process.cwd());
+    const retentionRoot = resolve(options.retainNetlogDir);
+    const relativeRetentionRoot = relative(repositoryRoot, retentionRoot);
+    const insideRepository = relativeRetentionRoot === ''
+      || (!relativeRetentionRoot.startsWith(`..${sep}`) && relativeRetentionRoot !== '..');
+    if (insideRepository) throw new Error('RETAIN_NETLOG_DIR_MUST_BE_OUTSIDE_REPOSITORY');
+    options.retainNetlogDir = retentionRoot;
   }
   return { ...options, target };
 }
@@ -90,14 +105,21 @@ const NETLOG_SUMMARY_MAX_EVENTS = 1000;
 const NETLOG_EVENT_GROUPS = Object.freeze({
   dns: new Set([
     'HOST_RESOLVER_MANAGER_REQUEST',
+    'HOST_RESOLVER_MANAGER_JOB',
+    'HOST_RESOLVER_MANAGER_JOB_ATTACH',
     'HOST_RESOLVER_MANAGER_CACHE_HIT',
     'HOST_RESOLVER_MANAGER_HOSTS_HIT',
     'HOST_RESOLVER_SYSTEM_TASK',
     'HOST_RESOLVER_DNS_TASK',
+    'HOST_RESOLVER_DNS_TASK_TIMEOUT',
     'HOST_RESOLVER_DNS_TASK_EXTRACTION_RESULTS',
     'HOST_RESOLVER_SERVICE_ENDPOINTS_UPDATED',
+    'DNS_TRANSACTION',
+    'DNS_TRANSACTION_QUERY',
+    'DNS_TRANSACTION_RESPONSE',
   ]),
   connection: new Set([
+    'CONNECT_JOB',
     'TRANSPORT_CONNECT_JOB_CONNECT_ATTEMPT',
     'TCP_CONNECT_JOB_CONNECTOR_CONNECT_START',
     'TCP_CONNECT_JOB_CONNECTOR_CONNECT_COMPLETE',
@@ -115,6 +137,9 @@ const NETLOG_EVENT_GROUPS = Object.freeze({
   ]),
   request: new Set([
     'URL_REQUEST_START_JOB',
+    'HTTP_STREAM_REQUEST',
+    'HTTP_STREAM_REQUEST_STARTED_JOB',
+    'HTTP_STREAM_REQUEST_BOUND_TO_JOB',
     'HTTP_STREAM_JOB',
     'HTTP_TRANSACTION',
     'TCP_CLIENT_SOCKET_POOL_REQUESTED_SOCKET',
@@ -136,6 +161,27 @@ const NETLOG_ADDRESS_KEYS = new Set([
   'ipv4_endpoints',
   'ipv6_endpoints',
   'remote_address',
+]);
+
+const NETLOG_ADDRESS_CONTAINER_KEYS = new Set([
+  'address_list',
+  'addresses',
+  'results',
+  'endpoints',
+  'ipv4_endpoints',
+  'ipv6_endpoints',
+]);
+
+const NETLOG_HOST_KEYS = new Set([
+  'host',
+  'hostname',
+  'qname',
+  'url',
+  'location',
+  'host_port',
+  'host_port_pair',
+  'logical_destination',
+  'destination',
 ]);
 
 function isRecord(value) {
@@ -165,10 +211,23 @@ function collectSourceDependencies(value, result = new Set()) {
   return result;
 }
 
-function containsTargetHost(value) {
-  if (typeof value === 'string') return value.includes(DEFAULTS.hostname);
-  if (Array.isArray(value)) return value.some(containsTargetHost);
-  if (isRecord(value)) return Object.values(value).some(containsTargetHost);
+function containsTargetHostname(value) {
+  if (typeof value !== 'string') return false;
+  const normalized = value.toLowerCase().replace(/\.$/, '');
+  const target = DEFAULTS.hostname.toLowerCase();
+  return normalized === target
+    || new RegExp(`(^|[^a-z0-9.-])${target.replaceAll('.', '\\.')}(?=$|[^a-z0-9.-])`, 'i').test(value);
+}
+
+function containsTargetHost(value, key = null) {
+  if (typeof value === 'string') return key !== null && NETLOG_HOST_KEYS.has(key)
+    && containsTargetHostname(value);
+  if (Array.isArray(value)) return value.some((item) => containsTargetHost(item, key));
+  if (isRecord(value)) {
+    return Object.entries(value).some(([childKey, child]) => (
+      NETLOG_HOST_KEYS.has(childKey) && containsTargetHost(child, childKey)
+    ));
+  }
   return false;
 }
 
@@ -202,7 +261,9 @@ function collectNetLogAddresses(value, key = null, result = new Set()) {
     result.add(`${value.address}${port}`);
   }
   for (const [childKey, child] of Object.entries(value)) {
-    if (NETLOG_ADDRESS_KEYS.has(childKey)) collectNetLogAddresses(child, childKey, result);
+    if (NETLOG_ADDRESS_KEYS.has(childKey) || NETLOG_ADDRESS_CONTAINER_KEYS.has(childKey)) {
+      collectNetLogAddresses(child, childKey, result);
+    }
   }
   return result;
 }
@@ -222,18 +283,48 @@ function safeNetLogErrorParams(params) {
   return result;
 }
 
-function summarizeNetLogEvent(event, group) {
+function invertNetLogMapping(value) {
+  const mapping = new Map();
+  if (!isRecord(value)) return mapping;
+  for (const [name, id] of Object.entries(value)) {
+    const numericId = Number(id);
+    if (Number.isSafeInteger(numericId) && typeof name === 'string' && name.length > 0) {
+      mapping.set(numericId, name);
+    }
+  }
+  return mapping;
+}
+
+function normalizeNetLogEventType(event, eventTypes) {
+  if (typeof event?.type === 'string') return event.type;
+  if (Number.isSafeInteger(event?.type)) return eventTypes.get(event.type) ?? null;
+  return null;
+}
+
+function normalizeNetLogTime(value) {
+  if (typeof value === 'string') return value;
+  if (Number.isFinite(value)) return String(value);
+  return null;
+}
+
+function summarizeNetLogEvent(event, group, typeName, sourceTypes) {
   const params = isRecord(event.params) ? event.params : {};
   const sourceId = normalizeNetLogId(event.source);
+  const sourceType = isRecord(event.source) ? event.source.type : null;
+  const sourceTypeName = typeof sourceType === 'string'
+    ? sourceType
+    : Number.isSafeInteger(sourceType) ? sourceTypes.get(sourceType) ?? null : null;
   const sourceDependencies = [...collectSourceDependencies(params)].sort();
   const addresses = [...collectNetLogAddresses(params)].sort();
   return {
     group,
-    type: typeof event.type === 'string' ? event.type : 'UNKNOWN',
+    type: event.type ?? null,
+    typeName,
     phase: Number.isSafeInteger(event.phase) ? event.phase : null,
-    netlogTime: typeof event.time === 'number' && Number.isFinite(event.time) ? event.time : null,
+    netlogTime: normalizeNetLogTime(event.time),
     sourceId,
-    sourceType: isRecord(event.source) && typeof event.source.type === 'string' ? event.source.type : null,
+    sourceType,
+    sourceTypeName,
     sourceDependencies,
     targetHost: DEFAULTS.hostname,
     addresses,
@@ -243,12 +334,26 @@ function summarizeNetLogEvent(event, group) {
 
 function summarizeNetLogDocument(document) {
   const events = Array.isArray(document?.events) ? document.events : [];
+  const eventTypes = invertNetLogMapping(document?.constants?.logEventTypes);
+  const sourceTypes = invertNetLogMapping(document?.constants?.logSourceType);
   const targetSources = new Set();
+  const recognizedTypes = new Set();
+  let recognizedEventCount = 0;
+  let unknownTypeCount = 0;
+  let eventsWithHostname = 0;
 
   for (const event of events) {
     if (!isRecord(event)) continue;
+    const typeName = normalizeNetLogEventType(event, eventTypes);
+    if (typeName === null) unknownTypeCount += 1;
+    const group = netLogEventGroup(typeName);
+    if (group) {
+      recognizedEventCount += 1;
+      recognizedTypes.add(typeName);
+    }
     const dependencies = collectSourceDependencies(event.params);
     if (containsTargetHost(event.params)) {
+      eventsWithHostname += 1;
       const sourceId = normalizeNetLogId(event.source);
       if (sourceId) targetSources.add(sourceId);
       for (const dependency of dependencies) targetSources.add(dependency);
@@ -281,14 +386,15 @@ function summarizeNetLogDocument(document) {
   const relevantEvents = events
     .map((event) => {
       if (!isRecord(event)) return null;
-      const group = netLogEventGroup(event.type);
+      const typeName = normalizeNetLogEventType(event, eventTypes);
+      const group = netLogEventGroup(typeName);
       if (!group) return null;
       const sourceId = normalizeNetLogId(event.source);
       const dependencies = collectSourceDependencies(event.params);
       const related = containsTargetHost(event.params)
         || (sourceId && targetSources.has(sourceId))
         || [...dependencies].some((dependency) => targetSources.has(dependency));
-      return related ? summarizeNetLogEvent(event, group) : null;
+      return related ? summarizeNetLogEvent(event, group, typeName, sourceTypes) : null;
     })
     .filter((event) => event !== null);
 
@@ -296,6 +402,12 @@ function summarizeNetLogDocument(document) {
   return {
     status: relevantEvents.length > 0 && !truncated ? 'OBSERVED' : 'LIMITATION',
     targetHost: DEFAULTS.hostname,
+    rawEventCount: events.length,
+    recognizedEventCount,
+    unknownTypeCount,
+    hasLogEventTypes: eventTypes.size > 0,
+    eventsWithHostname,
+    recognizedTypes: [...recognizedTypes].sort(),
     eventCount: relevantEvents.length,
     truncated,
     events: relevantEvents.slice(0, NETLOG_SUMMARY_MAX_EVENTS),
@@ -324,6 +436,32 @@ async function readNetLog(netlogPath) {
       reason: error?.code === 'ENOENT' ? 'NETLOG_FILE_NOT_FOUND' : 'NETLOG_UNREADABLE',
     };
   }
+}
+
+function retentionFileName(label) {
+  const safeLabel = label.replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '') || 'attempt';
+  return `${safeLabel}.netlog.json`;
+}
+
+async function retainNetLog(netlogPath, retentionDir, label, netlogResult) {
+  const result = {
+    rawRetained: false,
+    retainedBytes: null,
+    retainedSha256: netlogResult.sha256 ?? null,
+    retentionStatus: retentionDir === null ? 'NOT REQUESTED' : 'NOT RETAINED',
+  };
+  if (retentionDir === null || netlogResult.status !== 'AVAILABLE') return result;
+  try {
+    await mkdir(retentionDir, { recursive: true });
+    const retainedPath = join(retentionDir, retentionFileName(label));
+    await copyFile(netlogPath, retainedPath);
+    result.retainedBytes = (await stat(retainedPath)).size;
+    result.rawRetained = true;
+    result.retentionStatus = 'RETAINED';
+  } catch {
+    result.retentionStatus = 'FAILED';
+  }
+  return result;
 }
 
 async function cleanupNetLogDirectory(netlogDirectory) {
@@ -397,7 +535,7 @@ async function startControlFixture() {
   return { server, url: `http://127.0.0.1:${address.port}/control` };
 }
 
-async function runBrowserAttempt(label, targetUrl, controlUrl, timeoutMs) {
+async function runBrowserAttempt(label, targetUrl, controlUrl, timeoutMs, retentionDir) {
   const attempt = {
     label,
     startedAt: now(),
@@ -414,6 +552,10 @@ async function runBrowserAttempt(label, targetUrl, controlUrl, timeoutMs) {
     netlog: {
       status: 'NOT EXECUTED',
       summary: null,
+      rawRetained: false,
+      retainedBytes: null,
+      retainedSha256: null,
+      retentionStatus: retentionDir === null ? 'NOT REQUESTED' : 'NOT RETAINED',
       cleanupStatus: 'NOT_STARTED',
     },
     cdpSetupError: null,
@@ -607,7 +749,15 @@ async function runBrowserAttempt(label, targetUrl, controlUrl, timeoutMs) {
     if (context) await context.close().catch(() => undefined);
     if (browser) await browser.close().catch(() => undefined);
     attempt.finishedAt = now();
-    if (netlogPath) attempt.netlog = await readNetLog(netlogPath);
+    if (netlogPath) {
+      attempt.netlog = await readNetLog(netlogPath);
+      Object.assign(attempt.netlog, await retainNetLog(
+        netlogPath,
+        retentionDir,
+        label,
+        attempt.netlog,
+      ));
+    }
     attempt.netlog.cleanupStatus = await cleanupNetLogDirectory(netlogDirectory);
   }
   return attempt;
@@ -627,8 +777,20 @@ async function run(options) {
   let attempts;
   try {
     attempts = [
-      await runBrowserAttempt('initial-public-resolution', options.target.toString(), fixture.url, options.timeoutMs),
-      await runBrowserAttempt('post-rebind-private-resolution', options.target.toString(), fixture.url, options.timeoutMs),
+      await runBrowserAttempt(
+        'initial-public-resolution',
+        options.target.toString(),
+        fixture.url,
+        options.timeoutMs,
+        options.retainNetlogDir,
+      ),
+      await runBrowserAttempt(
+        'post-rebind-private-resolution',
+        options.target.toString(),
+        fixture.url,
+        options.timeoutMs,
+        options.retainNetlogDir,
+      ),
     ];
   } finally {
     await new Promise((resolvePromise) => fixture.server.close(resolvePromise));
@@ -649,7 +811,8 @@ async function run(options) {
       netlog: {
         enabled: true,
         maxSizeMb: NETLOG_MAX_SIZE_MB,
-        rawRetained: false,
+        rawRetained: attempts.some((attempt) => attempt.netlog.rawRetained === true),
+        retentionRequested: options.retainNetlogDir !== null,
       },
       hostResolverRulesUsed: false,
       hostsFileUsed: false,
