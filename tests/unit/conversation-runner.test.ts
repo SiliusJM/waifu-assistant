@@ -55,6 +55,31 @@ test('conversation runner reuses one session and preserves multi-turn order', as
   ]);
 });
 
+test('restored Session history is sent on the next conversational turn', async () => {
+  let observedMessages: readonly { role: string; content: string }[] = [];
+  const provider = new MockAIProvider({
+    responder: (request) => {
+      observedMessages = request.messages;
+      return { text: 'context received', provider: 'mock', model: 'mock-model', finishReason: 'stop' };
+    },
+  });
+  const session = new Session('restored-session');
+  session.restoreMessages([
+    { role: 'user', content: 'Mi palabra es ORION-731.' },
+    { role: 'assistant', content: 'Entendido.' },
+  ]);
+  const runner = new ConversationRunner(new AssistantCore({ provider }), session);
+
+  const result = await runner.run(inputs(['¿Cuál es mi palabra?']));
+
+  assert.equal(result.responses[0]?.text, 'context received');
+  assert.deepEqual(observedMessages.slice(-3).map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'Mi palabra es ORION-731.' },
+    { role: 'assistant', content: 'Entendido.' },
+    { role: 'user', content: '¿Cuál es mi palabra?' },
+  ]);
+});
+
 test('conversation runner reuses one compiled default personality snapshot across turns', async () => {
   const requests: Array<{ messages: readonly { role: string; content: string }[] }> = [];
   const provider = new MockAIProvider({
@@ -244,6 +269,36 @@ test('local commands can coexist without entering Session and exit cleanly', asy
   assert.equal(providerCalls, 2);
   assert.equal(outputs.length, 3);
   assert.deepEqual(result.session.getMessages().map(({ content }) => content), ['message A', 'reply', 'message B', 'reply']);
+});
+
+test('saved-session commands stay local and do not call the provider or contaminate Session', async () => {
+  let providerCalls = 0;
+  const provider = new MockAIProvider({
+    responder: () => {
+      providerCalls += 1;
+      return { text: 'reply', provider: 'mock', model: 'mock-model', finishReason: 'stop' };
+    },
+  });
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const commands: string[] = [];
+  const result = await runner.run(inputs([
+    '/sessions',
+    '/save-session demo',
+    '/load-session demo',
+    '/delete-session demo',
+    'message A',
+    '/exit',
+  ]), {
+    onCommand: async (command) => { commands.push(command); },
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(providerCalls, 1);
+  assert.deepEqual(commands, ['/sessions', '/save-session demo', '/load-session demo', '/delete-session demo']);
+  assert.deepEqual(runner.session.getMessages().map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'message A' },
+    { role: 'assistant', content: 'reply' },
+  ]);
 });
 
 test('session status and history commands are local and do not call the provider', async () => {

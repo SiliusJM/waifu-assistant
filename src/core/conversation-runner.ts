@@ -15,6 +15,10 @@ export const CONVERSATION_CLEAR_COMMAND = '/clear';
 export const CONVERSATION_REMEMBER_COMMAND = '/remember';
 export const CONVERSATION_MEMORY_COMMAND = '/memory';
 export const CONVERSATION_FORGET_COMMAND = '/forget';
+export const CONVERSATION_SAVE_SESSION_COMMAND = '/save-session';
+export const CONVERSATION_SESSIONS_COMMAND = '/sessions';
+export const CONVERSATION_LOAD_SESSION_COMMAND = '/load-session';
+export const CONVERSATION_DELETE_SESSION_COMMAND = '/delete-session';
 export const LOCAL_COMMAND_HELP = [
   'Comandos disponibles:',
   '  /help              Muestra esta ayuda',
@@ -27,6 +31,10 @@ export const LOCAL_COMMAND_HELP = [
   '  /remember <key> <value>  Guarda una memoria explícita',
   '  /memory            Lista las memorias guardadas',
   '  /forget <key>      Elimina una memoria',
+  '  /save-session <name>  Guarda la sesión actual',
+  '  /sessions           Lista las sesiones guardadas',
+  '  /load-session <name>  Carga una sesión guardada',
+  '  /delete-session <name>  Elimina una sesión guardada',
 ].join('\n');
 
 export type ConversationRunStatus = 'completed' | 'cancelled';
@@ -123,7 +131,14 @@ export class ConversationRunner {
           || input === CONVERSATION_REMEMBER_COMMAND
           || input.startsWith(`${CONVERSATION_REMEMBER_COMMAND} `)
           || input === CONVERSATION_FORGET_COMMAND
-          || input.startsWith(`${CONVERSATION_FORGET_COMMAND} `)) {
+          || input.startsWith(`${CONVERSATION_FORGET_COMMAND} `)
+          || input === CONVERSATION_SAVE_SESSION_COMMAND
+          || input.startsWith(`${CONVERSATION_SAVE_SESSION_COMMAND} `)
+          || input === CONVERSATION_SESSIONS_COMMAND
+          || input === CONVERSATION_LOAD_SESSION_COMMAND
+          || input.startsWith(`${CONVERSATION_LOAD_SESSION_COMMAND} `)
+          || input === CONVERSATION_DELETE_SESSION_COMMAND
+          || input.startsWith(`${CONVERSATION_DELETE_SESSION_COMMAND} `)) {
           if (!options.onCommand) {
             throw new AssistantError('The local command is unavailable.', {
               code: 'TOOL_UNAVAILABLE_ERROR',

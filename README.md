@@ -74,7 +74,24 @@ Instalar las dependencias y ejecutar:
 El modo CLI existente acepta una entrada única. Para mantener una conversación
 de varios turnos durante una ejecución, usa `node dist/main.js --interactive`.
 Cada línea es un turno; `/exit` termina explícitamente y EOF también finaliza.
-El historial vive únicamente en la `Session` y no se persiste.
+El historial vive en la `Session` durante la ejecución; solo se persiste cuando
+el usuario lo solicita explícitamente con los comandos de sesiones guardadas.
+
+## Persistencia explícita de conversaciones
+
+Yuki permite guardar y recuperar conversaciones de forma explícita con:
+
+```text
+/save-session <name>
+/sessions
+/load-session <name>
+/delete-session <name>
+```
+
+Las sesiones se guardan por defecto en `~/.waifu-assistant/sessions.json` y
+pueden redirigirse mediante `YUKI_SESSIONS_PATH`. Esta persistencia es
+independiente de `PersistentMemory`, no guarda automáticamente al salir y
+`/clear` solo limpia la `Session` actual; no elimina sesiones guardadas.
 
 ## MVP local con LLM real
 

@@ -23,10 +23,15 @@ import {
   CONVERSATION_HELP_COMMAND,
   CONVERSATION_MEMORY_COMMAND,
   CONVERSATION_REMEMBER_COMMAND,
+  CONVERSATION_DELETE_SESSION_COMMAND,
+  CONVERSATION_LOAD_SESSION_COMMAND,
+  CONVERSATION_SAVE_SESSION_COMMAND,
+  CONVERSATION_SESSIONS_COMMAND,
   CONVERSATION_STATUS_COMMAND,
   LOCAL_COMMAND_HELP,
 } from './core/conversation-runner.js';
 import { PersistentMemoryStore, resolveMemoryPath } from './memory/memory-store.js';
+import { resolveSavedSessionPath, SavedSessionStore } from './core/saved-session-store.js';
 
 export async function main(
   argv: readonly string[] = process.argv.slice(2),
@@ -45,6 +50,8 @@ export async function main(
   const logger = createLogger({ scope: 'waifu-assistant', sink: console });
   const memoryStore = new PersistentMemoryStore(resolveMemoryPath(env));
   await memoryStore.load();
+  const savedSessionStore = new SavedSessionStore(resolveSavedSessionPath(env));
+  await savedSessionStore.load();
   const localToolManager = createLocalToolManager();
   const core = new AssistantCore({
     provider: createAIProvider(config),
@@ -86,6 +93,7 @@ export async function main(
             `Session: ${runner.session.id}`,
             `Messages: ${runner.session.getMessages().length}`,
             `Persistent memories: ${await memoryStore.count()}`,
+            `Saved sessions: ${await savedSessionStore.count()}`,
             `Provider: ${config.ai.provider}`,
             'Personality: Yuki',
             'Local tools:',
@@ -149,6 +157,72 @@ export async function main(
               { code: 'MEMORY_IO_ERROR', retryable: false, cause: error },
             );
             process.stdout.write(`No se pudo eliminar la memoria: ${memoryError.message}\n`);
+          }
+          return;
+        }
+        if (command === CONVERSATION_SESSIONS_COMMAND) {
+          const names = await savedSessionStore.list();
+          process.stdout.write((names.length === 0
+            ? 'No hay sesiones guardadas.'
+            : ['Sesiones guardadas:', ...names].join('\n')) + '\n');
+          return;
+        }
+        if (command === CONVERSATION_SAVE_SESSION_COMMAND || command.startsWith(`${CONVERSATION_SAVE_SESSION_COMMAND} `)) {
+          const name = command.slice(CONVERSATION_SAVE_SESSION_COMMAND.length).trim();
+          if (!name || /\s/.test(name)) {
+            process.stdout.write('Uso: /save-session <name>\n');
+            return;
+          }
+          try {
+            await savedSessionStore.save(name, runner.session.getMessages());
+            process.stdout.write(`Sesión guardada: ${name}\n`);
+          } catch (error) {
+            const sessionError = error instanceof AssistantError ? error : new AssistantError(
+              'No se pudo guardar la sesión.',
+              { code: 'SESSION_IO_ERROR', retryable: false, cause: error },
+            );
+            process.stdout.write(`No se pudo guardar la sesión: ${sessionError.message}\n`);
+          }
+          return;
+        }
+        if (command === CONVERSATION_LOAD_SESSION_COMMAND || command.startsWith(`${CONVERSATION_LOAD_SESSION_COMMAND} `)) {
+          const name = command.slice(CONVERSATION_LOAD_SESSION_COMMAND.length).trim();
+          if (!name || /\s/.test(name)) {
+            process.stdout.write('Uso: /load-session <name>\n');
+            return;
+          }
+          try {
+            const snapshot = await savedSessionStore.get(name);
+            if (!snapshot) {
+              process.stdout.write(`No existe la sesión: ${name}\n`);
+              return;
+            }
+            runner.session.restoreMessages(snapshot.messages);
+            process.stdout.write(`Sesión cargada: ${name}\n`);
+          } catch (error) {
+            const sessionError = error instanceof AssistantError ? error : new AssistantError(
+              'No se pudo cargar la sesión.',
+              { code: 'SESSION_IO_ERROR', retryable: false, cause: error },
+            );
+            process.stdout.write(`No se pudo cargar la sesión: ${sessionError.message}\n`);
+          }
+          return;
+        }
+        if (command === CONVERSATION_DELETE_SESSION_COMMAND || command.startsWith(`${CONVERSATION_DELETE_SESSION_COMMAND} `)) {
+          const name = command.slice(CONVERSATION_DELETE_SESSION_COMMAND.length).trim();
+          if (!name || /\s/.test(name)) {
+            process.stdout.write('Uso: /delete-session <name>\n');
+            return;
+          }
+          try {
+            const removed = await savedSessionStore.delete(name);
+            process.stdout.write((removed ? `Sesión eliminada: ${name}` : `No existe la sesión: ${name}`) + '\n');
+          } catch (error) {
+            const sessionError = error instanceof AssistantError ? error : new AssistantError(
+              'No se pudo eliminar la sesión.',
+              { code: 'SESSION_IO_ERROR', retryable: false, cause: error },
+            );
+            process.stdout.write(`No se pudo eliminar la sesión: ${sessionError.message}\n`);
           }
           return;
         }

@@ -15,6 +15,10 @@ export {
   CONVERSATION_REMEMBER_COMMAND,
   CONVERSATION_MEMORY_COMMAND,
   CONVERSATION_FORGET_COMMAND,
+  CONVERSATION_SAVE_SESSION_COMMAND,
+  CONVERSATION_SESSIONS_COMMAND,
+  CONVERSATION_LOAD_SESSION_COMMAND,
+  CONVERSATION_DELETE_SESSION_COMMAND,
   ConversationRunner,
   type ConversationRunOptions,
   type ConversationRunResult,
@@ -22,6 +26,20 @@ export {
 } from './core/conversation-runner.js';
 export { LOCAL_TOOL_ALLOWLIST } from './tools/local-tool-manager.js';
 export * from './memory/index.js';
+export {
+  SAVED_SESSION_MAX_CONTENT_LENGTH,
+  SAVED_SESSION_MAX_ENTRIES,
+  SAVED_SESSION_MAX_MESSAGES,
+  SAVED_SESSION_MAX_NAME_LENGTH,
+  SAVED_SESSION_SCHEMA_VERSION,
+  SavedSessionStore,
+  resolveSavedSessionPath,
+  validateSavedSessionName,
+  type SavedSessionFileSystem,
+  type SavedSessionMessage,
+  type SavedSessionRole,
+  type SavedSessionSnapshot,
+} from './core/saved-session-store.js';
 export {
   LOCAL_TIME_COMMAND,
   createLocalToolManager,
