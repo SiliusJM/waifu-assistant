@@ -38,6 +38,7 @@ AssistantCore
 - Browser local: contexto efímero, sandbox solicitado y cleanup normal; sin prueba de aislamiento OS-level.
 - Host isolation evidence: contexto efímero sin storage heredado, rechazo browser-level de `file://` desde una página HTTP y cleanup normal/timeout/shutdown con árbol temporal eliminado. El sandbox fue solicitado, pero filesystem/sandbox OS-level y crash cleanup permanecen `LIMITATION`/`NOT EXECUTED`; esta evidencia no cierra el gate ni selecciona Playwright como dependencia productiva.
 - Provisioning experimental: Playwright `1.63.0` pudo iniciar Chrome Headless Shell `153.0.8010.12` con sandbox solicitado; esta disponibilidad local no selecciona un browser productivo ni cierra el gate.
+- Ejecución real de Chromium con NetLog (`2026-09-22`): el primer lanzamiento observó `1.1.1.1` y el segundo resolvió `rebind.test` a `10.20.0.1`, intentó `10.20.0.1:80` y terminó en timeout. El parser reconoció los eventos reales (`370/224` eventos brutos; `42/29` eventos relevantes), pero esta evidencia permanece `REAL / OBSERVED + LIMITATION` porque no incluye todavía clock reference fresca, DNS JSON formal, egress JSON formal ni `internalHits=0`, y no modifica el classifier.
 
 ## Revisión consolidada
 
