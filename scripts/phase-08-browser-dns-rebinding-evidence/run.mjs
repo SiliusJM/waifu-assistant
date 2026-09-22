@@ -1,5 +1,8 @@
 import { createServer } from 'node:http';
-import { readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { chromium } from 'playwright';
 import {
   DEFAULTS,
@@ -81,6 +84,258 @@ function cdpTimestamp(event) {
   return Number.isFinite(event?.timestamp) ? event.timestamp : null;
 }
 
+const NETLOG_MAX_SIZE_MB = 16;
+const NETLOG_SUMMARY_MAX_EVENTS = 1000;
+
+const NETLOG_EVENT_GROUPS = Object.freeze({
+  dns: new Set([
+    'HOST_RESOLVER_MANAGER_REQUEST',
+    'HOST_RESOLVER_MANAGER_CACHE_HIT',
+    'HOST_RESOLVER_MANAGER_HOSTS_HIT',
+    'HOST_RESOLVER_SYSTEM_TASK',
+    'HOST_RESOLVER_DNS_TASK',
+    'HOST_RESOLVER_DNS_TASK_EXTRACTION_RESULTS',
+    'HOST_RESOLVER_SERVICE_ENDPOINTS_UPDATED',
+  ]),
+  connection: new Set([
+    'TRANSPORT_CONNECT_JOB_CONNECT_ATTEMPT',
+    'TCP_CONNECT_JOB_CONNECTOR_CONNECT_START',
+    'TCP_CONNECT_JOB_CONNECTOR_CONNECT_COMPLETE',
+    'TCP_CONNECT_JOB_CONNECTOR_DONE',
+    'TCP_CONNECT_JOB_VERIFY_IP_ENDPOINT_USABLE',
+    'CONNECT_JOB_TIMED_OUT',
+    'TCP_CONNECT_JOB_CONNECT',
+    'TRANSPORT_CONNECT_JOB_CONNECT',
+  ]),
+  socket: new Set([
+    'CONNECT_JOB_SET_SOCKET',
+    'SOCKET_POOL_REUSED_AN_EXISTING_SOCKET',
+    'SOCKET_POOL_BOUND_TO_SOCKET',
+    'SOCKET_POOL_BOUND_TO_CONNECT_JOB',
+  ]),
+  request: new Set([
+    'URL_REQUEST_START_JOB',
+    'HTTP_STREAM_JOB',
+    'HTTP_TRANSACTION',
+    'TCP_CLIENT_SOCKET_POOL_REQUESTED_SOCKET',
+  ]),
+  error: new Set([
+    'FAILED',
+    'CANCELLED',
+    'CONNECT_JOB_TIMED_OUT',
+    'TCP_CONNECT_JOB_CONNECTOR_COMPLETE',
+    'TCP_CONNECT_JOB_CONNECTOR_DONE',
+  ]),
+});
+
+const NETLOG_ADDRESS_KEYS = new Set([
+  'address',
+  'address_list',
+  'addresses',
+  'ip_endpoint',
+  'ipv4_endpoints',
+  'ipv6_endpoints',
+  'remote_address',
+]);
+
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeNetLogId(value) {
+  if (Number.isSafeInteger(value)) return String(value);
+  if (typeof value === 'string' && value.length > 0) return value;
+  if (isRecord(value)) return normalizeNetLogId(value.id);
+  return null;
+}
+
+function collectSourceDependencies(value, result = new Set()) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectSourceDependencies(item, result);
+    return result;
+  }
+  if (!isRecord(value)) return result;
+  for (const [key, child] of Object.entries(value)) {
+    if (key === 'source_dependency' || key === 'sourceDependency') {
+      const dependency = normalizeNetLogId(child);
+      if (dependency) result.add(dependency);
+    }
+    collectSourceDependencies(child, result);
+  }
+  return result;
+}
+
+function containsTargetHost(value) {
+  if (typeof value === 'string') return value.includes(DEFAULTS.hostname);
+  if (Array.isArray(value)) return value.some(containsTargetHost);
+  if (isRecord(value)) return Object.values(value).some(containsTargetHost);
+  return false;
+}
+
+function netLogEventGroup(type) {
+  for (const [group, types] of Object.entries(NETLOG_EVENT_GROUPS)) {
+    if (types.has(type)) return group;
+  }
+  return null;
+}
+
+function isSafeNetworkEndpoint(value) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 128) return false;
+  return /^(?:\[[0-9a-f:]+\]|(?:\d{1,3}\.){3}\d{1,3})(?::\d{1,5})?$/i.test(value);
+}
+
+function collectNetLogAddresses(value, key = null, result = new Set()) {
+  if (typeof value === 'string') {
+    if (key && NETLOG_ADDRESS_KEYS.has(key) && isSafeNetworkEndpoint(value)) result.add(value);
+    return result;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectNetLogAddresses(item, key, result);
+    return result;
+  }
+  if (!isRecord(value)) return result;
+
+  if (typeof value.address === 'string' && isSafeNetworkEndpoint(value.address)) {
+    const port = Number.isSafeInteger(value.port) && value.port >= 0 && value.port <= 65535
+      ? `:${value.port}`
+      : '';
+    result.add(`${value.address}${port}`);
+  }
+  for (const [childKey, child] of Object.entries(value)) {
+    if (NETLOG_ADDRESS_KEYS.has(childKey)) collectNetLogAddresses(child, childKey, result);
+  }
+  return result;
+}
+
+function safeNetLogErrorParams(params) {
+  const result = {};
+  if (!isRecord(params)) return result;
+  if (Number.isSafeInteger(params.net_error)) result.netError = params.net_error;
+  if (Number.isSafeInteger(params.os_error)) result.osError = params.os_error;
+  if (typeof params.error_text === 'string' && params.error_text.length <= 128) {
+    result.errorText = params.error_text;
+  }
+  if (typeof params.error === 'string' && params.error.length <= 128) {
+    result.error = params.error;
+  }
+  if (Number.isSafeInteger(params.idle_ms)) result.idleMs = params.idle_ms;
+  return result;
+}
+
+function summarizeNetLogEvent(event, group) {
+  const params = isRecord(event.params) ? event.params : {};
+  const sourceId = normalizeNetLogId(event.source);
+  const sourceDependencies = [...collectSourceDependencies(params)].sort();
+  const addresses = [...collectNetLogAddresses(params)].sort();
+  return {
+    group,
+    type: typeof event.type === 'string' ? event.type : 'UNKNOWN',
+    phase: Number.isSafeInteger(event.phase) ? event.phase : null,
+    netlogTime: typeof event.time === 'number' && Number.isFinite(event.time) ? event.time : null,
+    sourceId,
+    sourceType: isRecord(event.source) && typeof event.source.type === 'string' ? event.source.type : null,
+    sourceDependencies,
+    targetHost: DEFAULTS.hostname,
+    addresses,
+    ...safeNetLogErrorParams(params),
+  };
+}
+
+function summarizeNetLogDocument(document) {
+  const events = Array.isArray(document?.events) ? document.events : [];
+  const targetSources = new Set();
+
+  for (const event of events) {
+    if (!isRecord(event)) continue;
+    const dependencies = collectSourceDependencies(event.params);
+    if (containsTargetHost(event.params)) {
+      const sourceId = normalizeNetLogId(event.source);
+      if (sourceId) targetSources.add(sourceId);
+      for (const dependency of dependencies) targetSources.add(dependency);
+    }
+  }
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const event of events) {
+      if (!isRecord(event)) continue;
+      const sourceId = normalizeNetLogId(event.source);
+      const dependencies = collectSourceDependencies(event.params);
+      if ((sourceId && targetSources.has(sourceId))
+        || [...dependencies].some((dependency) => targetSources.has(dependency))) {
+        if (sourceId && !targetSources.has(sourceId)) {
+          targetSources.add(sourceId);
+          changed = true;
+        }
+        for (const dependency of dependencies) {
+          if (!targetSources.has(dependency)) {
+            targetSources.add(dependency);
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+
+  const relevantEvents = events
+    .map((event) => {
+      if (!isRecord(event)) return null;
+      const group = netLogEventGroup(event.type);
+      if (!group) return null;
+      const sourceId = normalizeNetLogId(event.source);
+      const dependencies = collectSourceDependencies(event.params);
+      const related = containsTargetHost(event.params)
+        || (sourceId && targetSources.has(sourceId))
+        || [...dependencies].some((dependency) => targetSources.has(dependency));
+      return related ? summarizeNetLogEvent(event, group) : null;
+    })
+    .filter((event) => event !== null);
+
+  const truncated = relevantEvents.length > NETLOG_SUMMARY_MAX_EVENTS;
+  return {
+    status: relevantEvents.length > 0 && !truncated ? 'OBSERVED' : 'LIMITATION',
+    targetHost: DEFAULTS.hostname,
+    eventCount: relevantEvents.length,
+    truncated,
+    events: relevantEvents.slice(0, NETLOG_SUMMARY_MAX_EVENTS),
+  };
+}
+
+async function readNetLog(netlogPath) {
+  try {
+    const raw = await readFile(netlogPath, 'utf8');
+    const sha256 = createHash('sha256').update(raw).digest('hex');
+    let document;
+    try {
+      document = JSON.parse(raw);
+    } catch {
+      return { status: 'INVALID', sha256, summary: null, reason: 'NETLOG_JSON_INVALID' };
+    }
+    return {
+      status: 'AVAILABLE',
+      sha256,
+      summary: summarizeNetLogDocument(document),
+    };
+  } catch (error) {
+    return {
+      status: error?.code === 'ENOENT' ? 'NOT EXECUTED' : 'INVALID',
+      summary: null,
+      reason: error?.code === 'ENOENT' ? 'NETLOG_FILE_NOT_FOUND' : 'NETLOG_UNREADABLE',
+    };
+  }
+}
+
+async function cleanupNetLogDirectory(netlogDirectory) {
+  if (!netlogDirectory) return 'NOT_CREATED';
+  try {
+    await rm(netlogDirectory, { recursive: true, force: true });
+    return 'CLEANED';
+  } catch {
+    return 'FAILED';
+  }
+}
+
 const TIMING_FIELDS = [
   'startTime',
   'domainLookupStart',
@@ -156,6 +411,11 @@ async function runBrowserAttempt(label, targetUrl, controlUrl, timeoutMs) {
       playwright: [],
       cdp: [],
     },
+    netlog: {
+      status: 'NOT EXECUTED',
+      summary: null,
+      cleanupStatus: 'NOT_STARTED',
+    },
     cdpSetupError: null,
     cleanupStartedAt: null,
     finishedAt: null,
@@ -164,8 +424,19 @@ async function runBrowserAttempt(label, targetUrl, controlUrl, timeoutMs) {
   let context;
   let page;
   let cdpSession;
+  let netlogDirectory;
+  let netlogPath;
   try {
-    browser = await chromium.launch({ headless: true, chromiumSandbox: true });
+    netlogDirectory = await mkdtemp(join(tmpdir(), 'phase-08-netlog-'));
+    netlogPath = join(netlogDirectory, 'netlog.json');
+    browser = await chromium.launch({
+      headless: true,
+      chromiumSandbox: true,
+      args: [
+        `--log-net-log=${netlogPath}`,
+        `--net-log-max-size-mb=${NETLOG_MAX_SIZE_MB}`,
+      ],
+    });
     browser.on('disconnected', () => {
       attempt.observations.playwright.push({
         event: 'browser.disconnected',
@@ -336,6 +607,8 @@ async function runBrowserAttempt(label, targetUrl, controlUrl, timeoutMs) {
     if (context) await context.close().catch(() => undefined);
     if (browser) await browser.close().catch(() => undefined);
     attempt.finishedAt = now();
+    if (netlogPath) attempt.netlog = await readNetLog(netlogPath);
+    attempt.netlog.cleanupStatus = await cleanupNetLogDirectory(netlogDirectory);
   }
   return attempt;
 }
@@ -373,6 +646,11 @@ async function run(options) {
       launches: attempts.length,
       processRelaunchBetweenAttempts: true,
       chromiumSandboxRequested: true,
+      netlog: {
+        enabled: true,
+        maxSizeMb: NETLOG_MAX_SIZE_MB,
+        rawRetained: false,
+      },
       hostResolverRulesUsed: false,
       hostsFileUsed: false,
       browserOnlyLimitation: 'Playwright does not expose the DNS answer or TCP socket selected by Chromium.',
