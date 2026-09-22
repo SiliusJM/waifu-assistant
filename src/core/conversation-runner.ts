@@ -3,6 +3,7 @@ import type { Response } from './response.js';
 import type { Session } from './session.js';
 import type { PersonalitySnapshot } from '../personality/personality-types.js';
 import { AssistantError } from '../shared/errors.js';
+import type { MemorySnapshot } from '../memory/memory-types.js';
 
 export const CONVERSATION_EXIT_COMMAND = '/exit';
 export const CONVERSATION_HELP_COMMAND = '/help';
@@ -11,6 +12,9 @@ export const CONVERSATION_CALC_COMMAND = '/calc';
 export const CONVERSATION_STATUS_COMMAND = '/status';
 export const CONVERSATION_HISTORY_COMMAND = '/history';
 export const CONVERSATION_CLEAR_COMMAND = '/clear';
+export const CONVERSATION_REMEMBER_COMMAND = '/remember';
+export const CONVERSATION_MEMORY_COMMAND = '/memory';
+export const CONVERSATION_FORGET_COMMAND = '/forget';
 export const LOCAL_COMMAND_HELP = [
   'Comandos disponibles:',
   '  /help              Muestra esta ayuda',
@@ -20,6 +24,9 @@ export const LOCAL_COMMAND_HELP = [
   '  /status            Muestra el estado de la sesión',
   '  /history           Muestra el historial conversacional',
   '  /clear             Limpia la sesión actual',
+  '  /remember <key> <value>  Guarda una memoria explícita',
+  '  /memory            Lista las memorias guardadas',
+  '  /forget <key>      Elimina una memoria',
 ].join('\n');
 
 export type ConversationRunStatus = 'completed' | 'cancelled';
@@ -35,6 +42,7 @@ export interface ConversationRunOptions {
   readonly exitCommand?: string;
   readonly personality?: PersonalitySnapshot;
   readonly onResponse?: (response: Response) => void | Promise<void>;
+  readonly memory?: () => MemorySnapshot | Promise<MemorySnapshot>;
   readonly onCommand?: (command: string, context: {
     readonly signal?: AbortSignal;
     readonly sessionId: string;
@@ -110,7 +118,12 @@ export class ConversationRunner {
           || input.startsWith(`${CONVERSATION_CALC_COMMAND} `)
           || input === CONVERSATION_STATUS_COMMAND
           || input === CONVERSATION_HISTORY_COMMAND
-          || input === CONVERSATION_CLEAR_COMMAND) {
+          || input === CONVERSATION_CLEAR_COMMAND
+          || input === CONVERSATION_MEMORY_COMMAND
+          || input === CONVERSATION_REMEMBER_COMMAND
+          || input.startsWith(`${CONVERSATION_REMEMBER_COMMAND} `)
+          || input === CONVERSATION_FORGET_COMMAND
+          || input.startsWith(`${CONVERSATION_FORGET_COMMAND} `)) {
           if (!options.onCommand) {
             throw new AssistantError('The local command is unavailable.', {
               code: 'TOOL_UNAVAILABLE_ERROR',
@@ -128,6 +141,7 @@ export class ConversationRunner {
           const response = await this.core.respond(this.session, input, {
             signal: options.signal,
             personality: options.personality,
+            memory: await options.memory?.(),
           });
           responses.push(response);
           await options.onResponse?.(response);

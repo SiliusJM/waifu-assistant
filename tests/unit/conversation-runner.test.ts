@@ -7,6 +7,7 @@ import { Session } from '../../src/core/session.js';
 import { DEFAULT_PERSONALITY_PROFILE } from '../../src/personality/default-profile.js';
 import { PersonalityCompiler } from '../../src/personality/personality-compiler.js';
 import { PersonalityRegistry } from '../../src/personality/personality-registry.js';
+import type { MemorySnapshot } from '../../src/memory/memory-types.js';
 import {
   createLocalToolManager,
   executeLocalCalculation,
@@ -291,6 +292,38 @@ test('clear command resets only the current in-memory Session', async () => {
   assert.equal(providerCalls, 2);
   assert.deepEqual(requests[1], ['message B']);
   assert.deepEqual(runner.session.getMessages().map(({ content }) => content), ['message B', 'reply-2']);
+});
+
+test('memory commands are local and snapshots are requested only for conversational turns', async () => {
+  let providerCalls = 0;
+  let snapshots = 0;
+  const provider = new MockAIProvider({
+    responder: (request) => {
+      providerCalls += 1;
+      assert.equal(request.messages.at(-1)?.content, 'Hello');
+      assert.match(request.messages.find(({ content }) => content.includes('memory-data'))?.content ?? '', /Jhon/);
+      return { text: 'reply', provider: 'mock', model: 'mock-model', finishReason: 'stop' };
+    },
+  });
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const memory: MemorySnapshot = Object.freeze({
+    version: 1,
+    entries: Object.freeze([{ key: 'name', value: 'Jhon' }]),
+  });
+  const localCommands: string[] = [];
+  const result = await runner.run(inputs(['/remember name Jhon', '/memory', 'Hello', '/forget name', '/clear', '/exit']), {
+    memory: () => {
+      snapshots += 1;
+      return memory;
+    },
+    onCommand: async (command) => { localCommands.push(command); },
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(providerCalls, 1);
+  assert.equal(snapshots, 1);
+  assert.deepEqual(localCommands, ['/remember name Jhon', '/memory', '/forget name', '/clear']);
+  assert.deepEqual(result.session.getMessages().map(({ content }) => content), ['Hello', 'reply']);
 });
 
 test('conversation runner cancels while waiting for input and closes the source', async () => {

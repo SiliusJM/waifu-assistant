@@ -18,11 +18,15 @@ import {
 } from './tools/local-tool-manager.js';
 import {
   CONVERSATION_CLEAR_COMMAND,
+  CONVERSATION_FORGET_COMMAND,
   CONVERSATION_HISTORY_COMMAND,
   CONVERSATION_HELP_COMMAND,
+  CONVERSATION_MEMORY_COMMAND,
+  CONVERSATION_REMEMBER_COMMAND,
   CONVERSATION_STATUS_COMMAND,
   LOCAL_COMMAND_HELP,
 } from './core/conversation-runner.js';
+import { PersistentMemoryStore, resolveMemoryPath } from './memory/memory-store.js';
 
 export async function main(
   argv: readonly string[] = process.argv.slice(2),
@@ -39,6 +43,8 @@ export async function main(
 
   const config = loadConfig(env);
   const logger = createLogger({ scope: 'waifu-assistant', sink: console });
+  const memoryStore = new PersistentMemoryStore(resolveMemoryPath(env));
+  await memoryStore.load();
   const localToolManager = createLocalToolManager();
   const core = new AssistantCore({
     provider: createAIProvider(config),
@@ -50,7 +56,10 @@ export async function main(
     profile: new PersonalityRegistry().defaultProfile,
   });
   if (!interactive) {
-    const response = await core.respond(core.createSession(), input, { personality });
+    const response = await core.respond(core.createSession(), input, {
+      personality,
+      memory: await memoryStore.snapshot(),
+    });
     process.stdout.write(response.text + '\n');
     return;
   }
@@ -64,6 +73,7 @@ export async function main(
     await runner.run(terminal, {
       signal: controller.signal,
       personality,
+      memory: () => memoryStore.snapshot(),
       onResponse: (response): void => { process.stdout.write(response.text + '\n'); },
       onCommand: async (command, context): Promise<void> => {
         if (command === CONVERSATION_HELP_COMMAND) {
@@ -75,6 +85,7 @@ export async function main(
             'Yuki status',
             `Session: ${runner.session.id}`,
             `Messages: ${runner.session.getMessages().length}`,
+            `Persistent memories: ${await memoryStore.count()}`,
             `Provider: ${config.ai.provider}`,
             'Personality: Yuki',
             'Local tools:',
@@ -93,6 +104,52 @@ export async function main(
         if (command === CONVERSATION_CLEAR_COMMAND) {
           runner.session.clear();
           process.stdout.write('Session cleared.\n');
+          return;
+        }
+        if (command === CONVERSATION_MEMORY_COMMAND) {
+          const entries = await memoryStore.list();
+          process.stdout.write((entries.length === 0
+            ? 'No hay memorias guardadas.'
+            : ['Memorias:', ...entries.map(({ key, value }) => `${key}: ${value}`)].join('\n')) + '\n');
+          return;
+        }
+        if (command === CONVERSATION_REMEMBER_COMMAND || command.startsWith(`${CONVERSATION_REMEMBER_COMMAND} `)) {
+          const body = command.slice(CONVERSATION_REMEMBER_COMMAND.length).trim();
+          const separator = body.search(/\s/);
+          if (separator < 1) {
+            process.stdout.write('Uso: /remember <key> <value>\n');
+            return;
+          }
+          const key = body.slice(0, separator);
+          const value = body.slice(separator).trim();
+          try {
+            await memoryStore.set(key, value);
+            process.stdout.write(`Memoria guardada: ${key}\n`);
+          } catch (error) {
+            const memoryError = error instanceof AssistantError ? error : new AssistantError(
+              'No se pudo guardar la memoria.',
+              { code: 'MEMORY_IO_ERROR', retryable: false, cause: error },
+            );
+            process.stdout.write(`No se pudo guardar la memoria: ${memoryError.message}\n`);
+          }
+          return;
+        }
+        if (command === CONVERSATION_FORGET_COMMAND || command.startsWith(`${CONVERSATION_FORGET_COMMAND} `)) {
+          const key = command.slice(CONVERSATION_FORGET_COMMAND.length).trim();
+          if (!key || /\s/.test(key)) {
+            process.stdout.write('Uso: /forget <key>\n');
+            return;
+          }
+          try {
+            const removed = await memoryStore.delete(key);
+            process.stdout.write((removed ? `Memoria eliminada: ${key}` : `No existe la memoria: ${key}`) + '\n');
+          } catch (error) {
+            const memoryError = error instanceof AssistantError ? error : new AssistantError(
+              'No se pudo eliminar la memoria.',
+              { code: 'MEMORY_IO_ERROR', retryable: false, cause: error },
+            );
+            process.stdout.write(`No se pudo eliminar la memoria: ${memoryError.message}\n`);
+          }
           return;
         }
         if (command === '/time') {

@@ -12,12 +12,16 @@ export {
   CONVERSATION_STATUS_COMMAND,
   CONVERSATION_HISTORY_COMMAND,
   CONVERSATION_CLEAR_COMMAND,
+  CONVERSATION_REMEMBER_COMMAND,
+  CONVERSATION_MEMORY_COMMAND,
+  CONVERSATION_FORGET_COMMAND,
   ConversationRunner,
   type ConversationRunOptions,
   type ConversationRunResult,
   type ConversationRunStatus,
 } from './core/conversation-runner.js';
 export { LOCAL_TOOL_ALLOWLIST } from './tools/local-tool-manager.js';
+export * from './memory/index.js';
 export {
   LOCAL_TIME_COMMAND,
   createLocalToolManager,
