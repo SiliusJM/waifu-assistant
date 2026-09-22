@@ -14,6 +14,10 @@ Se revisaron ADR-012 y la documentación de definición, providers/sandbox, cont
 
 Los documentos de resultados conservan sus bases y fechas históricas porque describen ejecuciones concretas. Esta evaluación usa como referencia de estado actual el `origin/main` indicado arriba y no reinterpreta esas ejecuciones como nuevas.
 
+### Reconciliación posterior
+
+La evaluación original fue anterior a la ejecución browser con NetLog del 2026-09-22. Esa ejecución actualiza únicamente la caracterización del DNS rebinding browser a `REAL / OBSERVED + LIMITATION`: observó el primer endpoint `1.1.1.1:80`, el segundo endpoint `10.20.0.1:80` y un timeout real. No satisface el contrato formal del classifier ni demuestra egress artifact, `internalHits=0`, correlación cross-VM formal o pinning productivo; por tanto, no cierra el decision-gate ni convierte los criterios pendientes en `PASS`.
+
 ## 2. Criterios del decision-gate
 
 | Criterio | Estado actual | Clasificación para una nueva prueba | Bloqueo y siguiente requisito |
@@ -23,7 +27,7 @@ Los documentos de resultados conservan sus bases y fechas históricas porque des
 | HTTPS→HTTP | `NOT EXECUTED` | `BLOCKED` | Requiere fixture HTTPS controlado para medir la política de downgrade dentro del mismo boundary. |
 | HTTPS→destino interno | `NOT EXECUTED` | `BLOCKED` | Requiere handshake TLS controlado y frontera inferior que registre el destino efectivo. |
 | CONNECT/WebSocket sobre TLS | `NOT EXECUTED` | `BLOCKED` | Depende del mismo fixture TLS; no se usará `ignoreHTTPSErrors` ni trust store modificado. |
-| DNS rebinding real, múltiples A/AAAA y pinning | `SIMULATED` / `NOT EXECUTED` | `REQUIRES EXTERNAL/DEDICATED ENVIRONMENT` | La simulación local ya está documentada; falta resolver/egress real, socket observable y un entorno controlado que permita cambiar respuestas sin repetir el mismo fixture. |
+| DNS rebinding real, múltiples A/AAAA y pinning | Browser NetLog: `REAL / OBSERVED + LIMITATION`; pinning formal `SIMULATED` / `NOT EXECUTED` | `REQUIRES EXTERNAL/DEDICATED ENVIRONMENT` | El segundo endpoint TCP `10.20.0.1:80` y el timeout ya fueron observados; faltan fresh clock reference, DNS/egress JSON formal, `internalHits=0`, múltiples A/AAAA y pinning productivo. |
 | Egress inferior al browser en el runtime elegido | `PASS` parcial en proxy fixture; aislamiento host `NOT EXECUTED` | `REQUIRES EXTERNAL/DEDICATED ENVIRONMENT` | El proxy fixture no demuestra política efectiva del SO; falta un límite inferior real dentro de VM/Sandbox o servicio remoto controlado. |
 | Aislamiento OS-level de red y filesystem | `LIMITATION` / `NOT EXECUTED` | `REQUIRES EXTERNAL/DEDICATED ENVIRONMENT` | La sesión no es administrativa, Windows Sandbox no está confirmado y no hay VM/distro utilizable; no se habilitarán features ni Firewall. |
 | Browser remoto | `NOT EXECUTED` | `REQUIRES EXTERNAL/DEDICATED ENVIRONMENT` | Faltan endpoint, aislamiento, lifecycle, observabilidad y credenciales temporales explícitas. |
@@ -37,7 +41,7 @@ Los documentos de resultados conservan sus bases y fechas históricas porque des
 No se repiten los siguientes casos porque la limitación es la misma y el resultado no aportaría evidencia nueva:
 
 - intento de fixture HTTPS/TLS sin mecanismo confiable de certificado efímero;
-- simulación local de DNS rebinding ya marcada `SIMULATED`;
+- simulación local de DNS rebinding ya marcada `SIMULATED`; la observación browser NetLog posterior no se repite mientras no cambie el entorno;
 - comprobaciones browser-only de sandbox, filesystem o cleanup normal;
 - capacidad OS/network sin permisos o infraestructura dedicada;
 - crash cleanup mediante terminación de procesos;
@@ -59,7 +63,7 @@ Repetirlos en el mismo host podría producir el mismo `NOT EXECUTED` sin cerrar 
 ### Evidencia negativa o pendiente que se conserva
 
 - `browserContext.route()` como boundary único: `FAIL` deliberado por redirect público→interno.
-- DNS rebinding/pinning productivo: `SIMULATED` / `NOT EXECUTED`.
+- DNS rebinding browser: `REAL / OBSERVED + LIMITATION`; pinning productivo y consolidación formal: `SIMULATED` / `NOT EXECUTED`.
 - HTTPS/TLS: `NOT EXECUTED` / `LIMITATION`.
 - Aislamiento OS/network y filesystem: `LIMITATION` / `NOT EXECUTED`.
 - Browser remoto: `NOT EXECUTED`.

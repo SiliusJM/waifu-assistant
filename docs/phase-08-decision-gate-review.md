@@ -8,7 +8,7 @@ ADR-012 permanece provisional y en estado `decision-gate`. La evidencia respalda
 
 La evidencia negativa más importante se conserva: el baseline con `browserContext.route()` obtuvo `17 PASS`, `1 FAIL` y `1 NOT EXECUTED`; el redirect público→interno alcanzó el fixture interno (`internalHits=1`). El proxy/egress fixture bloqueó navegación, redirects, subrecursos, fetch/XHR y WebSocket con `internalHits=0`, pero esa evidencia no equivale a aislamiento de red del host.
 
-El Service Worker tiene un `PASS` real dentro de un fixture localhost específico, con request observada, bloqueo e `internalHits=0`; la cobertura no se considera generalizada hasta confirmarla para el browser/provider elegido. DNS/socket tiene evidencia real dentro de un fixture local, mientras que DNS rebinding y pinning productivo continúan sin demostrarse. Chromium está disponible y el host/browser harness demostró contexto efímero, storage limpio entre contextos y cleanup normal/timeout/shutdown; filesystem y sandbox OS-level son `LIMITATION` y crash cleanup es `NOT EXECUTED`.
+El Service Worker tiene un `PASS` real dentro de un fixture localhost específico, con request observada, bloqueo e `internalHits=0`; la cobertura no se considera generalizada hasta confirmarla para el browser/provider elegido. La ejecución browser con NetLog observó DNS rebinding real y el segundo endpoint TCP `10.20.0.1:80`, pero queda `REAL / OBSERVED + LIMITATION`: no demuestra egress formal, `internalHits=0`, correlación cross-VM formal ni pinning productivo. Chromium está disponible y el host/browser harness demostró contexto efímero, storage limpio entre contextos y cleanup normal/timeout/shutdown; filesystem y sandbox OS-level son `LIMITATION` y crash cleanup es `NOT EXECUTED`.
 
 ## 2. Matriz de evidencia
 
@@ -27,6 +27,7 @@ Estados usados: `PASS`, `FAIL`, `SIMULATED`, `LIMITATION` y `NOT EXECUTED`. `PAS
 | DNS/socket `public.test` | DNS local → IP validada `127.0.0.2` → IP efectiva → `socket.remoteAddress=127.0.0.2` | `PASS` | Real dentro de fixture local | No es DNS público ni destino público real | Demuestra instrumentación local, no pinning productivo |
 | Bloqueo previo a socket interno | `internal.test` → `127.0.0.3`, sin socket ni `internalHits` | `PASS` | Real dentro de fixture local | No demuestra host firewall ni red productiva | Confirma fail-closed local |
 | DNS rebinding | Cambio controlado `127.0.0.2` → `127.0.0.3`, bloqueado tras revalidación | `SIMULATED` | Simulada/controlada | No es resolver público, múltiples A/AAAA ni pinning real | No permite cerrar anti-rebinding |
+| Browser DNS rebinding con NetLog (2026-09-22) | Primer endpoint `1.1.1.1:80`; segundo endpoint `10.20.0.1:80` observado por NetLog y timeout real | `REAL / OBSERVED + LIMITATION` | Observación real, no consolidación formal | Faltan fresh clock reference, DNS JSON formal, egress JSON formal e `internalHits=0`; no demuestra pinning productivo ni seguridad de todos los canales | Documenta el comportamiento observado sin cerrar el gate |
 | HTTPS→HTTPS, HTTPS→HTTP, HTTPS→interno | No existe certificado X.509 efímero confiable y reproducible bajo las restricciones | `NOT EXECUTED` | Limitada por entorno | No hubo handshake ni egress TLS observado | Gate TLS permanece abierto; no es fallo del boundary |
 | CONNECT/WebSocket sobre TLS | Sin fixture TLS confiable | `NOT EXECUTED` | Limitada por entorno | No se observó handshake TLS | Pendiente junto con fixture TLS |
 | Playwright/Chromium disponible | Playwright `1.63.0`; Chromium `153.0.8010.12` inició fuera del repositorio | `PASS` | Runtime experimental | Disponibilidad no selecciona dependencia productiva | Permite nuevos experimentos |
@@ -47,6 +48,7 @@ Estados usados: `PASS`, `FAIL`, `SIMULATED`, `LIMITATION` y `NOT EXECUTED`. `PAS
 - Un proxy/egress fixture inferior al browser revalida navegación y redirects, observa solicitudes secundarias y bloquea image, script, stylesheet, iframe, fetch/XHR y WebSocket con `internalHits=0`.
 - El fixture localhost del gate produjo una request real de Service Worker, fue observado por el proxy y bloqueado con `internalHits=0`. Esta evidencia es específica de ese fixture y no sustituye confirmación para un provider futuro.
 - El fixture DNS/socket observó la cadena hostname controlado → resolución → IP validada → IP efectiva → socket y bloqueó el destino interno antes de abrir socket.
+- La ejecución browser con NetLog observó el primer endpoint `1.1.1.1:80`, el segundo endpoint `10.20.0.1:80` y un timeout real. Es evidencia `REAL / OBSERVED + LIMITATION`; no aporta por sí sola egress artifact, `internalHits=0`, correlación temporal cross-VM formal, pinning productivo ni seguridad de todos los canales.
 - Playwright/Chromium puede iniciar en contexto efímero. El harness de host/browser comprobó storage no heredado, ausencia de perfil principal, `file://` inaccesible desde una página HTTP, timeout, shutdown y cleanup normal.
 - No se han introducido providers productivos, browser automation integrada al producto, credenciales, shell ni APIs de procesos.
 
@@ -57,7 +59,7 @@ Estados usados: `PASS`, `FAIL`, `SIMULATED`, `LIMITATION` y `NOT EXECUTED`. `PAS
 - Aislamiento OS-level de filesystem, red y host en Windows.
 - Browser remoto o servicio independiente con egress y cleanup observables.
 - Crash cleanup reproducible sin APIs de terminación arbitraria.
-- DNS/socket con resolver y egress reales, múltiples A/AAAA y cambios de respuesta controlados.
+- Consolidación formal del DNS rebinding browser con resolver/egress reales, múltiples A/AAAA, fresh clock reference, `internalHits=0` y cambios de respuesta controlados.
 
 ### Requieren credenciales temporales
 
@@ -104,7 +106,7 @@ La evidencia actual respalda mantener una frontera inferior obligatoria como gat
 |---|---|---|---|
 | Service Worker interno bloqueado | Request generada, observada, destino efectivo bloqueado e `internalHits=0` en el browser/provider elegido | `PASS` en fixture localhost; cobertura general aún parcial | Repetir en el runtime/provider candidato y conservar evidencia por canal |
 | HTTPS y downgrade | Handshake HTTPS→HTTPS, política explícita HTTPS→HTTP y bloqueo HTTPS→interno | `NOT EXECUTED`/`LIMITATION` | Fixture TLS confiable, sin bypass, con observación de IP/socket y resultados individuales |
-| DNS y pinning | Múltiples A/AAAA, cambio de resolución, IP validada, IP efectiva y socket realmente usado | Fixture local `PASS`; rebinding `SIMULATED` | Evidencia de resolver/egress real y mismatch bloqueado antes de conexión |
+| DNS y pinning | Múltiples A/AAAA, cambio de resolución, IP validada, IP efectiva y socket realmente usado | Fixture local `PASS`; browser NetLog `REAL / OBSERVED + LIMITATION` | Evidencia formal de resolver/egress real, clock cross-VM suficiente y mismatch bloqueado antes de conexión |
 | Egress completo | `internalHits=0` individual para navegación, redirects, subrecursos, fetch/XHR, WebSocket y Service Worker | PASS controlado para canales ejecutados; route baseline `FAIL` | Repetir en el mecanismo elegido y resolver los canales no ejecutados |
 | Aislamiento local/remoto | Filesystem, credenciales, sandbox y red del modo elegido | Storage y browser-level `PASS`; OS/network `LIMITATION`/`NOT EXECUTED` | Entorno de aislamiento demostrable, con límites y controles Windows documentados |
 | Cleanup | Normal, timeout, shutdown y crash seguro | Normal/timeout/shutdown `PASS`; crash `NOT EXECUTED` | Evidencia reproducible de crash cleanup sin mecanismos inseguros |
@@ -115,6 +117,6 @@ El gate no se cierra mientras permanezca pendiente cualquiera de las condiciones
 
 ## 7. Conclusión
 
-ADR-012 sigue provisional. Queda bloqueada la implementación productiva de `WebSearchProvider`, `WebFetchProvider` y `BrowserProvider`, así como la selección definitiva de proxy, gateway, browser local/remoto, Playwright productivo, sandbox o aislamiento de red.
+ADR-012 sigue provisional. La observación browser NetLog cierra esta subetapa experimental como `REAL / OBSERVED + LIMITATION`, pero no satisface el contrato formal de egress/pinning. Queda bloqueada la implementación productiva de `WebSearchProvider`, `WebFetchProvider` y `BrowserProvider`, así como la selección definitiva de proxy, gateway, browser local/remoto, Playwright productivo, sandbox o aislamiento de red.
 
 Puede continuarse sin producción con experimentos documentales y fixtures aislados: obtener un mecanismo seguro de certificado efímero, preparar un entorno OS/network aislado, repetir DNS/socket y Service Worker para el runtime candidato, ejecutar Search solo con credenciales temporales y definir mediciones comparables. Ningún resultado pendiente debe convertirse en `PASS` por ausencia de fallo observado.

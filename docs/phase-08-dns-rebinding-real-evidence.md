@@ -185,12 +185,16 @@ La prueba se ejecutó con VMs dedicadas y redes VirtualBox separadas:
 
 El DNS experimental mantiene un contador de secuencia, por lo que consultas sucesivas al mismo nombre producen alternancia determinista entre la IP pública y la IP privada.
 
-## Siguiente paso
+## Reconciliación posterior
 
-La siguiente etapa debe integrar esta clase de DNS rebinding con un cliente de navegador real dentro del entorno aislado, manteniendo el boundary de egress inferior y observando:
+La integración posterior con un cliente de navegador real está documentada en `docs/phase-08-real-browser-dns-rebinding-netlog-execution-2026-09-22.md`. Esa ejecución observó el primer endpoint `1.1.1.1:80`, el segundo endpoint `10.20.0.1:80` mediante NetLog y un timeout real. Su estado es `REAL / OBSERVED + LIMITATION`.
+
+Esta evidencia posterior no convierte este experimento histórico en una prueba de egress formal: no demuestra `internalHits=0`, un egress artifact formal, una correlación cross-VM respaldada por fresh clock reference ni pinning productivo. La implementación productiva y el cierre de ADR-012 permanecen fuera de alcance.
+
+El siguiente paso, únicamente si se decide intentar el contrato formal del classifier, sería capturar esos artefactos faltantes en una ejecución dirigida; no se repite el laboratorio por defecto.
+
+La relación observada en el experimento browser posterior queda descrita como:
 
 ```
 DNS -> IP validada -> navegación -> IP efectiva -> socket -> decisión del boundary
 ```
-
-La implementación productiva y el cierre de ADR-012 permanecen fuera de alcance hasta completar esa evidencia.

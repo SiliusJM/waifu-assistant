@@ -53,18 +53,18 @@ Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #
 - Egress secundario: se observaron/bloquearon image, script, stylesheet, iframe, fetch/XHR y WebSocket dentro del harness; esta evidencia no equivale a aislamiento de red.
 - Service Worker: comportamiento observado con limitación explícita de routing.
 - Sandbox: se solicitó Chromium con `chromiumSandbox=true` y sin `--no-sandbox`; esto no se considera prueba OS-level de efectividad del sandbox.
-- Browser remoto y DNS rebinding real: `NOT EXECUTED`.
+- Browser remoto: `NOT EXECUTED`. La ejecución browser con NetLog observó DNS rebinding real, pero su estado consolidado es `REAL / OBSERVED + LIMITATION`.
 - Crash cleanup seguro: `NOT EXECUTED`; cleanup normal de context/browser y timeout sí fueron ejecutados.
 - Playwright `1.63.0` fue añadido únicamente como `devDependency` experimental para el harness externo.
 - El harness externo no añadió APIs de procesos, shell, providers productivos ni cambios en `src/`.
 - Egress boundary spike: 19 PASS, 0 FAIL y 2 NOT EXECUTED, con `internalHits=0`.
 - El proxy fixture bloqueó redirects públicos hacia destinos internos y WebSocket interno mediante CONNECT.
 - Service Worker en el egress fixture: NOT EXECUTED; Chromium no expuso `navigator.serviceWorker` para el origen controlado.
-- DNS rebinding controlado real dentro de VirtualBox ya tiene evidencia `PASS`; el rebinding público/productivo, el pinning y la validación IP efectiva justo antes del socket dentro de BrowserProvider siguen pendientes.
+- El experimento DNS rebinding controlado previo dentro de VirtualBox tiene un `PASS` acotado a ese fixture; no sustituye la evidencia browser NetLog posterior ni demuestra pinning productivo o validación IP dentro de BrowserProvider.
 - Egress hardening por canal: 14 PASS, 0 FAIL, 6 NOT EXECUTED y 1 SIMULATED; `internalHits=[]`.
 - Egress architecture decision gate: ADR-012 provisional; `browserContext.route()` queda descartado como boundary único y cualquier BrowserProvider futuro deberá usar una frontera de egress inferior. La selección concreta sigue abierta.
 - Gate evidence: Service Worker real en localhost `PASS`, con request generada, proxy observado, destino `127.0.0.1`, bloqueo e `internalHits=0`.
-- HTTPS público→HTTPS, HTTPS→HTTP y HTTPS→interno permanecen `NOT EXECUTED`; la viabilidad del fixture TLS queda documentada como `NOT EXECUTED`/`LIMITATION`; DNS/socket pinning permanece `SIMULATED`/`NOT EXECUTED`.
+- HTTPS público→HTTPS, HTTPS→HTTP y HTTPS→interno permanecen `NOT EXECUTED`; la viabilidad del fixture TLS queda documentada como `NOT EXECUTED`/`LIMITATION`; la consolidación formal de DNS/socket pinning permanece pendiente, mientras la observación browser NetLog queda en `REAL / OBSERVED + LIMITATION`.
 - No se seleccionó todavía proxy productivo, aislamiento de red, browser remoto ni combinación definitiva.
 - Runtime browser experimental provisionado fuera del repositorio mediante Playwright `1.63.0`; Chrome Headless Shell `153.0.8010.12` inició con sandbox solicitado. El provisioning no modifica `src/`, manifests ni lockfiles y no cierra ADR-012.
 - Evidencia DNS/socket local controlada: `public.test` observó `127.0.0.2` como IP validada, efectiva y `socket.remoteAddress`; `internal.test` fue bloqueado antes del socket con `internalHits=0`; el cambio `127.0.0.2 → 127.0.0.3` permanece `SIMULATED`.
@@ -75,7 +75,8 @@ Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #
 - Evidencia OS/network documentada en `docs/phase-08-network-host-isolation-evidence-results.md`; la ejecución real quedó `NOT EXECUTED`/`LIMITATION` por falta de un entorno administrativo/dedicado reproducible, sin nuevos `PASS`/`FAIL`.
 - Evaluación consolidada de evidencia restante documentada en `docs/phase-08-remaining-evidence-assessment.md`; no se identificó una nueva prueba segura y útil ejecutable en el entorno actual y los criterios pendientes conservan sus categorías.
 - Checklist de readiness del entorno experimental documentado en `docs/phase-08-experimental-environment-readiness.md`; define requisitos de entrada, rollback y evidencia por prueba sin alterar el host de trabajo.
-- Evidencia real de DNS rebinding controlado documentada en `docs/phase-08-dns-rebinding-real-evidence.md`; `rebind.test` alternó entre `1.1.1.1` y `10.20.0.1`, el intento a `10.20.0.1:22` fue bloqueado y `nftables` registró 12 paquetes/788 bytes DROP.
+- Evidencia real de DNS rebinding controlado documentada en `docs/phase-08-dns-rebinding-real-evidence.md`; ese experimento histórico y acotado alternó `rebind.test` entre `1.1.1.1` y `10.20.0.1`, el intento a `10.20.0.1:22` fue bloqueado y `nftables` registró 12 paquetes/788 bytes DROP.
+- Evidencia browser real con NetLog documentada en `docs/phase-08-real-browser-dns-rebinding-netlog-execution-2026-09-22.md`; el segundo endpoint TCP `10.20.0.1:80` y el timeout fueron observados, pero no se obtuvo consolidación formal de egress.
 
 ## In Progress
 
@@ -86,8 +87,8 @@ Ninguno. El architecture decision gate fue documentado y mergeado; la implementa
 - Las métricas de hardware siguen pendientes por el bloqueo de WMI.
 - La selección final de proveedores de STT/TTS requiere pruebas locales comparables de compatibilidad, latencia, calidad, consumo, cancelación y licencias.
 - Search requiere credenciales temporales para ejecutar el benchmark real.
-- Browser remoto y DNS rebinding público/productivo requieren entornos/evidencia adicionales; el rebinding controlado real ya fue ejecutado y documentado en VirtualBox.
-- La evidencia DNS/socket continúa limitada al fixture local controlado para IP efectiva/socket; el nuevo experimento sí demuestra rebinding DNS controlado real (`rebind.test`) y bloqueo del destino privado, pero no demuestra pinning productivo, DNS público cambiante ni múltiples A/AAAA en un escenario productivo.
+- Browser remoto y la consolidación productiva/formal del DNS rebinding requieren entornos/evidencia adicionales; la observación browser real con NetLog ya fue ejecutada y documentada.
+- La evidencia browser NetLog demuestra el primer endpoint `1.1.1.1:80`, el segundo endpoint `10.20.0.1:80` y un timeout real. No demuestra bloqueo formal mediante egress artifact, `internalHits=0`, correlación cross-VM formal, pinning productivo, DNS público cambiante, múltiples A/AAAA en un escenario productivo ni seguridad de todos los canales.
 - El fixture HTTPS/TLS sigue bloqueado por la ausencia de un mecanismo de emisión y confianza X.509 efímero compatible con Chromium bajo las restricciones actuales.
 - La evidencia de host isolation no demuestra aislamiento OS-level del filesystem ni efectividad OS-level del sandbox; crash cleanup continúa sin ejecutar.
 - El spike de network/host isolation no confirmó Windows Sandbox ni capacidad administrativa para gestionar VMs/switches; la identificación exacta del producto/versión del sistema operativo permanece `LIMITATION` por señales inconsistentes.
@@ -99,12 +100,12 @@ Ninguno. El architecture decision gate fue documentado y mergeado; la implementa
 
 Sin introducir código de producción todavía:
 1. Resolver, solo si es posible sin debilitar TLS ni usar APIs de proceso, la limitación del fixture X.509 efímero y después repetir HTTPS→HTTPS, HTTPS→HTTP y HTTPS→interno.
-2. Probar el mecanismo con resolución efectiva y DNS rebinding real en un entorno aislado; mantener la simulación separada.
+2. Mantener separada la evidencia browser NetLog ya obtenida de la simulación y de cualquier futura consolidación formal; no repetir el laboratorio mientras no cambie el entorno.
 3. Evaluar un entorno de aislamiento de red/host que permita demostrar límites OS-level sin depender de una configuración browser-only.
 4. Repetir Search con credenciales temporales para Brave, Tavily y Exa y medir las 20 consultas.
 5. Evaluar browser remoto y crash cleanup seguro.
 6. Cerrar el `decision-gate` de ADR-012 con evidencia reproducible antes de implementar `WebSearchProvider`, `WebFetchProvider` o `BrowserProvider`.
-7. Integrar el DNS rebinding controlado con un cliente/browser real para observar `DNS -> IP validada -> navegación -> IP efectiva -> socket -> decisión del boundary`.
+7. Solo si se decide intentar satisfacer el contrato formal del classifier, capturar fresh clock reference, DNS JSON, egress JSON e `internalHits=0` en una ejecución dirigida; la observación browser NetLog ya está documentada.
 8. Solo en un entorno administrativo/dedicado, evaluar una VM temporal o mecanismo equivalente para demostrar aislamiento de red/host y cleanup sin modificar el host de trabajo.
 
 ## Phase 8 — Internet & Browser
@@ -113,7 +114,7 @@ La definición arquitectónica, el spike de providers/sandbox, los controlled te
 
 La evidencia Fetch/SSRF/DNS/policies es 29/29 PASS en fixtures controlados. El experimento browser local ejecutó 19 comprobaciones: 17 PASS, 1 FAIL y 1 NOT EXECUTED. El FAIL es una evidencia negativa deliberada: el redirect público → interno alcanzó el fixture interno pese al routing configurado. Por tanto, `browserContext.route()` no debe considerarse suficiente para una frontera de egress/SSRF de producción.
 
-Search real, browser remoto, DNS rebinding real, HTTPS→HTTPS/HTTP, aislamiento OS-level/de red y crash cleanup seguro continúan pendientes. La evidencia host/browser mejora la caracterización local, pero no constituye aislamiento OS-level. La evaluación TLS no produjo handshake ni evidencia de egress HTTPS; la limitación del fixture queda documentada. DNS/socket real solo está demostrado en el fixture local controlado; no se demuestra pinning productivo. El fixture TLS reproducible permanece bloqueado por la limitación documentada del entorno actual. Service Worker ya tiene evidencia PASS en el fixture localhost, pero debe confirmarse para el browser/provider elegido. ADR-012 mantiene la fase en `decision-gate`; no hay selección definitiva de provider, browser, sandbox o egress, y no hay implementación de producción. El nuevo spike solo registra capacidades observadas de Hyper-V/Firewall/vEthernet y WSL2; no demuestra aislamiento OS-level y no cambia el gate.
+Search real, browser remoto, HTTPS→HTTPS/HTTP, aislamiento OS-level/de red y crash cleanup seguro continúan pendientes. La ejecución browser NetLog de DNS rebinding es `REAL / OBSERVED + LIMITATION`: demuestra el segundo endpoint TCP `10.20.0.1:80` y el timeout, pero no bloqueo formal, `internalHits=0`, correlación cross-VM formal, seguridad de todos los canales ni pinning productivo. La evidencia host/browser mejora la caracterización local, pero no constituye aislamiento OS-level. La evaluación TLS no produjo handshake ni evidencia de egress HTTPS; la limitación del fixture queda documentada. Service Worker ya tiene evidencia PASS en el fixture localhost, pero debe confirmarse para el browser/provider elegido. ADR-012 mantiene la fase en `decision-gate`; no hay selección definitiva de provider, browser, sandbox o egress, y no hay implementación de producción. El nuevo spike solo registra capacidades observadas de Hyper-V/Firewall/vEthernet y WSL2; no demuestra aislamiento OS-level y no cambia el gate.
 
 ## Known Risks
 
