@@ -76,6 +76,22 @@ de varios turnos durante una ejecución, usa `node dist/main.js --interactive`.
 Cada línea es un turno; `/exit` termina explícitamente y EOF también finaliza.
 El historial vive únicamente en la `Session` y no se persiste.
 
+## MVP local con LLM real
+
+Sin `AI_PROVIDER`, el CLI usa `MockAIProvider` y no realiza llamadas externas.
+Para usar el `DirectAIProvider`, configura temporalmente `AI_PROVIDER=direct`,
+`AI_BASE_URL`, `AI_API_KEY` y `AI_MODEL`. El historial y la personalidad de Yuki
+siguen siendo efímeros durante la ejecución.
+
+En PowerShell, el smoke test real opt-in se ejecuta así:
+
+```powershell
+$env:AI_PROVIDER="direct"; $env:AI_BASE_URL="<ENDPOINT>"; $env:AI_API_KEY="<API_KEY>"; $env:AI_MODEL="<MODEL>"; $env:AI_TIMEOUT_MS="10000"; node scripts/smoke-real-ai.mjs
+```
+
+El comando consume una llamada real, no forma parte de `npm test` ni de
+`npm run check`, y nunca imprime la API key ni el header de autorización.
+
 ## Próximo paso
 
 Cerrar y revisar la unidad offline de contratos/base: datos web no confiables, policy URL pura, lifecycle, cancelación, mocks y adapters de `ToolManager`. La red, los providers reales, el browser, el egress y la ejecución del laboratorio siguen fuera de esta unidad; ADR-012 permanece provisional y el resultado debe conservar `PASS`, `FAIL`, `LIMITATION` o `NOT EXECUTED` sin convertir mocks en evidencia real.

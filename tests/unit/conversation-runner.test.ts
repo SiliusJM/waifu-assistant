@@ -67,6 +67,7 @@ test('conversation runner reuses one compiled default personality snapshot acros
   assert.equal(requests[0]?.messages.filter(({ role }) => role === 'system').length, snapshot.instructions.length);
   assert.equal(requests[1]?.messages.filter(({ role }) => role === 'system').length, snapshot.instructions.length);
   assert.equal(snapshot.personalityId, DEFAULT_PERSONALITY_PROFILE.personalityId);
+  assert.equal(snapshot.identity.displayName, 'Yuki');
   assert.ok(Object.isFrozen(snapshot));
   assert.deepEqual(result.session.getMessages().map(({ role }) => role), ['user', 'assistant', 'user', 'assistant']);
 });
@@ -77,6 +78,7 @@ test('default personality registry and compiler produce one immutable applicatio
 
   assert.equal(snapshot.personalityId, DEFAULT_PERSONALITY_PROFILE.personalityId);
   assert.equal(snapshot.profileVersion, DEFAULT_PERSONALITY_PROFILE.profileVersion);
+  assert.equal(snapshot.identity.displayName, 'Yuki');
   assert.ok(Object.isFrozen(snapshot));
   assert.ok(Object.isFrozen(snapshot.instructions));
   assert.throws(() => {

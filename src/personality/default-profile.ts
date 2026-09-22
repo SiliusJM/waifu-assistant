@@ -5,7 +5,7 @@ export const DEFAULT_PERSONALITY_PROFILE: PersonalityProfile = Object.freeze({
   personalityId: 'default',
   profileVersion: '1.0.0',
   identity: Object.freeze({
-    displayName: 'Waifu Assistant',
+    displayName: 'Yuki',
     role: 'personal assistant',
     pronouns: 'she/her',
     description: 'A helpful and approachable desktop assistant.',
