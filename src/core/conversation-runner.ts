@@ -5,8 +5,16 @@ import type { PersonalitySnapshot } from '../personality/personality-types.js';
 import { AssistantError } from '../shared/errors.js';
 
 export const CONVERSATION_EXIT_COMMAND = '/exit';
+export const CONVERSATION_HELP_COMMAND = '/help';
 export const CONVERSATION_TIME_COMMAND = '/time';
 export const CONVERSATION_CALC_COMMAND = '/calc';
+export const LOCAL_COMMAND_HELP = [
+  'Comandos disponibles:',
+  '  /help              Muestra esta ayuda',
+  '  /time              Muestra la hora local',
+  '  /calc <expresión>  Calcula una expresión aritmética',
+  '  /exit              Cierra la conversación',
+].join('\n');
 
 export type ConversationRunStatus = 'completed' | 'cancelled';
 
@@ -91,10 +99,11 @@ export class ConversationRunner {
           sourceFinished = true;
           return { status: 'completed', session: this.session, responses: [...responses] };
         }
-        if (input === CONVERSATION_TIME_COMMAND || input === CONVERSATION_CALC_COMMAND
+        if (input === CONVERSATION_HELP_COMMAND || input === CONVERSATION_TIME_COMMAND
+          || input === CONVERSATION_CALC_COMMAND
           || input.startsWith(`${CONVERSATION_CALC_COMMAND} `)) {
           if (!options.onCommand) {
-            throw new AssistantError('The local time command is unavailable.', {
+            throw new AssistantError('The local command is unavailable.', {
               code: 'TOOL_UNAVAILABLE_ERROR',
               retryable: false,
             });

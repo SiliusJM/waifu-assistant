@@ -18,16 +18,18 @@ export function createLocalToolManager(now?: TimeSource): ToolManager {
   return new ToolManager({
     registry,
     authorizer: {
-      authorize: (tool, context) => ({
-        allowed: (tool.id === LOCAL_TIME_TOOL_ID || tool.id === LOCAL_CALCULATOR_TOOL_ID)
-          && typeof context.metadata.command === 'string'
-          && (context.metadata.command === LOCAL_TIME_COMMAND
-            || context.metadata.command === '/calc'
-            || context.metadata.command.startsWith('/calc '))
-          && context.authorization?.source === 'explicit-cli-command',
+      authorize: (tool, context) => {
+        const command = context.metadata.command;
+        const isTimeCommand = command === LOCAL_TIME_COMMAND;
+        const isCalculatorCommand = command === '/calc' || (typeof command === 'string' && command.startsWith('/calc '));
+        return {
+          allowed: ((tool.id === LOCAL_TIME_TOOL_ID && isTimeCommand)
+            || (tool.id === LOCAL_CALCULATOR_TOOL_ID && isCalculatorCommand))
+            && context.authorization?.source === 'explicit-cli-command',
         reason: 'The tool requires an explicit local command.',
         authorization: context.authorization,
-      }),
+        };
+      },
     },
   });
 }

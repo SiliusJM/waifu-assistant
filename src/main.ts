@@ -15,6 +15,7 @@ import {
   formatCalculation,
   formatLocalTime,
 } from './tools/local-tool-manager.js';
+import { CONVERSATION_HELP_COMMAND, LOCAL_COMMAND_HELP } from './core/conversation-runner.js';
 
 export async function main(
   argv: readonly string[] = process.argv.slice(2),
@@ -56,6 +57,10 @@ export async function main(
       personality,
       onResponse: (response): void => { process.stdout.write(response.text + '\n'); },
       onCommand: async (command, context): Promise<void> => {
+        if (command === CONVERSATION_HELP_COMMAND) {
+          process.stdout.write(LOCAL_COMMAND_HELP + '\n');
+          return;
+        }
         if (command === '/time') {
           const result = await executeLocalTime(localToolManager, context);
           if (result.status !== 'success') {

@@ -42,3 +42,14 @@ test('calculator reports controlled failures through ToolManager', async () => {
     error: { code: 'TOOL_ARGUMENTS_ERROR', message: 'Division by zero is not allowed.', retryable: false },
   });
 });
+
+test('local calculator cannot be authorized by the time command', async () => {
+  const manager = createLocalToolManager();
+  const result = await manager.execute('local.calculate', { expression: '2+2' }, {
+    metadata: { command: '/time' },
+    authorization: { source: 'explicit-cli-command' },
+  });
+
+  assert.equal(result.status, 'failure');
+  if (result.status === 'failure') assert.equal(result.error.code, 'TOOL_PERMISSION_ERROR');
+});

@@ -29,3 +29,14 @@ test('local time tool requires the explicit command authorization', async () => 
     },
   });
 });
+
+test('local time cannot be authorized by a calculator command', async () => {
+  const manager = createLocalToolManager();
+  const result = await manager.execute('local.time', {}, {
+    metadata: { command: '/calc 2+2' },
+    authorization: { source: 'explicit-cli-command' },
+  });
+
+  assert.equal(result.status, 'failure');
+  if (result.status === 'failure') assert.equal(result.error.code, 'TOOL_PERMISSION_ERROR');
+});

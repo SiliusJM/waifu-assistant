@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MockAIProvider } from '../../src/ai/mock-ai-provider.js';
 import { AssistantCore } from '../../src/core/assistant-core.js';
-import { ConversationRunner } from '../../src/core/conversation-runner.js';
+import { ConversationRunner, LOCAL_COMMAND_HELP } from '../../src/core/conversation-runner.js';
 import { Session } from '../../src/core/session.js';
 import { DEFAULT_PERSONALITY_PROFILE } from '../../src/personality/default-profile.js';
 import { PersonalityCompiler } from '../../src/personality/personality-compiler.js';
@@ -109,6 +109,40 @@ test('conversation runner supports EOF, explicit exit and empty input without ex
   assert.deepEqual(calls, ['accepted']);
 });
 
+test('local help is deterministic, does not call the provider or change Session', async () => {
+  let providerCalls = 0;
+  const provider = new MockAIProvider({
+    responder: () => {
+      providerCalls += 1;
+      return { text: 'ok', provider: 'mock', model: 'mock-model', finishReason: 'stop' };
+    },
+  });
+  const outputs: string[] = [];
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const result = await runner.run(inputs(['message A', '/help', 'message B', '/exit']), {
+    onCommand: async (command) => {
+      assert.equal(command, '/help');
+      outputs.push(LOCAL_COMMAND_HELP);
+    },
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(providerCalls, 2);
+  assert.deepEqual(outputs, [LOCAL_COMMAND_HELP]);
+  assert.deepEqual(result.session.getMessages().map(({ content }) => content), ['message A', 'ok', 'message B', 'ok']);
+});
+
+test('local command without a handler reports a generic unavailable error', async () => {
+  const runner = new ConversationRunner(new AssistantCore({ provider: new MockAIProvider() }));
+
+  await assert.rejects(() => runner.run(inputs(['/help'])), (error: unknown) => (
+    error instanceof Error
+    && error.message === 'The local command is unavailable.'
+    && 'code' in error
+    && error.code === 'TOOL_UNAVAILABLE_ERROR'
+  ));
+});
+
 test('explicit /time uses ToolManager without calling the provider or changing Session', async () => {
   let providerCalls = 0;
   const requests: string[][] = [];
@@ -177,6 +211,38 @@ test('explicit /calc uses ToolManager without calling the provider or changing S
   assert.deepEqual(result.session.getMessages().map(({ content }) => content), [
     'message A', 'reply-1', 'message B', 'reply-2',
   ]);
+});
+
+test('local commands can coexist without entering Session and exit cleanly', async () => {
+  let providerCalls = 0;
+  const provider = new MockAIProvider({
+    responder: () => {
+      providerCalls += 1;
+      return { text: 'reply', provider: 'mock', model: 'mock-model', finishReason: 'stop' };
+    },
+  });
+  const manager = createLocalToolManager();
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const outputs: string[] = [];
+
+  const result = await runner.run(inputs(['message A', '/time', '/calc 2 + 2', '/help', 'message B', '/exit']), {
+    onCommand: async (command, context) => {
+      if (command === '/time') {
+        const time = await executeLocalTime(manager, context);
+        if (time.status === 'success') outputs.push(formatLocalTime(time.value));
+      } else if (command === '/calc 2 + 2') {
+        const calculation = await executeLocalCalculation(manager, '2 + 2', context);
+        if (calculation.status === 'success') outputs.push(String(calculation.value.result));
+      } else {
+        outputs.push(LOCAL_COMMAND_HELP);
+      }
+    },
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(providerCalls, 2);
+  assert.equal(outputs.length, 3);
+  assert.deepEqual(result.session.getMessages().map(({ content }) => content), ['message A', 'reply', 'message B', 'reply']);
 });
 
 test('conversation runner cancels while waiting for input and closes the source', async () => {

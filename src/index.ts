@@ -5,7 +5,9 @@ export { toAssistantResponse, type Response } from './core/response.js';
 export { Session } from './core/session.js';
 export {
   CONVERSATION_EXIT_COMMAND,
+  CONVERSATION_HELP_COMMAND,
   CONVERSATION_TIME_COMMAND,
+  LOCAL_COMMAND_HELP,
   CONVERSATION_CALC_COMMAND,
   ConversationRunner,
   type ConversationRunOptions,
