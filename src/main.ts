@@ -16,7 +16,13 @@ import {
   formatLocalTime,
   LOCAL_TOOL_ALLOWLIST,
 } from './tools/local-tool-manager.js';
-import { CONVERSATION_HELP_COMMAND, LOCAL_COMMAND_HELP } from './core/conversation-runner.js';
+import {
+  CONVERSATION_CLEAR_COMMAND,
+  CONVERSATION_HISTORY_COMMAND,
+  CONVERSATION_HELP_COMMAND,
+  CONVERSATION_STATUS_COMMAND,
+  LOCAL_COMMAND_HELP,
+} from './core/conversation-runner.js';
 
 export async function main(
   argv: readonly string[] = process.argv.slice(2),
@@ -62,6 +68,31 @@ export async function main(
       onCommand: async (command, context): Promise<void> => {
         if (command === CONVERSATION_HELP_COMMAND) {
           process.stdout.write(LOCAL_COMMAND_HELP + '\n');
+          return;
+        }
+        if (command === CONVERSATION_STATUS_COMMAND) {
+          process.stdout.write([
+            'Yuki status',
+            `Session: ${runner.session.id}`,
+            `Messages: ${runner.session.getMessages().length}`,
+            `Provider: ${config.ai.provider}`,
+            'Personality: Yuki',
+            'Local tools:',
+            '- local.time',
+            '- local.calculate',
+          ].join('\n') + '\n');
+          return;
+        }
+        if (command === CONVERSATION_HISTORY_COMMAND) {
+          const history = runner.session.getMessages();
+          process.stdout.write((history.length === 0
+            ? '(empty)'
+            : history.map(({ role, content }) => `${role}: ${content}`).join('\n')) + '\n');
+          return;
+        }
+        if (command === CONVERSATION_CLEAR_COMMAND) {
+          runner.session.clear();
+          process.stdout.write('Session cleared.\n');
           return;
         }
         if (command === '/time') {

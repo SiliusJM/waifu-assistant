@@ -245,6 +245,54 @@ test('local commands can coexist without entering Session and exit cleanly', asy
   assert.deepEqual(result.session.getMessages().map(({ content }) => content), ['message A', 'reply', 'message B', 'reply']);
 });
 
+test('session status and history commands are local and do not call the provider', async () => {
+  let providerCalls = 0;
+  const provider = new MockAIProvider({
+    responder: () => {
+      providerCalls += 1;
+      return { text: 'reply', provider: 'mock', model: 'mock-model', finishReason: 'stop' };
+    },
+  });
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const outputs: string[] = [];
+
+  const result = await runner.run(inputs(['/status', 'message A', '/history', '/exit']), {
+    onCommand: async (command) => {
+      if (command === '/status') outputs.push(`Messages: ${runner.session.getMessages().length}`);
+      if (command === '/history') outputs.push(runner.session.getMessages().map(({ role, content }) => `${role}: ${content}`).join('\n'));
+    },
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(providerCalls, 1);
+  assert.deepEqual(outputs, ['Messages: 0', 'user: message A\nassistant: reply']);
+});
+
+test('clear command resets only the current in-memory Session', async () => {
+  let providerCalls = 0;
+  const requests: string[][] = [];
+  const provider = new MockAIProvider({
+    responder: (request) => {
+      providerCalls += 1;
+      requests.push(request.messages.map(({ content }) => content));
+      return { text: `reply-${providerCalls}`, provider: 'mock', model: 'mock-model', finishReason: 'stop' };
+    },
+  });
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+
+  const result = await runner.run(inputs(['message A', '/clear', '/status', 'message B']), {
+    onCommand: async (command) => {
+      if (command === '/clear') runner.session.clear();
+      if (command === '/status') assert.equal(runner.session.getMessages().length, 0);
+    },
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(providerCalls, 2);
+  assert.deepEqual(requests[1], ['message B']);
+  assert.deepEqual(runner.session.getMessages().map(({ content }) => content), ['message B', 'reply-2']);
+});
+
 test('conversation runner cancels while waiting for input and closes the source', async () => {
   const controller = new AbortController();
   let closed = false;

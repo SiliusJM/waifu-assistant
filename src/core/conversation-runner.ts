@@ -8,12 +8,18 @@ export const CONVERSATION_EXIT_COMMAND = '/exit';
 export const CONVERSATION_HELP_COMMAND = '/help';
 export const CONVERSATION_TIME_COMMAND = '/time';
 export const CONVERSATION_CALC_COMMAND = '/calc';
+export const CONVERSATION_STATUS_COMMAND = '/status';
+export const CONVERSATION_HISTORY_COMMAND = '/history';
+export const CONVERSATION_CLEAR_COMMAND = '/clear';
 export const LOCAL_COMMAND_HELP = [
   'Comandos disponibles:',
   '  /help              Muestra esta ayuda',
   '  /time              Muestra la hora local',
   '  /calc <expresión>  Calcula una expresión aritmética',
   '  /exit              Cierra la conversación',
+  '  /status            Muestra el estado de la sesión',
+  '  /history           Muestra el historial conversacional',
+  '  /clear             Limpia la sesión actual',
 ].join('\n');
 
 export type ConversationRunStatus = 'completed' | 'cancelled';
@@ -101,7 +107,10 @@ export class ConversationRunner {
         }
         if (input === CONVERSATION_HELP_COMMAND || input === CONVERSATION_TIME_COMMAND
           || input === CONVERSATION_CALC_COMMAND
-          || input.startsWith(`${CONVERSATION_CALC_COMMAND} `)) {
+          || input.startsWith(`${CONVERSATION_CALC_COMMAND} `)
+          || input === CONVERSATION_STATUS_COMMAND
+          || input === CONVERSATION_HISTORY_COMMAND
+          || input === CONVERSATION_CLEAR_COMMAND) {
           if (!options.onCommand) {
             throw new AssistantError('The local command is unavailable.', {
               code: 'TOOL_UNAVAILABLE_ERROR',
