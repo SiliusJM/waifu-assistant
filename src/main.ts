@@ -8,6 +8,11 @@ import { PersonalityCompiler } from './personality/personality-compiler.js';
 import { PersonalityRegistry } from './personality/personality-registry.js';
 import { AssistantError } from './shared/errors.js';
 import { createLogger } from './shared/logger.js';
+import {
+  createLocalToolManager,
+  executeLocalTime,
+  formatLocalTime,
+} from './tools/local-tool-manager.js';
 
 export async function main(
   argv: readonly string[] = process.argv.slice(2),
@@ -28,6 +33,7 @@ export async function main(
     provider: createAIProvider(config),
     logger,
   });
+  const localToolManager = createLocalToolManager();
   const personality = new PersonalityCompiler().compile({
     profile: new PersonalityRegistry().defaultProfile,
   });
@@ -47,6 +53,16 @@ export async function main(
       signal: controller.signal,
       personality,
       onResponse: (response): void => { process.stdout.write(response.text + '\n'); },
+      onCommand: async (_command, context): Promise<void> => {
+        const result = await executeLocalTime(localToolManager, context);
+        if (result.status !== 'success') {
+          throw new AssistantError(result.error.message, {
+            code: result.error.code,
+            retryable: result.error.retryable,
+          });
+        }
+        process.stdout.write(formatLocalTime(result.value) + '\n');
+      },
     });
   } finally {
     terminal.close();

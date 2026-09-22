@@ -5,11 +5,20 @@ export { toAssistantResponse, type Response } from './core/response.js';
 export { Session } from './core/session.js';
 export {
   CONVERSATION_EXIT_COMMAND,
+  CONVERSATION_TIME_COMMAND,
   ConversationRunner,
   type ConversationRunOptions,
   type ConversationRunResult,
   type ConversationRunStatus,
 } from './core/conversation-runner.js';
+export {
+  LOCAL_TIME_COMMAND,
+  createLocalToolManager,
+  executeLocalTime,
+  formatLocalTime,
+  createLocalTimeTool,
+} from './tools/local-tool-manager.js';
+export type { LocalTimeValue, TimeSource } from './tools/time-tool.js';
 export { DirectAIProvider } from './ai/direct-ai-provider.js';
 export { MockAIProvider } from './ai/mock-ai-provider.js';
 export type { AIProvider } from './ai/ai-provider.js';

@@ -2,8 +2,10 @@ import type { AssistantCore } from './assistant-core.js';
 import type { Response } from './response.js';
 import type { Session } from './session.js';
 import type { PersonalitySnapshot } from '../personality/personality-types.js';
+import { AssistantError } from '../shared/errors.js';
 
 export const CONVERSATION_EXIT_COMMAND = '/exit';
+export const CONVERSATION_TIME_COMMAND = '/time';
 
 export type ConversationRunStatus = 'completed' | 'cancelled';
 
@@ -18,6 +20,10 @@ export interface ConversationRunOptions {
   readonly exitCommand?: string;
   readonly personality?: PersonalitySnapshot;
   readonly onResponse?: (response: Response) => void | Promise<void>;
+  readonly onCommand?: (command: string, context: {
+    readonly signal?: AbortSignal;
+    readonly sessionId: string;
+  }) => void | Promise<void>;
 }
 
 async function nextWithSignal(
@@ -83,6 +89,19 @@ export class ConversationRunner {
         if (input === exitCommand) {
           sourceFinished = true;
           return { status: 'completed', session: this.session, responses: [...responses] };
+        }
+        if (input === CONVERSATION_TIME_COMMAND) {
+          if (!options.onCommand) {
+            throw new AssistantError('The local time command is unavailable.', {
+              code: 'TOOL_UNAVAILABLE_ERROR',
+              retryable: false,
+            });
+          }
+          await options.onCommand(input, {
+            signal: options.signal,
+            sessionId: this.session.id,
+          });
+          continue;
         }
 
         try {

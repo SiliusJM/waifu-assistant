@@ -7,6 +7,7 @@ import { Session } from '../../src/core/session.js';
 import { DEFAULT_PERSONALITY_PROFILE } from '../../src/personality/default-profile.js';
 import { PersonalityCompiler } from '../../src/personality/personality-compiler.js';
 import { PersonalityRegistry } from '../../src/personality/personality-registry.js';
+import { createLocalToolManager, executeLocalTime, formatLocalTime } from '../../src/tools/local-tool-manager.js';
 
 async function* inputs(values: readonly string[]): AsyncIterable<string> {
   yield* values;
@@ -101,6 +102,43 @@ test('conversation runner supports EOF, explicit exit and empty input without ex
 
   assert.equal(result.status, 'completed');
   assert.deepEqual(calls, ['accepted']);
+});
+
+test('explicit /time uses ToolManager without calling the provider or changing Session', async () => {
+  let providerCalls = 0;
+  const requests: string[][] = [];
+  const provider = new MockAIProvider({
+    responder: (request) => {
+      providerCalls += 1;
+      requests.push(request.messages.map(({ content }) => content));
+      return { text: `reply-${providerCalls}`, provider: 'mock', model: 'mock-model', finishReason: 'stop' };
+    },
+  });
+  const manager = createLocalToolManager(() => new Date('2026-09-22T18:30:04.000Z'));
+  const output: string[] = [];
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+
+  const result = await runner.run(inputs(['message A', '/time', 'message B']), {
+    onCommand: async (_command, context) => {
+      const timeResult = await executeLocalTime(manager, context);
+      assert.equal(timeResult.status, 'success');
+      if (timeResult.status === 'success') output.push(formatLocalTime(timeResult.value));
+    },
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(providerCalls, 2);
+  assert.equal(output.length, 1);
+  assert.match(output[0] ?? '', /^Hora local:/);
+  assert.deepEqual(result.session.getMessages().map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'message A' },
+    { role: 'assistant', content: 'reply-1' },
+    { role: 'user', content: 'message B' },
+    { role: 'assistant', content: 'reply-2' },
+  ]);
+  assert.equal(requests[1]?.includes('/time'), false);
+  assert.equal(requests[1]?.includes(output[0] ?? ''), false);
+  assert.equal(requests[1]?.includes('message A'), true);
 });
 
 test('conversation runner cancels while waiting for input and closes the source', async () => {
