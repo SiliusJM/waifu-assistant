@@ -69,6 +69,10 @@ async function assertCode(operation: Promise<unknown>, code: AssistantError['cod
   );
 }
 
+async function consumeStream(stream: AsyncIterable<AIStreamEvent>): Promise<void> {
+  for await (const event of stream) { void event; }
+}
+
 test('direct provider handles a successful response', async () => {
   await withServer(
     (response) => sendJson(response, 200, {
@@ -192,6 +196,141 @@ test('direct provider stream emits the completed response', async () => {
         assert.equal(events[0].response.model, 'test-model');
         assert.equal(events[0].response.finishReason, 'stop');
       }
+    },
+  );
+});
+
+test('direct provider parses SSE deltas split across chunks and requests streaming', async () => {
+  let received: Record<string, unknown> | undefined;
+  await withRequestServer(
+    (incoming, response) => {
+      const chunks: Buffer[] = [];
+      incoming.on('data', (chunk: Buffer) => chunks.push(chunk));
+      incoming.on('end', () => {
+        received = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
+        response.writeHead(200, { 'content-type': 'text/event-stream' });
+        const body = [
+          'data: {"model":"test-model","choices":[{"delta":{"content":"Ho"},"finish_reason":null}]}\r\n\r\n',
+          'data: {"choices":[{"delta":{"content":"la 🌸"},"finish_reason":null}]}\r\n\r\n',
+          'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\r\n\r\n',
+          'data: [DONE]\r\n\r\n',
+        ].join('');
+        for (const byte of Buffer.from(body, 'utf8')) response.write(Buffer.from([byte]));
+        response.end();
+      });
+    },
+    async (baseURL) => {
+      const events: AIStreamEvent[] = [];
+      for await (const event of provider(baseURL).stream(request)) events.push(event);
+      assert.equal(received?.stream, true);
+      assert.deepEqual(events.filter((event) => event.type === 'text_delta').map((event) => event.delta), ['Ho', 'la 🌸']);
+      const completed = events.at(-1);
+      assert.equal(completed?.type, 'completed');
+      if (completed?.type === 'completed') {
+        assert.equal(completed.response.text, 'Hola 🌸');
+        assert.equal(completed.response.finishReason, 'stop');
+      }
+    },
+  );
+});
+
+test('direct provider reconstructs fragmented streamed tool calls with a bounded argument', async () => {
+  await withServer(
+    (response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.end([
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"local_calculate","arguments":"{\\"ex"}}]}}]}\n\n',
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"pression\\":\\"2+2\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n',
+        'data: [DONE]\n\n',
+      ].join(''));
+    },
+    async (baseURL) => {
+      const events: AIStreamEvent[] = [];
+      for await (const event of provider(baseURL).stream(request)) events.push(event);
+      const completed = events.at(-1);
+      assert.equal(completed?.type, 'completed');
+      if (completed?.type === 'completed') {
+        assert.deepEqual(completed.response.toolCalls, [{ id: 'call-1', name: 'local_calculate', argumentsJson: '{"expression":"2+2"}' }]);
+      }
+    },
+  );
+});
+
+test('direct provider rejects malformed, empty and unsupported streams safely', async () => {
+  await withServer(
+    (response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.end('data: {broken\n\n');
+    },
+    async (baseURL) => assertCode(consumeStream(provider(baseURL).stream(request)), 'INVALID_RESPONSE_ERROR'),
+  );
+  await withServer(
+    (response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.end('data: [DONE]\n\n');
+    },
+    async (baseURL) => assertCode(consumeStream(provider(baseURL).stream(request)), 'INVALID_RESPONSE_ERROR'),
+  );
+  await withServer(
+    (response) => {
+      response.writeHead(200, { 'content-type': 'text/html' });
+      response.end('<html>not an API response</html>');
+    },
+    async (baseURL) => assertCode(consumeStream(provider(baseURL).stream(request)), 'INVALID_RESPONSE_ERROR'),
+  );
+});
+
+test('direct provider timeout covers a stream body that never completes', async () => {
+  await withServer(
+    (response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.write('data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}\n\n');
+    },
+    async (baseURL) => assertCode(consumeStream(provider(baseURL, { timeoutMs: 20 }).stream(request)), 'TIMEOUT_ERROR'),
+  );
+});
+
+test('direct provider cancellation stops a stream after partial text without retrying', async () => {
+  let calls = 0;
+  await withServer(
+    (response) => {
+      calls += 1;
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.write('data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}\n\n');
+      setTimeout(() => response.end('data: [DONE]\n\n'), 100);
+    },
+    async (baseURL) => {
+      const controller = new AbortController();
+      const events: AIStreamEvent[] = [];
+      setTimeout(() => controller.abort(), 10);
+      await assert.rejects(async () => {
+        for await (const event of provider(baseURL, { retryPolicy: { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0 } }).stream(request, { signal: controller.signal })) {
+          events.push(event);
+        }
+      }, (error: unknown) => error instanceof AssistantError && error.code === 'CANCELLATION_ERROR');
+      assert.equal(calls, 1);
+      assert.deepEqual(events.map((event) => event.type), ['text_delta']);
+    },
+  );
+});
+
+test('direct provider retries a stream failure before the first visible delta', async () => {
+  let calls = 0;
+  await withRequestServer(
+    (_incoming, response) => {
+      calls += 1;
+      if (calls === 1) {
+        sendJson(response, 500, { error: 'temporary stream failure' });
+        return;
+      }
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.end('data: {"choices":[{"delta":{"content":"recovered"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+    },
+    async (baseURL) => {
+      const events: AIStreamEvent[] = [];
+      for await (const event of provider(baseURL, { retryPolicy: { maxAttempts: 2, baseDelayMs: 0, maxDelayMs: 0 } }).stream(request)) events.push(event);
+      assert.equal(calls, 2);
+      assert.equal(events.find((event) => event.type === 'text_delta')?.delta, 'recovered');
     },
   );
 });

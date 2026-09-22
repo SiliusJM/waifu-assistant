@@ -93,6 +93,8 @@ pueden redirigirse mediante `YUKI_SESSIONS_PATH`. Esta persistencia es
 independiente de `PersistentMemory`, no guarda automáticamente al salir y
 `/clear` solo limpia la `Session` actual; no elimina sesiones guardadas.
 
+Las respuestas interactivas pueden mostrarse progresivamente mediante streaming; la respuesta completa se guarda como un único mensaje de `Session`.
+
 ## Comandos locales
 
 La CLI reconoce `/help`, `/time`, `/calc <expression>`, `/status`, `/history`,
