@@ -1,3 +1,5 @@
+import type { NormalizedUrl } from './url-policy.js';
+
 export const INTERNET_PERMISSION_MODES = ['auto', 'confirm', 'block'] as const;
 export type InternetPermissionMode = (typeof INTERNET_PERMISSION_MODES)[number];
 
@@ -17,7 +19,7 @@ export type InternetLifecycleState = (typeof INTERNET_LIFECYCLE_STATES)[number];
 export interface WebDataProvenance {
   readonly source: 'search' | 'fetch' | 'browser';
   readonly provider: string;
-  readonly sourceUrl: string;
+  readonly sourceUrl: NormalizedUrl;
   readonly fetchedAt: string;
 }
 
@@ -51,7 +53,7 @@ export interface WebSearchRequest {
 
 export interface WebSearchResult {
   readonly title: string;
-  readonly url: string;
+  readonly url: NormalizedUrl;
   readonly snippet: WebData;
 }
 
@@ -72,15 +74,16 @@ export interface WebFetchRequest {
 
 export interface WebContentSnapshot {
   readonly kind: 'content-snapshot';
-  readonly url: string;
-  readonly finalUrl: string;
+  readonly url: NormalizedUrl;
+  readonly finalUrl: NormalizedUrl;
   readonly statusCode: number;
   readonly contentType: string;
   readonly data: WebData;
-  readonly redirects: readonly string[];
+  readonly redirects: readonly NormalizedUrl[];
 }
 
 export interface InternetOperationOptions {
+  /** Direct provider calls may omit this; ToolManager adapters always supply a managed signal. */
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
 }

@@ -14,6 +14,7 @@ import {
   evaluateContentPolicy,
   evaluateRedirect,
   evaluateUrlPolicy,
+  normalizeUrl,
   summarizeWebData,
   transitionInternetLifecycle,
   type ToolAuthorizer,
@@ -24,20 +25,27 @@ const allowAll: ToolAuthorizer = {
   authorize: () => ({ allowed: true, authorization: { source: 'internet-unit-test' } }),
 };
 
-function snapshot(url = 'https://example.com/article'): WebContentSnapshot {
+function snapshot(url = 'https://example.com/article', options: {
+  readonly content?: string;
+  readonly contentType?: string;
+  readonly finalUrl?: string;
+  readonly redirects?: readonly string[];
+} = {}): WebContentSnapshot {
+  const normalizedUrl = normalizeUrl(url);
+  const finalUrl = normalizeUrl(options.finalUrl ?? url);
   return {
     kind: 'content-snapshot',
-    url,
-    finalUrl: url,
+    url: normalizedUrl,
+    finalUrl,
     statusCode: 200,
-    contentType: 'text/plain',
+    contentType: options.contentType ?? 'text/plain',
     data: createWebData({
-      content: 'untrusted article text',
+      content: options.content ?? 'untrusted article text',
       provenance: { source: 'fetch', provider: 'fixture', sourceUrl: url, fetchedAt: '2026-01-01T00:00:00.000Z' },
-      metadata: { contentType: 'text/plain', statusCode: 200 },
+      metadata: { contentType: options.contentType ?? 'text/plain', statusCode: 200 },
       maxBytes: 4096,
     }),
-    redirects: [],
+    redirects: (options.redirects ?? []).map(normalizeUrl),
   };
 }
 
@@ -54,6 +62,7 @@ test('web data is explicitly untrusted, bounded and safely summarized', () => {
   const summary = summarizeWebData(data);
   assert.equal('content' in summary, false);
   assert.equal(summary.observedBytes <= 20, true);
+  assert.equal(summary.sourceUrl, 'https://example.com/');
 });
 
 test('URL policy normalizes allowed URLs and blocks non-web or restricted destinations', () => {
@@ -68,6 +77,43 @@ test('URL policy normalizes allowed URLs and blocks non-web or restricted destin
   assert.equal(evaluateUrlPolicy('http://192.0.2.1/').destination, 'reserved');
   assert.equal(evaluateUrlPolicy('https://rebind.test/', { resolvedAddresses: ['10.0.0.1'] }).allowed, false);
   assert.equal(evaluateUrlPolicy('https://example.com/', { requireResolvedAddress: true }).allowed, false);
+  const mappedDestinations = [
+    ['::ffff:127.0.0.1', 'loopback'],
+    ['::ffff:10.0.0.1', 'private'],
+    ['::ffff:172.16.0.1', 'private'],
+    ['::ffff:192.168.0.1', 'private'],
+    ['::ffff:169.254.0.1', 'link-local'],
+    ['::ffff:224.0.0.1', 'multicast'],
+  ] as const;
+  for (const [address, destination] of mappedDestinations) {
+    assert.equal(evaluateUrlPolicy(`http://[${address}]/`).destination, destination);
+  }
+});
+
+test('web data normalizes provenance URLs, rejects credentials and protects telemetry from queries', () => {
+  const data = createWebData({
+    content: 'safe',
+    provenance: { source: 'fetch', provider: 'test', sourceUrl: 'https://Example.com/path?token=secret#fragment', fetchedAt: '2026-01-01T00:00:00.000Z' },
+    maxBytes: 100,
+  });
+  assert.equal(data.provenance.sourceUrl, 'https://example.com/path?token=secret');
+  assert.equal(summarizeWebData(data).sourceUrl, 'https://example.com/path');
+  assert.throws(
+    () => createWebData({
+      content: 'safe',
+      provenance: { source: 'fetch', provider: 'test', sourceUrl: 'https://user:password@example.com', fetchedAt: '2026-01-01T00:00:00.000Z' },
+      maxBytes: 100,
+    }),
+    (error: unknown) => error instanceof InternetError && error.internetCode === 'INVALID_URL',
+  );
+  assert.throws(
+    () => createWebData({
+      content: 'safe',
+      provenance: { source: 'fetch', provider: 'test', sourceUrl: 'file:///secret', fetchedAt: '2026-01-01T00:00:00.000Z' },
+      maxBytes: 100,
+    }),
+    (error: unknown) => error instanceof InternetError && error.internetCode === 'UNSUPPORTED_SCHEME',
+  );
 });
 
 test('redirect and content policies enforce hops, MIME and size limits', () => {
@@ -127,6 +173,40 @@ test('mock search and fetch providers return normalized deterministic results wi
   );
 });
 
+test('mock fetch enforces byte, MIME, redirect and malformed-result limits', async () => {
+  const large = new MockFetchProvider('large', { snapshots: [snapshot('https://example.com/large', { content: 'x'.repeat(20) })] });
+  await assert.rejects(
+    () => large.fetch({ url: 'https://example.com/large', maxBytes: 10 }),
+    (error: unknown) => error instanceof InternetError && error.internetCode === 'CONTENT_TOO_LARGE',
+  );
+  const mime = new MockFetchProvider('mime', { snapshots: [snapshot('https://example.com/data', { contentType: 'application/octet-stream' })] });
+  await assert.rejects(
+    () => mime.fetch({ url: 'https://example.com/data' }),
+    (error: unknown) => error instanceof InternetError && error.internetCode === 'INVALID_CONTENT',
+  );
+  const explicitlyAllowedMime = await mime.fetch({
+    url: 'https://example.com/data',
+    allowedMimeTypes: ['application/octet-stream'],
+  });
+  assert.equal(explicitlyAllowedMime.contentType, 'application/octet-stream');
+  const redirected = new MockFetchProvider('redirected', {
+    snapshots: [snapshot('https://example.com/start', {
+      redirects: ['https://example.org/one', 'https://example.net/two'],
+    })],
+  });
+  await assert.rejects(
+    () => redirected.fetch({ url: 'https://example.com/start', maxRedirectHops: 1 }),
+    (error: unknown) => error instanceof InternetError && error.internetCode === 'TOO_MANY_REDIRECTS',
+  );
+  const malformed = snapshot('https://example.com/malformed');
+  const invalid = { ...malformed, data: { ...malformed.data, kind: 'unexpected' } } as unknown as WebContentSnapshot;
+  const invalidProvider = new MockFetchProvider('invalid', { snapshots: [invalid] });
+  await assert.rejects(
+    () => invalidProvider.fetch({ url: 'https://example.com/malformed' }),
+    (error: unknown) => error instanceof InternetError && error.internetCode === 'INVALID_CONTENT',
+  );
+});
+
 test('mocks honor cancellation, timeout, unavailable and cleanup paths', async () => {
   const slow = new MockSearchProvider('slow-search', { latencyMs: 50 });
   const controller = new AbortController();
@@ -141,6 +221,19 @@ test('mocks honor cancellation, timeout, unavailable and cleanup paths', async (
     () => new MockSearchProvider('offline', { available: false }).search({ query: 'offline' }),
     (error: unknown) => error instanceof InternetError && error.internetCode === 'PROVIDER_UNAVAILABLE',
   );
+});
+
+test('browser cancellation is cooperative and cleanup still closes the failed page', async () => {
+  const browser = new MockBrowserProvider('slow-browser', { latencyMs: 50 });
+  const session = await browser.createSession();
+  const page = await session.createPage();
+  const controller = new AbortController();
+  const navigation = page.navigate('https://example.com', { signal: controller.signal });
+  controller.abort();
+  await assert.rejects(navigation, (error: unknown) => error instanceof InternetError && error.internetCode === 'CANCELLATION');
+  await session.close();
+  assert.equal(page.state, 'stopped');
+  await browser.shutdown();
 });
 
 test('mock browser exposes bounded session/page lifecycle and enumerated actions', async () => {
@@ -186,4 +279,18 @@ test('internet adapters remain under ToolManager validation and authorization', 
   const timedOut = await slowManager.execute(INTERNET_TOOL_IDS.search, { query: 'slow' }, { timeoutMs: 1 });
   assert.equal(timedOut.status, 'failure');
   if (timedOut.status === 'failure') assert.equal(timedOut.error.code, 'TOOL_TIMEOUT_ERROR');
+});
+
+test('internet adapters expose explicit authorizer denial', async () => {
+  const registry = new ToolRegistry();
+  for (const tool of createInternetTools({ search: new MockSearchProvider(), fetch: new MockFetchProvider('mock-fetch', { snapshots: [snapshot()] }) })) {
+    registry.register(tool);
+  }
+  const manager = new ToolManager({
+    registry,
+    authorizer: { authorize: () => ({ allowed: false, reason: 'internet access denied by test policy' }) },
+  });
+  const result = await manager.execute(INTERNET_TOOL_IDS.fetch, { url: 'https://example.com/article' });
+  assert.equal(result.status, 'failure');
+  if (result.status === 'failure') assert.equal(result.error.code, 'TOOL_PERMISSION_ERROR');
 });

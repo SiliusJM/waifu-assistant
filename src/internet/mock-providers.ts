@@ -1,6 +1,6 @@
 import { InternetError } from './internet-errors.js';
 import { transitionInternetLifecycle } from './lifecycle.js';
-import { evaluateUrlPolicy } from './url-policy.js';
+import { evaluateContentPolicy, evaluateRedirect, evaluateUrlPolicy, normalizeUrl } from './url-policy.js';
 import { createWebData } from './web-data.js';
 import type {
   BrowserAction,
@@ -74,8 +74,65 @@ function ensureAvailable(available: boolean): void {
   if (!available) throw new InternetError('Internet provider is unavailable.', 'PROVIDER_UNAVAILABLE', true);
 }
 
+function throwFetchPolicyError(reason: string): never {
+  switch (reason) {
+    case 'CONTENT_TOO_LARGE': throw new InternetError('Mock fetch content exceeded its limit.', 'CONTENT_TOO_LARGE');
+    case 'TOO_MANY_REDIRECTS': throw new InternetError('Mock fetch exceeded its redirect limit.', 'TOO_MANY_REDIRECTS');
+    case 'BLOCKED_REDIRECT': throw new InternetError('Mock fetch redirect was denied by policy.', 'BLOCKED_REDIRECT');
+    case 'BLOCKED_DESTINATION': throw new InternetError('Mock fetch destination was denied by policy.', 'BLOCKED_DESTINATION');
+    default: throw new InternetError('Mock fetch result was invalid.', 'INVALID_CONTENT');
+  }
+}
+
+function validateSnapshot(value: unknown): WebContentSnapshot {
+  if (typeof value !== 'object' || value === null) {
+    throw new InternetError('Mock fetch result was invalid.', 'INVALID_CONTENT');
+  }
+  const snapshot = value as WebContentSnapshot;
+  const data = snapshot.data;
+  if (snapshot.kind !== 'content-snapshot' || typeof snapshot.url !== 'string'
+    || typeof snapshot.finalUrl !== 'string' || !Number.isInteger(snapshot.statusCode)
+    || typeof snapshot.contentType !== 'string'
+    || !Array.isArray(snapshot.redirects) || typeof data !== 'object' || data === null
+    || data.kind !== 'untrusted-web-data' || data.trust !== 'untrusted'
+    || typeof data.content !== 'string' || typeof data.provenance?.sourceUrl !== 'string'
+    || typeof data.limits !== 'object' || data.limits === null
+    || !Number.isFinite(data.limits.observedBytes)) {
+    throw new InternetError('Mock fetch result was invalid.', 'INVALID_CONTENT');
+  }
+  try {
+    if (normalizeUrl(snapshot.url) !== snapshot.url || normalizeUrl(snapshot.finalUrl) !== snapshot.finalUrl
+      || snapshot.redirects.some((url) => normalizeUrl(url) !== url)
+      || normalizeUrl(snapshot.data.provenance.sourceUrl) !== snapshot.data.provenance.sourceUrl) {
+      throw new InternetError('Mock fetch result was not normalized.', 'INVALID_CONTENT');
+    }
+  } catch (error) {
+    if (error instanceof InternetError) throw error;
+    throw new InternetError('Mock fetch result was invalid.', 'INVALID_CONTENT', false, error);
+  }
+  return snapshot;
+}
+
+function validateSearchResult(value: unknown): WebSearchResult {
+  if (typeof value !== 'object' || value === null) {
+    throw new InternetError('Mock search result was invalid.', 'INVALID_CONTENT');
+  }
+  const result = value as WebSearchResult;
+  const snippet = result.snippet;
+  if (typeof result.title !== 'string' || !result.title
+    || typeof result.url !== 'string' || normalizeUrl(result.url) !== result.url
+    || typeof snippet !== 'object' || snippet === null
+    || snippet.kind !== 'untrusted-web-data'
+    || snippet.trust !== 'untrusted'
+    || typeof snippet.provenance?.sourceUrl !== 'string'
+    || normalizeUrl(snippet.provenance.sourceUrl) !== snippet.provenance.sourceUrl) {
+    throw new InternetError('Mock search result was invalid.', 'INVALID_CONTENT');
+  }
+  return result;
+}
+
 function defaultSearchResults(provider: string, query: string): readonly WebSearchResult[] {
-  const url = `https://example.invalid/search?q=${encodeURIComponent(query)}`;
+  const url = normalizeUrl(`https://example.invalid/search?q=${encodeURIComponent(query)}`);
   return [{
     title: `Mock result for ${query}`,
     url,
@@ -112,6 +169,7 @@ export class MockSearchProvider implements WebSearchProvider {
     }
     await waitForOperation(options, this.latencyMs);
     const results = this.results ?? defaultSearchResults(this.id, request.query);
+    for (const result of results) validateSearchResult(result);
     return { kind: 'search-response', items: results.slice(0, maxResults), provider: this.id, completedAt: MOCK_TIMESTAMP };
   }
 }
@@ -143,7 +201,27 @@ export class MockFetchProvider implements WebFetchProvider {
     await waitForOperation(options, this.latencyMs);
     const snapshot = this.snapshots.get(policy.normalizedUrl);
     if (!snapshot) throw new InternetError('Mock fetch result is unavailable.', 'PROVIDER_UNAVAILABLE');
-    return snapshot;
+    const validated = validateSnapshot(snapshot);
+    let previousUrl = policy.normalizedUrl;
+    for (const [index, redirectUrl] of validated.redirects.entries()) {
+      const redirect = evaluateRedirect(previousUrl, redirectUrl, index, {
+        maxRedirectHops: request.maxRedirectHops,
+        resolvedAddresses: request.resolvedAddresses,
+      });
+      if (!redirect.allowed) throwFetchPolicyError(redirect.reason ?? 'BLOCKED_REDIRECT');
+      previousUrl = redirectUrl;
+    }
+    const finalPolicy = evaluateUrlPolicy(validated.finalUrl, {
+      resolvedAddresses: request.resolvedAddresses,
+      requireResolvedAddress: false,
+    });
+    if (!finalPolicy.allowed) throwFetchPolicyError('BLOCKED_DESTINATION');
+    const content = evaluateContentPolicy(validated.contentType, validated.data.limits.observedBytes, {
+      maxBytes: request.maxBytes,
+      allowedMimeTypes: request.allowedMimeTypes,
+    });
+    if (!content.allowed) throwFetchPolicyError(content.reason ?? 'INVALID_CONTENT');
+    return validated;
   }
 }
 
@@ -232,7 +310,7 @@ class MockBrowserSession implements BrowserSession {
 }
 
 function defaultSnapshot(provider: string): WebContentSnapshot {
-  const url = 'https://example.invalid/mock';
+  const url = normalizeUrl('https://example.invalid/mock');
   return {
     kind: 'content-snapshot',
     url,

@@ -22,9 +22,12 @@ export interface UrlPolicyOptions {
   readonly requireResolvedAddress?: boolean;
 }
 
+declare const normalizedUrlBrand: unique symbol;
+export type NormalizedUrl = string & { readonly [normalizedUrlBrand]: true };
+
 export interface UrlPolicyDecision {
   readonly allowed: boolean;
-  readonly normalizedUrl?: string;
+  readonly normalizedUrl?: NormalizedUrl;
   readonly scheme?: string;
   readonly destination?: DestinationKind;
   readonly reason?: string;
@@ -72,9 +75,52 @@ function ipv4Kind(parts: readonly number[]): DestinationKind {
   return 'public';
 }
 
+function parseIpv6Groups(value: string): readonly number[] | undefined {
+  const host = value.toLowerCase().replace(/^\[|\]$/g, '');
+  if (!host.includes(':')) return undefined;
+  const halves = host.split('::');
+  if (halves.length > 2) return undefined;
+  const expand = (half: string): number[] | undefined => {
+    if (!half) return [];
+    const parts = half.split(':');
+    const output: number[] = [];
+    for (const part of parts) {
+      if (part.includes('.')) {
+        const ipv4 = parseIpv4(part);
+        if (!ipv4 || part !== parts[parts.length - 1]) return undefined;
+        output.push((ipv4[0] ?? 0) * 256 + (ipv4[1] ?? 0));
+        output.push((ipv4[2] ?? 0) * 256 + (ipv4[3] ?? 0));
+      } else if (/^[0-9a-f]{1,4}$/.test(part)) {
+        output.push(Number.parseInt(part, 16));
+      } else {
+        return undefined;
+      }
+    }
+    return output;
+  };
+  const left = expand(halves[0] ?? '');
+  const right = expand(halves[1] ?? '');
+  if (!left || !right) return undefined;
+  const missing = 8 - left.length - right.length;
+  if (missing < 0 || (halves.length === 1 && missing !== 0)) return undefined;
+  return [...left, ...Array.from({ length: missing }, () => 0), ...right];
+}
+
+function mappedIpv4Kind(value: string): DestinationKind | undefined {
+  const groups = parseIpv6Groups(value);
+  if (!groups || groups.length !== 8 || groups.slice(0, 5).some((group) => group !== 0) || groups[5] !== 0xffff) {
+    return undefined;
+  }
+  const first = groups[6] ?? 0;
+  const second = groups[7] ?? 0;
+  return ipv4Kind([first >> 8, first & 0xff, second >> 8, second & 0xff]);
+}
+
 function ipv6Kind(value: string): DestinationKind | undefined {
   const host = value.toLowerCase().replace(/^\[|\]$/g, '');
   if (!host.includes(':')) return undefined;
+  const mappedKind = mappedIpv4Kind(host);
+  if (mappedKind) return mappedKind;
   if (host === '::1') return 'loopback';
   if (host.startsWith('ff')) return 'multicast';
   if (host.startsWith('fe8') || host.startsWith('fe9') || host.startsWith('fea') || host.startsWith('feb')) {
@@ -102,7 +148,7 @@ function isRestricted(kind: DestinationKind): boolean {
   return kind !== 'public' && kind !== 'hostname';
 }
 
-export function normalizeUrl(input: string): string {
+export function normalizeUrl(input: string): NormalizedUrl {
   if (typeof input !== 'string' || !input.trim()) {
     throw new InternetError('URL is invalid.', 'INVALID_URL');
   }
@@ -119,7 +165,7 @@ export function normalizeUrl(input: string): string {
     throw new InternetError('URL credentials are not allowed.', 'INVALID_URL');
   }
   url.hash = '';
-  return url.toString();
+  return url.toString() as NormalizedUrl;
 }
 
 export function evaluateUrlPolicy(input: string, options: UrlPolicyOptions = {}): UrlPolicyDecision {
