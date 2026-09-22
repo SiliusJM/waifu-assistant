@@ -14,6 +14,8 @@ import type { ToolManager } from '../tools/tool-manager.js';
 import { LLM_TOOL_CALL_AUTHORIZATION_SOURCE } from '../tools/tool-types.js';
 import type { ToolResult } from '../tools/tool-types.js';
 
+const MAX_TOOL_ARGUMENTS_JSON_LENGTH = 4096;
+
 export interface AssistantCoreOptions {
   readonly provider: AIProvider;
   readonly logger?: Logger;
@@ -194,6 +196,10 @@ export class AssistantCore {
         continue;
       }
       let argumentsValue: unknown;
+      if (toolCall.argumentsJson.length > MAX_TOOL_ARGUMENTS_JSON_LENGTH) {
+        toolMessages.push(this.toolFailureMessage(toolCall, 'TOOL_ARGUMENTS_ERROR', 'The tool arguments are too large.'));
+        continue;
+      }
       try {
         argumentsValue = JSON.parse(toolCall.argumentsJson) as unknown;
       } catch {

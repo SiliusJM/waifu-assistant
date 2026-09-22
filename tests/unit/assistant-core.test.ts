@@ -180,6 +180,64 @@ test('assistant core rejects invalid tool JSON without evaluating it', async () 
   assert.match(requests[1]?.messages.at(-1)?.content ?? '', /TOOL_ARGUMENTS_ERROR/);
 });
 
+test('assistant core rejects invalid tool arguments through the ToolManager', async () => {
+  const requests: AIRequest[] = [];
+  let calls = 0;
+  const provider = new MockAIProvider({
+    responder: async (request) => {
+      requests.push(request);
+      calls += 1;
+      return calls === 1
+        ? toolResponse('local_calculate', '{}')
+        : {
+          text: 'The arguments were rejected.',
+          provider: 'mock',
+          model: 'mock-model',
+          finishReason: 'stop' as const,
+        };
+    },
+  });
+  const core = new AssistantCore({
+    provider,
+    toolManager: createLocalToolManager(),
+    toolAllowlist: LOCAL_TOOL_ALLOWLIST,
+  });
+
+  await core.respond(core.createSession(), 'Calculate this.');
+
+  assert.equal(calls, 2);
+  assert.match(requests[1]?.messages.at(-1)?.content ?? '', /TOOL_ARGUMENTS_ERROR/);
+});
+
+test('assistant core rejects oversized tool arguments before JSON parsing', async () => {
+  const requests: AIRequest[] = [];
+  let calls = 0;
+  const provider = new MockAIProvider({
+    responder: async (request) => {
+      requests.push(request);
+      calls += 1;
+      return calls === 1
+        ? toolResponse('local_time', 'x'.repeat(4097))
+        : {
+          text: 'The arguments were too large.',
+          provider: 'mock',
+          model: 'mock-model',
+          finishReason: 'stop' as const,
+        };
+    },
+  });
+  const core = new AssistantCore({
+    provider,
+    toolManager: createLocalToolManager(),
+    toolAllowlist: LOCAL_TOOL_ALLOWLIST,
+  });
+
+  await core.respond(core.createSession(), 'Use time.');
+
+  assert.equal(calls, 2);
+  assert.match(requests[1]?.messages.at(-1)?.content ?? '', /TOOL_ARGUMENTS_ERROR/);
+});
+
 test('assistant core permits at most two tool calls in one round and never recurses', async () => {
   let calls = 0;
   const provider = new MockAIProvider({
