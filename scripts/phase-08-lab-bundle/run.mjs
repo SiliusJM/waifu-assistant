@@ -1,7 +1,9 @@
+import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
 
 const toolPath = fileURLToPath(import.meta.url);
 const repositoryRoot = resolve(dirname(toolPath), '..', '..');
@@ -39,6 +41,7 @@ Commands:
   prepare       Create an integrity-checked run bundle and initial manifest.
   preflight     Validate readiness declarations without executing VMs.
   advance       Advance lifecycle: execute, collect, validate, cleanup, final-manifest.
+  self-test     Run deterministic marker/artifact validation tests in a temporary directory.
 
 Prepare options:
   --output-root <dir>       Existing or new directory outside the repository.
@@ -315,6 +318,7 @@ async function prepare(values) {
       'Readiness marker files are declarations from the dedicated laboratory, not evidence produced by this preparation command.',
       'The classifier and production source are copied for reference only and are never modified by this tool.',
       'Source copies are integrity-checked; lifecycle manifests remain intentionally mutable and are not filesystem read-only.',
+      'Readiness artifact SHA-256 values provide integrity and run correlation, not cryptographic authenticity of the producing operator or lab.',
       'Cleanup verification is inventory-based; missing, limited or failed cleanup inventory blocks finalization.',
     ],
   };
@@ -332,32 +336,128 @@ function assertReadyMarker(marker, manifest, source, kind) {
   assertRunId(marker.runId, manifest, `${source}/${kind}`);
 }
 
+function assertNonEmptyString(value, label) {
+  if (typeof value !== 'string' || value.trim() === '') throw new Error(`${label} must be a non-empty string`);
+}
+
 function assertIso(value, label) {
   if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) throw new Error(`${label} must be an ISO timestamp`);
 }
 
-function validateClockMarker(marker, manifest) {
-  assertReadyMarker(marker, manifest, 'host', 'clock-reference');
-  if (marker.fresh !== true) throw new Error('clock-reference is not fresh');
-  assertIso(marker.observedAt, 'clock-reference.observedAt');
-  assertIso(marker.gatewayUtc, 'clock-reference.gatewayUtc');
-  assertIso(marker.browserUtc, 'clock-reference.browserUtc');
-  if (!Number.isSafeInteger(marker.maxOffsetMs) || marker.maxOffsetMs < 0) throw new Error('clock-reference.maxOffsetMs is invalid');
-  const age = Date.now() - Date.parse(marker.observedAt);
-  if (age < 0 || age > manifest.policy.maxClockAgeMs) throw new Error('clock-reference is outside the configured freshness window');
+function validateFreshness(observedAt, manifest, label) {
+  assertIso(observedAt, `${label}.observedAt`);
+  const ageMs = Date.now() - Date.parse(observedAt);
+  if (ageMs < 0 || ageMs > manifest.policy.maxClockAgeMs) throw new Error(`${label}.observedAt is outside the configured freshness window`);
+  return { status: 'PASS', observedAt, ageMs, maxAgeMs: manifest.policy.maxClockAgeMs };
 }
 
-function validateCounterMarker(marker, manifest) {
-  assertReadyMarker(marker, manifest, 'gateway', 'counters-before');
-  if (marker.captured !== true) throw new Error('counters-before is not captured');
-  if (!Number.isSafeInteger(marker.packetsBefore) || marker.packetsBefore < 0) throw new Error('packetsBefore is invalid');
-  if (!Number.isSafeInteger(marker.bytesBefore) || marker.bytesBefore < 0) throw new Error('bytesBefore is invalid');
-  assertIso(marker.observedAt, 'counters-before.observedAt');
+function validateOutputContract(value, fields, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} is invalid`);
+  for (const field of fields) assertNonEmptyString(value[field], `${label}.${field}`);
 }
 
-function validateReadinessMarker(marker, manifest, source, kind, predicate) {
+function validateArtifactContract(artifact, source, kind) {
+  if (kind === 'clock-reference') {
+    assertNonEmptyString(artifact.producer, 'clock-reference.producer');
+    assertIso(artifact.gatewayUtc, 'clock-reference.gatewayUtc');
+    assertIso(artifact.browserUtc, 'clock-reference.browserUtc');
+    if (!Number.isSafeInteger(artifact.maxOffsetMs) || artifact.maxOffsetMs < 0) throw new Error('clock-reference.maxOffsetMs is invalid');
+    return { contract: 'clock-reference', producer: artifact.producer };
+  }
+  if (kind === 'counters-before') {
+    if (!Number.isSafeInteger(artifact.packetsBefore) || artifact.packetsBefore < 0) throw new Error('counters-before.packetsBefore is invalid');
+    if (!Number.isSafeInteger(artifact.bytesBefore) || artifact.bytesBefore < 0) throw new Error('counters-before.bytesBefore is invalid');
+    assertNonEmptyString(artifact.counter, 'counters-before.counter');
+    return { contract: 'counters-before', counter: artifact.counter };
+  }
+  if (kind === 'dns-formal') {
+    if (artifact.formal !== true || artifact.canExportSequence !== true) throw new Error('dns-formal capability is invalid');
+    assertNonEmptyString(artifact.dnsSource, 'dns-formal.dnsSource');
+    validateOutputContract(artifact.outputContract, ['sequence', 'observedAt', 'address'], 'dns-formal.outputContract');
+    return { contract: 'dns-formal', dnsSource: artifact.dnsSource };
+  }
+  if (kind === 'egress-formal') {
+    if (artifact.differential !== true) throw new Error('egress-formal.differential is not true');
+    assertNonEmptyString(artifact.counterSource, 'egress-formal.counterSource');
+    assertNonEmptyString(artifact.destination, 'egress-formal.destination');
+    validateOutputContract(artifact.outputContract, ['before', 'after', 'delta'], 'egress-formal.outputContract');
+    return { contract: 'egress-formal', counterSource: artifact.counterSource };
+  }
+  if (kind === 'internal-hits') {
+    if (artifact.independent !== true) throw new Error('internal-hits.independent is not true');
+    assertNonEmptyString(artifact.measurementMethod, 'internal-hits.measurementMethod');
+    if (!artifact.result || typeof artifact.result !== 'object' || Array.isArray(artifact.result)) throw new Error('internal-hits.result is invalid');
+    if (!Number.isSafeInteger(artifact.result.internalHits) || artifact.result.internalHits < 0) throw new Error('internal-hits.result.internalHits is invalid');
+    return { contract: 'internal-hits', measurementMethod: artifact.measurementMethod };
+  }
+  if (kind === 'rollback') {
+    assertNonEmptyString(artifact.snapshotId, 'rollback.snapshotId');
+    assertNonEmptyString(artifact.provider, 'rollback.provider');
+    assertNonEmptyString(artifact.scope, 'rollback.scope');
+    assertIso(artifact.createdAt, 'rollback.createdAt');
+    assertNonEmptyString(artifact.reversibilityEvidence, 'rollback.reversibilityEvidence');
+    return { contract: 'rollback', snapshotId: artifact.snapshotId };
+  }
+  if (kind === 'fixture-isolation') {
+    assertNonEmptyString(artifact.topology, 'fixture-isolation.topology');
+    assertNonEmptyString(artifact.verificationMethod, 'fixture-isolation.verificationMethod');
+    if (artifact.browserToFixtureDirectRoute !== false) throw new Error('fixture-isolation direct route is not false');
+    return { contract: 'fixture-isolation', topology: artifact.topology };
+  }
+  throw new Error(`Unsupported readiness artifact kind: ${source}/${kind}`);
+}
+
+async function validateArtifactBackedMarker(bundleRoot, manifest, markerRelativePath, source, kind) {
+  const marker = await readJson(relativeArtifactPath(bundleRoot, markerRelativePath));
   assertReadyMarker(marker, manifest, source, kind);
-  if (!predicate(marker)) throw new Error(`${source}/${kind} does not satisfy its readiness contract`);
+  if (marker.source !== source) throw new Error(`${source}/${kind}.source mismatch`);
+  if (marker.kind !== kind) throw new Error(`${source}/${kind}.kind mismatch`);
+  assertIso(marker.observedAt, `${source}/${kind}.observedAt`);
+  if (!marker.artifact || typeof marker.artifact !== 'object' || Array.isArray(marker.artifact)) throw new Error(`${source}/${kind}.artifact is invalid`);
+  assertNonEmptyString(marker.artifact.id, `${source}/${kind}.artifact.id`);
+  assertNonEmptyString(marker.artifact.path, `${source}/${kind}.artifact.path`);
+  if (!/^[a-f0-9]{64}$/i.test(marker.artifact.sha256 ?? '')) throw new Error(`${source}/${kind}.artifact.sha256 is invalid`);
+  if (isAbsolute(marker.artifact.path)) throw new Error(`${source}/${kind}.artifact.path must be relative`);
+
+  const artifactPath = resolve(bundleRoot, marker.artifact.path);
+  const sourceRoot = resolve(bundleRoot, source);
+  const markerPath = resolve(bundleRoot, markerRelativePath);
+  if (!isWithin(artifactPath, bundleRoot) || !isWithin(artifactPath, sourceRoot)) throw new Error(`${source}/${kind}.artifact.path is outside the expected source directory`);
+  if (artifactPath === markerPath) throw new Error(`${source}/${kind}.artifact.path points to its own marker`);
+  if (!(await exists(artifactPath))) throw new Error(`${source}/${kind}.artifact.path does not exist`);
+  const [realBundleRoot, realSourceRoot, realArtifactPath, realMarkerPath] = await Promise.all([
+    realpath(bundleRoot),
+    realpath(sourceRoot),
+    realpath(artifactPath),
+    realpath(markerPath),
+  ]);
+  if (!isWithin(realArtifactPath, realBundleRoot) || !isWithin(realArtifactPath, realSourceRoot)) throw new Error(`${source}/${kind}.artifact.path resolves outside the expected source directory`);
+  if (realArtifactPath === realMarkerPath) throw new Error(`${source}/${kind}.artifact.path resolves to its own marker`);
+
+  const actualSha256 = await sha256(artifactPath);
+  if (actualSha256 !== marker.artifact.sha256.toLowerCase()) throw new Error(`${source}/${kind}.artifact.sha256 mismatch`);
+  const artifact = await readJson(artifactPath);
+  if (artifact.schemaVersion !== 1) throw new Error(`${source}/${kind} artifact schemaVersion is invalid`);
+  assertRunId(artifact.runId, manifest, `${source}/${kind} artifact`);
+  if (artifact.source !== source) throw new Error(`${source}/${kind} artifact.source mismatch`);
+  if (artifact.kind !== kind) throw new Error(`${source}/${kind} artifact.kind mismatch`);
+  if (artifact.status !== 'PASS') throw new Error(`${source}/${kind} artifact.status must be PASS`);
+  assertIso(artifact.observedAt, `${source}/${kind} artifact.observedAt`);
+  if (marker.runId !== artifact.runId) throw new Error(`${source}/${kind} marker/artifact runId mismatch`);
+  if (marker.source !== artifact.source) throw new Error(`${source}/${kind} marker/artifact source mismatch`);
+  if (marker.kind !== artifact.kind) throw new Error(`${source}/${kind} marker/artifact kind mismatch`);
+  if (marker.observedAt !== artifact.observedAt) throw new Error(`${source}/${kind} marker/artifact observedAt mismatch`);
+
+  const freshness = validateFreshness(artifact.observedAt, manifest, `${source}/${kind} artifact`);
+  const contract = validateArtifactContract(artifact, source, kind);
+  return {
+    marker: toPosixPath(markerRelativePath),
+    artifactPath: toPosixPath(relative(bundleRoot, artifactPath)),
+    artifactSha256: actualSha256,
+    artifactStatus: artifact.status,
+    freshness,
+    validations: contract,
+  };
 }
 
 async function runPreflight(bundleRoot, manifest) {
@@ -365,8 +465,8 @@ async function runPreflight(bundleRoot, manifest) {
   const missing = [];
   const check = async (name, action) => {
     try {
-      await action();
-      checks.push({ name, status: 'PASS' });
+      const details = await action();
+      checks.push({ name, status: 'PASS', ...(details ?? {}) });
     } catch (error) {
       checks.push({ name, status: 'FAIL', reason: error.message });
       missing.push(name);
@@ -381,23 +481,20 @@ async function runPreflight(bundleRoot, manifest) {
   }
   const readiness = manifest.layout.readiness;
   const markerEntries = [
-    ['fresh clocks', readiness.clockReference, 'host', 'clock-reference', validateClockMarker],
-    ['egress counters before', readiness.countersBefore, 'gateway', 'counters-before', validateCounterMarker],
-    ['formal DNS capability', readiness.dnsFormal, 'gateway', 'dns-formal', (marker) => marker.formal === true && marker.canExportSequence === true],
-    ['formal egress capability', readiness.egressFormal, 'gateway', 'egress-formal', (marker) => marker.formal === true && marker.differential === true && marker.canExportDelta === true],
-    ['independent internalHits fixture', readiness.internalHits, 'fixture', 'internal-hits', (marker) => marker.independent === true && marker.canMeasure === true],
-    ['rollback snapshot', readiness.rollback, 'host', 'rollback', (marker) => marker.reversible === true && typeof marker.snapshotId === 'string' && marker.snapshotId.length > 0],
-    ['Browser to Fixture isolation', readiness.browserFixtureIsolation, 'browser', 'fixture-isolation', (marker) => marker.verified === true && marker.browserToFixtureDirectRoute === false],
+    ['fresh clocks', readiness.clockReference, 'host', 'clock-reference'],
+    ['egress counters before', readiness.countersBefore, 'gateway', 'counters-before'],
+    ['formal DNS capability', readiness.dnsFormal, 'gateway', 'dns-formal'],
+    ['formal egress capability', readiness.egressFormal, 'gateway', 'egress-formal'],
+    ['independent internalHits fixture', readiness.internalHits, 'fixture', 'internal-hits'],
+    ['rollback snapshot', readiness.rollback, 'host', 'rollback'],
+    ['Browser to Fixture isolation', readiness.browserFixtureIsolation, 'browser', 'fixture-isolation'],
   ];
 
-  for (const [name, relativePath, source, kind, predicate] of markerEntries) {
+  for (const [name, relativePath, source, kind] of markerEntries) {
     await check(name, async () => {
       const path = relativeArtifactPath(bundleRoot, relativePath);
       if (!(await exists(path))) throw new Error(`missing ${relativePath}`);
-      const marker = await readJson(path);
-      if (kind === 'clock-reference') validateClockMarker(marker, manifest);
-      else if (kind === 'counters-before') validateCounterMarker(marker, manifest);
-      else validateReadinessMarker(marker, manifest, source, kind, predicate);
+      return validateArtifactBackedMarker(bundleRoot, manifest, relativePath, source, kind);
     });
   }
 
@@ -513,6 +610,189 @@ async function preflight(values) {
   await writeCurrentManifest(bundleRoot, manifest);
 }
 
+function selfTestArtifact(runId, source, kind, observedAt) {
+  const artifact = {
+    schemaVersion: 1,
+    runId,
+    source,
+    kind,
+    status: 'PASS',
+    observedAt,
+    producer: 'phase-08-lab-bundle-self-test',
+  };
+  if (kind === 'clock-reference') Object.assign(artifact, { gatewayUtc: observedAt, browserUtc: observedAt, maxOffsetMs: 1 });
+  if (kind === 'counters-before') Object.assign(artifact, { packetsBefore: 1, bytesBefore: 2, counter: 'self-test-counter' });
+  if (kind === 'dns-formal') Object.assign(artifact, {
+    formal: true,
+    canExportSequence: true,
+    dnsSource: 'self-test-dns',
+    outputContract: { sequence: 'sequence', observedAt: 'observedAt', address: 'address' },
+  });
+  if (kind === 'egress-formal') Object.assign(artifact, {
+    differential: true,
+    counterSource: 'self-test-counter',
+    destination: 'self-test-destination',
+    outputContract: { before: 'before', after: 'after', delta: 'delta' },
+  });
+  if (kind === 'internal-hits') Object.assign(artifact, {
+    independent: true,
+    measurementMethod: 'self-test-fixture-counter',
+    result: { internalHits: 0 },
+  });
+  if (kind === 'rollback') Object.assign(artifact, {
+    snapshotId: `${runId}-snapshot`,
+    provider: 'self-test-snapshot-provider',
+    scope: 'self-test-bundle',
+    createdAt: observedAt,
+    reversibilityEvidence: 'self-test-reversibility-record',
+  });
+  if (kind === 'fixture-isolation') Object.assign(artifact, {
+    topology: 'self-test-topology',
+    verificationMethod: 'self-test-route-record',
+    browserToFixtureDirectRoute: false,
+  });
+  return artifact;
+}
+
+async function createSelfTestBundle(bundleRoot) {
+  const runId = 'phase08-self-test-run';
+  const layout = buildLayout(runId);
+  const observedAt = new Date().toISOString();
+  const manifest = {
+    schemaVersion: 1,
+    runId,
+    state: 'PREPARED',
+    createdAt: observedAt,
+    updatedAt: observedAt,
+    scriptHashes: {},
+    config: { topology: 'self-test-topology', directBrowserFixtureRoute: false },
+    policy: { maxClockAgeMs: 120_000 },
+    layout,
+    preflight: { status: 'PENDING', checks: [], missing: [] },
+    validation: { status: 'PENDING', checks: [], missing: [] },
+    cleanup: { status: 'PENDING', checks: [], missing: [] },
+    lifecycle: [{ state: 'PREPARED', at: observedAt }],
+  };
+  await createDirectories(bundleRoot, layout);
+  for (const [name, markerRelativePath, source, kind] of [
+    ['clockReference', layout.readiness.clockReference, 'host', 'clock-reference'],
+    ['countersBefore', layout.readiness.countersBefore, 'gateway', 'counters-before'],
+    ['dnsFormal', layout.readiness.dnsFormal, 'gateway', 'dns-formal'],
+    ['egressFormal', layout.readiness.egressFormal, 'gateway', 'egress-formal'],
+    ['internalHits', layout.readiness.internalHits, 'fixture', 'internal-hits'],
+    ['rollback', layout.readiness.rollback, 'host', 'rollback'],
+    ['browserFixtureIsolation', layout.readiness.browserFixtureIsolation, 'browser', 'fixture-isolation'],
+  ]) {
+    const artifactRelativePath = `${source}/input/${runId}.${source}.${kind}.json`;
+    const artifact = selfTestArtifact(runId, source, kind, observedAt);
+    await writeJson(join(bundleRoot, artifactRelativePath), artifact);
+    const marker = {
+      schemaVersion: 1,
+      runId,
+      ready: true,
+      source,
+      kind,
+      observedAt,
+      artifact: {
+        id: `${runId}-${source}-${kind}`,
+        path: artifactRelativePath,
+        sha256: await sha256(join(bundleRoot, artifactRelativePath)),
+      },
+    };
+    await writeJson(join(bundleRoot, markerRelativePath), marker);
+    manifest.layout.readiness[name] = markerRelativePath;
+  }
+  await writeCurrentManifest(bundleRoot, manifest);
+  return { runId, manifest };
+}
+
+async function mutateSelfTestArtifact(bundleRoot, manifest, source, kind, mutate, updateMarkerHash = true) {
+  const markerRelativePath = manifest.layout.readiness[{
+    'clock-reference': 'clockReference',
+    'counters-before': 'countersBefore',
+    'dns-formal': 'dnsFormal',
+    'egress-formal': 'egressFormal',
+    'internal-hits': 'internalHits',
+    rollback: 'rollback',
+    'fixture-isolation': 'browserFixtureIsolation',
+  }[kind]];
+  const markerPath = join(bundleRoot, markerRelativePath);
+  const marker = await readJson(markerPath);
+  const artifactPath = join(bundleRoot, marker.artifact.path);
+  const artifact = await readJson(artifactPath);
+  await mutate(artifact, marker);
+  await writeJson(artifactPath, artifact);
+  if (updateMarkerHash) marker.artifact.sha256 = await sha256(artifactPath);
+  await writeJson(markerPath, marker);
+}
+
+async function runSelfTestCase(parent, name, mutate, expectedReady) {
+  const bundleRoot = join(parent, name);
+  const { manifest } = await createSelfTestBundle(bundleRoot);
+  if (mutate) await mutate(bundleRoot, manifest);
+  const ready = await runPreflight(bundleRoot, manifest);
+  assert.equal(ready, expectedReady, `${name} readiness mismatch`);
+  if (ready) {
+    updateLifecycle(manifest, 'PREFLIGHT_READY');
+    await writeCurrentManifest(bundleRoot, manifest);
+    assert.equal(manifest.state, 'PREFLIGHT_READY');
+  }
+  return { name, status: expectedReady ? 'PASS' : 'BLOCKED' };
+}
+
+async function selfTest() {
+  const root = await mkdtemp(join(tmpdir(), 'phase08-lab-bundle-self-test-'));
+  const results = [];
+  try {
+    results.push(await runSelfTestCase(root, 'valid', null, true));
+    results.push(await runSelfTestCase(root, 'hash-mismatch', async (bundleRoot, manifest) => {
+      await mutateSelfTestArtifact(bundleRoot, manifest, 'gateway', 'dns-formal', async (_artifact, marker) => {
+        marker.artifact.sha256 = '0'.repeat(64);
+      }, false);
+    }, false));
+    results.push(await runSelfTestCase(root, 'path-outside-bundle', async (bundleRoot, manifest) => {
+      await mutateSelfTestArtifact(bundleRoot, manifest, 'host', 'clock-reference', async (_artifact, marker) => {
+        marker.artifact.path = '../outside.json';
+      }, false);
+    }, false));
+    results.push(await runSelfTestCase(root, 'artifact-absent', async (bundleRoot, manifest) => {
+      await mutateSelfTestArtifact(bundleRoot, manifest, 'gateway', 'egress-formal', async (_artifact, marker) => {
+        marker.artifact.path = 'gateway/input/missing.json';
+      }, false);
+    }, false));
+    results.push(await runSelfTestCase(root, 'run-id-mismatch', async (bundleRoot, manifest) => {
+      await mutateSelfTestArtifact(bundleRoot, manifest, 'fixture', 'internal-hits', async (artifact) => {
+        artifact.runId = 'other-run';
+      });
+    }, false));
+    results.push(await runSelfTestCase(root, 'stale-artifact', async (bundleRoot, manifest) => {
+      await mutateSelfTestArtifact(bundleRoot, manifest, 'host', 'clock-reference', async (artifact) => {
+        const stale = new Date(Date.now() - 121_000).toISOString();
+        artifact.observedAt = stale;
+        artifact.gatewayUtc = stale;
+        artifact.browserUtc = stale;
+      });
+      const markerPath = join(bundleRoot, manifest.layout.readiness.clockReference);
+      const marker = await readJson(markerPath);
+      marker.observedAt = (await readJson(join(bundleRoot, marker.artifact.path))).observedAt;
+      await writeJson(markerPath, marker);
+    }, false));
+    results.push(await runSelfTestCase(root, 'schema-invalid', async (bundleRoot, manifest) => {
+      await mutateSelfTestArtifact(bundleRoot, manifest, 'browser', 'fixture-isolation', async (artifact) => {
+        artifact.schemaVersion = 2;
+      });
+    }, false));
+    results.push(await runSelfTestCase(root, 'marker-self-reference', async (bundleRoot, manifest) => {
+      await mutateSelfTestArtifact(bundleRoot, manifest, 'host', 'rollback', async (_artifact, marker) => {
+        marker.artifact.path = manifest.layout.readiness.rollback;
+      }, false);
+    }, false));
+    console.log(JSON.stringify({ status: 'PASS', cases: results }, null, 2));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.command === 'help') {
@@ -522,6 +802,7 @@ async function main() {
   if (options.command === 'prepare') await prepare(options.values);
   else if (options.command === 'preflight') await preflight(options.values);
   else if (options.command === 'advance') await advance(options.values);
+  else if (options.command === 'self-test') await selfTest();
   else throw new Error(`Unknown command: ${options.command}`);
 }
 
