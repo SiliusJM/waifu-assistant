@@ -6,7 +6,7 @@
 
 Base auditada: `origin/main` en `9be8bed48dee0aa46ddc1bc93c8007a2bd62c92b`.
 
-ADR-012 continúa provisional / `decision-gate`. Esta etapa no implementa `WebSearchProvider`, `WebFetchProvider` ni `BrowserProvider`, no selecciona arquitectura productiva y no avanza a Phase 9.
+ADR-012 continúa provisional / `decision-gate`. Esta etapa no implementa `WebSearchProvider`, `WebFetchProvider` ni `BrowserProvider`, no selecciona arquitectura productiva y permanece dentro del alcance de Phase 8.
 
 ## 1. Alcance de la auditoría
 
