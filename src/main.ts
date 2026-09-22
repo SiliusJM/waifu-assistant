@@ -4,6 +4,8 @@ import { AssistantCore } from './core/assistant-core.js';
 import { ConversationRunner } from './core/conversation-runner.js';
 import { createAIProvider } from './config/provider-factory.js';
 import { loadConfig } from './config/config.js';
+import { PersonalityCompiler } from './personality/personality-compiler.js';
+import { PersonalityRegistry } from './personality/personality-registry.js';
 import { AssistantError } from './shared/errors.js';
 import { createLogger } from './shared/logger.js';
 
@@ -26,8 +28,11 @@ export async function main(
     provider: createAIProvider(config),
     logger,
   });
+  const personality = new PersonalityCompiler().compile({
+    profile: new PersonalityRegistry().defaultProfile,
+  });
   if (!interactive) {
-    const response = await core.respond(core.createSession(), input);
+    const response = await core.respond(core.createSession(), input, { personality });
     process.stdout.write(response.text + '\n');
     return;
   }
@@ -40,6 +45,7 @@ export async function main(
     const runner = new ConversationRunner(core);
     await runner.run(terminal, {
       signal: controller.signal,
+      personality,
       onResponse: (response): void => { process.stdout.write(response.text + '\n'); },
     });
   } finally {

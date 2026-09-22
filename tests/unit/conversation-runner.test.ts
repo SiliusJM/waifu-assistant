@@ -4,6 +4,9 @@ import { MockAIProvider } from '../../src/ai/mock-ai-provider.js';
 import { AssistantCore } from '../../src/core/assistant-core.js';
 import { ConversationRunner } from '../../src/core/conversation-runner.js';
 import { Session } from '../../src/core/session.js';
+import { DEFAULT_PERSONALITY_PROFILE } from '../../src/personality/default-profile.js';
+import { PersonalityCompiler } from '../../src/personality/personality-compiler.js';
+import { PersonalityRegistry } from '../../src/personality/personality-registry.js';
 
 async function* inputs(values: readonly string[]): AsyncIterable<string> {
   yield* values;
@@ -43,6 +46,42 @@ test('conversation runner reuses one session and preserves multi-turn order', as
     { role: 'user', content: 'two' },
     { role: 'assistant', content: 'messages=3' },
   ]);
+});
+
+test('conversation runner reuses one compiled default personality snapshot across turns', async () => {
+  const requests: Array<{ messages: readonly { role: string; content: string }[] }> = [];
+  const provider = new MockAIProvider({
+    responder: (request) => {
+      requests.push(request);
+      return { text: 'ok', provider: 'mock', model: 'mock-model', finishReason: 'stop' };
+    },
+  });
+  const snapshot = new PersonalityCompiler().compile({ profile: new PersonalityRegistry().defaultProfile });
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const result = await runner.run(inputs(['one', 'two']), { personality: snapshot });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0]?.messages[0]?.content, snapshot.instructions[0]?.text);
+  assert.equal(requests[1]?.messages[0]?.content, snapshot.instructions[0]?.text);
+  assert.equal(requests[0]?.messages.filter(({ role }) => role === 'system').length, snapshot.instructions.length);
+  assert.equal(requests[1]?.messages.filter(({ role }) => role === 'system').length, snapshot.instructions.length);
+  assert.equal(snapshot.personalityId, DEFAULT_PERSONALITY_PROFILE.personalityId);
+  assert.ok(Object.isFrozen(snapshot));
+  assert.deepEqual(result.session.getMessages().map(({ role }) => role), ['user', 'assistant', 'user', 'assistant']);
+});
+
+test('default personality registry and compiler produce one immutable application snapshot', () => {
+  const registry = new PersonalityRegistry();
+  const snapshot = new PersonalityCompiler().compile({ profile: registry.defaultProfile });
+
+  assert.equal(snapshot.personalityId, DEFAULT_PERSONALITY_PROFILE.personalityId);
+  assert.equal(snapshot.profileVersion, DEFAULT_PERSONALITY_PROFILE.profileVersion);
+  assert.ok(Object.isFrozen(snapshot));
+  assert.ok(Object.isFrozen(snapshot.instructions));
+  assert.throws(() => {
+    (snapshot.instructions as unknown as { push: (value: unknown) => void }).push({});
+  }, TypeError);
 });
 
 test('conversation runner supports EOF, explicit exit and empty input without extra turns', async () => {

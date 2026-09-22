@@ -1,6 +1,7 @@
 import type { AssistantCore } from './assistant-core.js';
 import type { Response } from './response.js';
 import type { Session } from './session.js';
+import type { PersonalitySnapshot } from '../personality/personality-types.js';
 
 export const CONVERSATION_EXIT_COMMAND = '/exit';
 
@@ -15,6 +16,7 @@ export interface ConversationRunResult {
 export interface ConversationRunOptions {
   readonly signal?: AbortSignal;
   readonly exitCommand?: string;
+  readonly personality?: PersonalitySnapshot;
   readonly onResponse?: (response: Response) => void | Promise<void>;
 }
 
@@ -84,7 +86,10 @@ export class ConversationRunner {
         }
 
         try {
-          const response = await this.core.respond(this.session, input, { signal: options.signal });
+          const response = await this.core.respond(this.session, input, {
+            signal: options.signal,
+            personality: options.personality,
+          });
           responses.push(response);
           await options.onResponse?.(response);
         } catch (error) {
