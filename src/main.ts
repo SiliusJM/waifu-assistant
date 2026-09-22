@@ -18,6 +18,7 @@ import {
 } from './tools/local-tool-manager.js';
 import {
   CONVERSATION_CLEAR_COMMAND,
+  CONVERSATION_CALC_COMMAND,
   CONVERSATION_FORGET_COMMAND,
   CONVERSATION_HISTORY_COMMAND,
   CONVERSATION_HELP_COMMAND,
@@ -89,14 +90,14 @@ export async function main(
         }
         if (command === CONVERSATION_STATUS_COMMAND) {
           process.stdout.write([
-            'Yuki status',
-            `Session: ${runner.session.id}`,
-            `Messages: ${runner.session.getMessages().length}`,
-            `Persistent memories: ${await memoryStore.count()}`,
-            `Saved sessions: ${await savedSessionStore.count()}`,
-            `Provider: ${config.ai.provider}`,
-            'Personality: Yuki',
-            'Local tools:',
+            'Estado de Yuki',
+            `Sesión actual: ${runner.session.id}`,
+            `Mensajes: ${runner.session.getMessages().length}`,
+            `Memorias persistentes: ${await memoryStore.count()}`,
+            `Sesiones guardadas: ${await savedSessionStore.count()}`,
+            `Proveedor: ${config.ai.provider}`,
+            'Personalidad: Yuki',
+            'Herramientas locales:',
             '- local.time',
             '- local.calculate',
           ].join('\n') + '\n');
@@ -105,20 +106,20 @@ export async function main(
         if (command === CONVERSATION_HISTORY_COMMAND) {
           const history = runner.session.getMessages();
           process.stdout.write((history.length === 0
-            ? '(empty)'
-            : history.map(({ role, content }) => `${role}: ${content}`).join('\n')) + '\n');
+            ? 'No hay mensajes en la sesión actual.'
+            : history.map(({ role, content }) => `${role === 'user' ? 'Tú' : 'Yuki'}: ${content}`).join('\n')) + '\n');
           return;
         }
         if (command === CONVERSATION_CLEAR_COMMAND) {
           runner.session.clear();
-          process.stdout.write('Session cleared.\n');
+          process.stdout.write('Sesión actual limpiada.\n');
           return;
         }
         if (command === CONVERSATION_MEMORY_COMMAND) {
           const entries = await memoryStore.list();
           process.stdout.write((entries.length === 0
             ? 'No hay memorias guardadas.'
-            : ['Memorias:', ...entries.map(({ key, value }) => `${key}: ${value}`)].join('\n')) + '\n');
+            : ['Memorias guardadas:', ...entries.map(({ key, value }) => `${key}: ${value}`)].join('\n')) + '\n');
           return;
         }
         if (command === CONVERSATION_REMEMBER_COMMAND || command.startsWith(`${CONVERSATION_REMEMBER_COMMAND} `)) {
@@ -229,16 +230,21 @@ export async function main(
         if (command === '/time') {
           const result = await executeLocalTime(localToolManager, context);
           if (result.status !== 'success') {
-            process.stdout.write(`No pude obtener la hora local: ${result.error.message}\n`);
+            process.stdout.write('No pude obtener la hora local.\n');
             return;
           }
           process.stdout.write(formatLocalTime(result.value) + '\n');
           return;
         }
+        if (command.startsWith('/') && command !== CONVERSATION_CALC_COMMAND
+          && !command.startsWith(`${CONVERSATION_CALC_COMMAND} `)) {
+          process.stdout.write('Comando desconocido. Usa /help.\n');
+          return;
+        }
         const expression = command.slice('/calc'.length).trim();
         const result = await executeLocalCalculation(localToolManager, expression, context);
         if (result.status !== 'success') {
-          process.stdout.write(`No pude calcular esa expresión: ${result.error.message}\n`);
+          process.stdout.write('No pude calcular esa expresión: la expresión no es válida.\n');
           return;
         }
         process.stdout.write(formatCalculation(result.value) + '\n');

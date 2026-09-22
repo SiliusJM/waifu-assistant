@@ -301,6 +301,29 @@ test('saved-session commands stay local and do not call the provider or contamin
   ]);
 });
 
+test('unknown slash commands stay local and do not reach the provider or Session', async () => {
+  let providerCalls = 0;
+  const provider = new MockAIProvider({
+    responder: () => {
+      providerCalls += 1;
+      return { text: 'reply', provider: 'mock', model: 'mock-model', finishReason: 'stop' };
+    },
+  });
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const unknownCommands: string[] = [];
+  const result = await runner.run(inputs(['/foo', '/time extra', 'message']), {
+    onCommand: async (command) => { unknownCommands.push(command); },
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(providerCalls, 1);
+  assert.deepEqual(unknownCommands, ['/foo', '/time extra']);
+  assert.deepEqual(runner.session.getMessages().map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'message' },
+    { role: 'assistant', content: 'reply' },
+  ]);
+});
+
 test('session status and history commands are local and do not call the provider', async () => {
   let providerCalls = 0;
   const provider = new MockAIProvider({

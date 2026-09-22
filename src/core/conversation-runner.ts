@@ -152,6 +152,20 @@ export class ConversationRunner {
           continue;
         }
 
+        if (input.startsWith('/')) {
+          if (!options.onCommand) {
+            throw new AssistantError('The local command is unavailable.', {
+              code: 'TOOL_UNAVAILABLE_ERROR',
+              retryable: false,
+            });
+          }
+          await options.onCommand(input, {
+            signal: options.signal,
+            sessionId: this.session.id,
+          });
+          continue;
+        }
+
         try {
           const response = await this.core.respond(this.session, input, {
             signal: options.signal,

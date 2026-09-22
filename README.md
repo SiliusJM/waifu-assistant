@@ -93,12 +93,22 @@ pueden redirigirse mediante `YUKI_SESSIONS_PATH`. Esta persistencia es
 independiente de `PersistentMemory`, no guarda automáticamente al salir y
 `/clear` solo limpia la `Session` actual; no elimina sesiones guardadas.
 
+## Comandos locales
+
+La CLI reconoce `/help`, `/time`, `/calc <expression>`, `/status`, `/history`,
+`/clear`, `/remember <key> <value>`, `/memory`, `/forget <key>`,
+`/save-session <name>`, `/sessions`, `/load-session <name>`,
+`/delete-session <name>` y `/exit`. Estos comandos no requieren una llamada al
+LLM. La memoria explícita se guarda localmente y puede redirigirse mediante
+`YUKI_MEMORY_PATH`; no se mezcla con las sesiones guardadas.
+
 ## MVP local con LLM real
 
 Sin `AI_PROVIDER`, el CLI usa `MockAIProvider` y no realiza llamadas externas.
 Para usar el `DirectAIProvider`, configura temporalmente `AI_PROVIDER=direct`,
-`AI_BASE_URL`, `AI_API_KEY` y `AI_MODEL`. El historial y la personalidad de Yuki
-siguen siendo efímeros durante la ejecución.
+`AI_BASE_URL`, `AI_API_KEY` y `AI_MODEL`. La personalidad se mantiene durante
+la ejecución; el historial solo se conserva entre procesos cuando el usuario
+lo guarda explícitamente.
 
 En PowerShell, el smoke test real opt-in se ejecuta así:
 
