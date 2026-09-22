@@ -2,7 +2,9 @@
 
 ## Current Phase
 
-Phase 8 — Internet & Browser (definición, spikes y controlled/external tests aprobados y mergeados; implementación de producción no iniciada).
+La unidad offline de contratos/base de Phase 8 está en implementación acotada: no realiza I/O de red, no selecciona provider/browser/egress y no habilita providers reales.
+
+Phase 8 — Internet & Browser (definición, spikes y controlled/external tests aprobados y mergeados; providers y ejecución de producción no iniciados; contratos/base offline en curso).
 
 ## Status
 
@@ -80,7 +82,7 @@ Phase 6 fue revisada técnicamente, corregida y mergeada en `main` mediante PR #
 
 ## In Progress
 
-Ninguno. El architecture decision gate fue documentado y mergeado; la implementación productiva de Phase 8 todavía no ha comenzado.
+Unidad offline de contratos/base en implementación acotada. El architecture decision gate sigue provisional; la implementación productiva de Phase 8 todavía no ha comenzado.
 
 ## Blocked
 

@@ -2,7 +2,7 @@
 
 ## Estado
 
-Definición arquitectónica revisada, aprobada y mergeada a `main` mediante PR #9 (`ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`). La fase continúa sin implementación de producción, dependencias, providers reales ni navegación.
+Definición arquitectónica revisada, aprobada y mergeada a `main` mediante PR #9 (`ef17ff897b2d25d1c402d271d4a3631b26b3fa5b`). La fase mantiene fuera de alcance la implementación productiva, dependencias, providers reales y navegación; esta rama inicia únicamente una unidad offline de contratos, política y mocks deterministas.
 
 ## 1. Objetivo
 
@@ -25,7 +25,7 @@ Esta fase define únicamente:
 - integración futura con `ToolManager`, `AssistantCore`, `RealtimeEngine` y `VoiceService`;
 - observabilidad segura, fallos offline y decisiones pendientes.
 
-No se implementa ningún provider, navegador, renderer, UI, integración externa ni flujo autónomo.
+No se implementa ningún provider real, navegador, renderer, UI, integración externa ni flujo autónomo. La unidad offline no realiza I/O de red y no selecciona una implementación.
 
 ## 3. Fuera de alcance y perímetro prohibido
 
@@ -297,8 +297,8 @@ Estas decisiones requieren spikes, threat modeling y pruebas controladas. No aut
 - Concurrencia, latest-wins, cola acotada y no bloqueo del core están definidos.
 - La integración con `ToolManager`, `AssistantCore`, `RealtimeEngine` y `VoiceService` no permite bypass.
 - Errores, offline, providers no disponibles y logging seguro están descritos.
-- No se añadieron código de producción, dependencias, providers, renderer, UI, assets, procesos ni cambios funcionales.
+- No se añadieron providers reales, dependencias, renderer, UI, assets, procesos ni integraciones externas; la unidad offline de contratos y policy es el único código permitido en esta rama.
 
-## 21. No implementación explícita
+## 21. Límite de la unidad offline
 
-El cierre de esta fase contiene únicamente la definición arquitectónica y documentación sincronizada. Phase 8 no se considera implementada, no habilita navegación real y no autoriza todavía la instalación de un framework de browser, la selección final de un provider ni la creación de herramientas reales.
+La unidad offline implementa únicamente contratos ejecutables, representación de datos no confiables, política pura, errores, lifecycle, mocks y adapters de `ToolManager`. Phase 8 no se considera cerrada ni habilita navegación real: no autoriza todavía la instalación de un framework de browser, la selección final de un provider ni la creación de providers productivos.

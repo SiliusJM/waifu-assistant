@@ -46,3 +46,4 @@ export type {
 export * from './realtime/index.js';
 export * from './voice/index.js';
 export * from './avatar/index.js';
+export * from './internet/index.js';
