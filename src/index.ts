@@ -3,6 +3,13 @@ export { createContext, type Context } from './core/context.js';
 export { createMessage, type Message, type MessageRole } from './core/message.js';
 export { toAssistantResponse, type Response } from './core/response.js';
 export { Session } from './core/session.js';
+export {
+  CONVERSATION_EXIT_COMMAND,
+  ConversationRunner,
+  type ConversationRunOptions,
+  type ConversationRunResult,
+  type ConversationRunStatus,
+} from './core/conversation-runner.js';
 export { DirectAIProvider } from './ai/direct-ai-provider.js';
 export { MockAIProvider } from './ai/mock-ai-provider.js';
 export type { AIProvider } from './ai/ai-provider.js';

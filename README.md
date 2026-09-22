@@ -69,6 +69,13 @@ Instalar las dependencias y ejecutar:
 
 `dist` y `dist-tests` son artefactos generados y no se versionan.
 
+## Conversación efímera multi-turno
+
+El modo CLI existente acepta una entrada única. Para mantener una conversación
+de varios turnos durante una ejecución, usa `node dist/main.js --interactive`.
+Cada línea es un turno; `/exit` termina explícitamente y EOF también finaliza.
+El historial vive únicamente en la `Session` y no se persiste.
+
 ## Próximo paso
 
 Cerrar y revisar la unidad offline de contratos/base: datos web no confiables, policy URL pura, lifecycle, cancelación, mocks y adapters de `ToolManager`. La red, los providers reales, el browser, el egress y la ejecución del laboratorio siguen fuera de esta unidad; ADR-012 permanece provisional y el resultado debe conservar `PASS`, `FAIL`, `LIMITATION` o `NOT EXECUTED` sin convertir mocks en evidencia real.
