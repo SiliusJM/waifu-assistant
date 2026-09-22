@@ -569,6 +569,10 @@ async function verifyCleanup(bundleRoot, manifest) {
   return status === 'READY';
 }
 
+async function revalidateBeforeExecute(bundleRoot, manifest) {
+  return runPreflight(bundleRoot, manifest);
+}
+
 async function advance(values) {
   const { bundleRoot, manifest } = await loadBundle(values);
   const target = requiredOption(values, 'state').toUpperCase().replaceAll('_', '-');
@@ -580,7 +584,14 @@ async function advance(values) {
   if (target === 'PREFLIGHT_READY' && manifest.preflight.status !== 'READY') {
     throw new Error('PREFLIGHT_READY requires a successful preflight');
   }
-  if (target === 'EXECUTE' && manifest.preflight.status !== 'READY') throw new Error('Execution is blocked until preflight is READY');
+  if (target === 'EXECUTE') {
+    if (manifest.preflight.status !== 'READY') throw new Error('Execution is blocked until preflight is READY');
+    const ready = await revalidateBeforeExecute(bundleRoot, manifest);
+    if (!ready) {
+      process.exitCode = 2;
+      return;
+    }
+  }
   if (target === 'VALIDATE' && !(await validateCollectedEvidence(bundleRoot, manifest))) {
     updateLifecycle(manifest, target);
     await writeCurrentManifest(bundleRoot, manifest);
@@ -740,6 +751,33 @@ async function runSelfTestCase(parent, name, mutate, expectedReady) {
   return { name, status: expectedReady ? 'PASS' : 'BLOCKED' };
 }
 
+async function runExecuteRevalidationCase(parent, name, mutate, expectedReady, expectedMissing) {
+  const bundleRoot = join(parent, name);
+  const { manifest } = await createSelfTestBundle(bundleRoot);
+  assert.equal(await runPreflight(bundleRoot, manifest), true, `${name} initial preflight should pass`);
+  updateLifecycle(manifest, 'PREFLIGHT_READY');
+  await writeCurrentManifest(bundleRoot, manifest);
+  if (mutate) await mutate(bundleRoot, manifest);
+
+  const previousExitCode = process.exitCode;
+  process.exitCode = undefined;
+  await advance({ bundle: bundleRoot, state: 'execute' });
+  const exitCode = process.exitCode ?? 0;
+  process.exitCode = previousExitCode;
+
+  const current = await readJson(join(bundleRoot, currentManifestName(manifest.runId)));
+  assert.equal(exitCode, expectedReady ? 0 : 2, `${name} exit code mismatch`);
+  assert.equal(current.state, expectedReady ? 'EXECUTE' : 'PREFLIGHT_READY', `${name} lifecycle state mismatch`);
+  assert.equal(current.lifecycle.some((event) => event.state === 'EXECUTE'), expectedReady, `${name} must not skip or enter EXECUTE incorrectly`);
+  if (expectedReady) {
+    assert.equal(current.preflight.status, 'READY');
+  } else {
+    assert.equal(current.preflight.status, 'BLOCKED');
+    assert.ok(current.preflight.missing.includes(expectedMissing), `${name} should identify ${expectedMissing}`);
+  }
+  return { name, status: expectedReady ? 'EXECUTE_ALLOWED' : 'EXECUTE_BLOCKED', exitCode };
+}
+
 async function selfTest() {
   const root = await mkdtemp(join(tmpdir(), 'phase08-lab-bundle-self-test-'));
   const results = [];
@@ -787,6 +825,36 @@ async function selfTest() {
         marker.artifact.path = manifest.layout.readiness.rollback;
       }, false);
     }, false));
+    results.push(await runExecuteRevalidationCase(root, 'execute-intact', null, true));
+    results.push(await runExecuteRevalidationCase(root, 'execute-artifact-modified', async (bundleRoot, manifest) => {
+      await mutateSelfTestArtifact(bundleRoot, manifest, 'gateway', 'dns-formal', async (artifact) => {
+        artifact.changedAfterPreflight = true;
+      }, false);
+    }, false, 'formal DNS capability'));
+    results.push(await runExecuteRevalidationCase(root, 'execute-marker-modified', async (bundleRoot, manifest) => {
+      const markerPath = join(bundleRoot, manifest.layout.readiness.dnsFormal);
+      const marker = await readJson(markerPath);
+      marker.ready = false;
+      await writeJson(markerPath, marker);
+    }, false, 'formal DNS capability'));
+    results.push(await runExecuteRevalidationCase(root, 'execute-artifact-deleted', async (bundleRoot, manifest) => {
+      const marker = await readJson(join(bundleRoot, manifest.layout.readiness.egressFormal));
+      await rm(join(bundleRoot, marker.artifact.path), { force: true });
+    }, false, 'formal egress capability'));
+    results.push(await runExecuteRevalidationCase(root, 'execute-stale-artifact', async (bundleRoot, manifest) => {
+      const markerPath = join(bundleRoot, manifest.layout.readiness.clockReference);
+      const marker = await readJson(markerPath);
+      const artifactPath = join(bundleRoot, marker.artifact.path);
+      const artifact = await readJson(artifactPath);
+      const stale = new Date(Date.now() - 121_000).toISOString();
+      artifact.observedAt = stale;
+      artifact.gatewayUtc = stale;
+      artifact.browserUtc = stale;
+      await writeJson(artifactPath, artifact);
+      marker.observedAt = stale;
+      marker.artifact.sha256 = await sha256(artifactPath);
+      await writeJson(markerPath, marker);
+    }, false, 'fresh clocks'));
     console.log(JSON.stringify({ status: 'PASS', cases: results }, null, 2));
   } finally {
     await rm(root, { recursive: true, force: true });
