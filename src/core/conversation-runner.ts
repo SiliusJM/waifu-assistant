@@ -1,4 +1,5 @@
 import type { AssistantCore } from './assistant-core.js';
+import type { AssistantStreamEvent } from './assistant-core.js';
 import type { Response } from './response.js';
 import type { Session } from './session.js';
 import type { PersonalitySnapshot } from '../personality/personality-types.js';
@@ -50,6 +51,7 @@ export interface ConversationRunOptions {
   readonly exitCommand?: string;
   readonly personality?: PersonalitySnapshot;
   readonly onResponse?: (response: Response) => void | Promise<void>;
+  readonly onDelta?: (delta: string) => void | Promise<void>;
   readonly memory?: () => MemorySnapshot | Promise<MemorySnapshot>;
   readonly onCommand?: (command: string, context: {
     readonly signal?: AbortSignal;
@@ -167,11 +169,27 @@ export class ConversationRunner {
         }
 
         try {
-          const response = await this.core.respond(this.session, input, {
+          let response: Response | undefined;
+          let emittedDelta = false;
+          for await (const event of this.core.respondStream(this.session, input, {
             signal: options.signal,
             personality: options.personality,
             memory: await options.memory?.(),
-          });
+          })) {
+            const streamEvent = event as AssistantStreamEvent;
+            if (streamEvent.type === 'text_delta') {
+              emittedDelta = true;
+              await options.onDelta?.(streamEvent.delta);
+            } else {
+              response = streamEvent.response;
+            }
+          }
+          if (!response) {
+            throw new AssistantError('The conversation stream ended without a response.', {
+              code: 'INVALID_RESPONSE_ERROR', retryable: false,
+            });
+          }
+          if (!emittedDelta && response.text) await options.onDelta?.(response.text);
           responses.push(response);
           await options.onResponse?.(response);
         } catch (error) {

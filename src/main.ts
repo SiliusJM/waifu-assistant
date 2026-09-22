@@ -82,7 +82,8 @@ export async function main(
       signal: controller.signal,
       personality,
       memory: () => memoryStore.snapshot(),
-      onResponse: (response): void => { process.stdout.write(response.text + '\n'); },
+      onDelta: (delta): void => { process.stdout.write(delta); },
+      onResponse: (): void => { process.stdout.write('\n'); },
       onCommand: async (command, context): Promise<void> => {
         if (command === CONVERSATION_HELP_COMMAND) {
           process.stdout.write(LOCAL_COMMAND_HELP + '\n');

@@ -1,4 +1,4 @@
-export { AssistantCore } from './core/assistant-core.js';
+export { AssistantCore, type AssistantStreamEvent } from './core/assistant-core.js';
 export { createContext, type Context } from './core/context.js';
 export { createMessage, type Message, type MessageRole } from './core/message.js';
 export { toAssistantResponse, type Response } from './core/response.js';

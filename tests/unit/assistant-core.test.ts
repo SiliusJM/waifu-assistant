@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { AIRequest } from '../../src/ai/ai-types.js';
+import type { AIProvider } from '../../src/ai/ai-provider.js';
 import type { MemorySnapshot } from '../../src/memory/memory-types.js';
 import type { PersonalitySnapshot } from '../../src/personality/personality-types.js';
 import { AssistantCore } from '../../src/core/assistant-core.js';
@@ -53,8 +54,90 @@ test('mock provider exposes the streaming-compatible contract', async () => {
     events.push(event);
   }
 
-  assert.equal(events.length, 1);
-  assert.equal(events[0]?.type, 'completed');
+  assert.equal(events.length, 2);
+  assert.equal(events[0]?.type, 'text_delta');
+  assert.equal(events[1]?.type, 'completed');
+});
+
+test('assistant core streams deltas and stores one complete assistant message', async () => {
+  const provider = new MockAIProvider({ responseText: 'Hello Yuki', streamDeltas: ['Hello', ' ', 'Yuki'] });
+  const core = new AssistantCore({ provider });
+  const events = [];
+  for await (const event of core.respondStream(core.createSession(), 'Hello')) events.push(event);
+
+  assert.deepEqual(events.map((event) => event.type), ['text_delta', 'text_delta', 'text_delta', 'completed']);
+  assert.equal(events.filter((event) => event.type === 'text_delta').map((event) => event.delta).join(''), 'Hello Yuki');
+  const completed = events.at(-1);
+  assert.equal(completed?.type, 'completed');
+  assert.equal(completed?.response.text, 'Hello Yuki');
+});
+
+test('assistant core does not persist partial streamed text after failure', async () => {
+  const provider: AIProvider = {
+    name: 'failing-stream',
+    complete: async () => ({ text: 'unused', provider: 'failing-stream', model: 'test', finishReason: 'stop' }),
+    async *stream() {
+      yield { type: 'text_delta', delta: 'partial' };
+      throw new Error('stream failed');
+    },
+  };
+  const session = new AssistantCore({ provider }).createSession();
+  const core = new AssistantCore({ provider });
+  await assert.rejects(() => (async () => {
+    for await (const event of core.respondStream(session, 'Hello')) { void event; }
+  })(), (error: unknown) => error instanceof Error && 'code' in error && error.code === 'PROVIDER_ERROR');
+  assert.deepEqual(session.getMessages().map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'Hello' },
+  ]);
+});
+
+test('assistant core streams the final response after a controlled tool round', async () => {
+  let calls = 0;
+  const provider = new MockAIProvider({
+    streamDeltas: ['It is ', '12:34.'],
+    responder: () => {
+      calls += 1;
+      return calls === 1
+        ? toolResponse('local_time', '{}')
+        : { text: 'It is 12:34.', provider: 'mock', model: 'mock-model', finishReason: 'stop' as const };
+    },
+  });
+  const core = new AssistantCore({
+    provider,
+    toolManager: createLocalToolManager(() => new Date('2026-09-22T17:34:56.000Z')),
+    toolAllowlist: LOCAL_TOOL_ALLOWLIST,
+  });
+  const events = [];
+  const session = core.createSession();
+  for await (const event of core.respondStream(session, 'What time is it?')) events.push(event);
+
+  assert.equal(calls, 2);
+  assert.deepEqual(events.map((event) => event.type), ['text_delta', 'text_delta', 'completed']);
+  assert.equal(session.getMessages().at(-1)?.content, 'It is 12:34.');
+});
+
+test('assistant core completes 100 sequential mock streams without state cross-talk', async () => {
+  const core = new AssistantCore({
+    provider: new MockAIProvider({ responseText: 'stable', streamDeltas: ['sta', 'ble'] }),
+  });
+  for (let index = 0; index < 100; index += 1) {
+    const session = core.createSession();
+    const events = [];
+    for await (const event of core.respondStream(session, `message-${index}`)) events.push(event);
+    const completed = events.at(-1);
+    assert.equal(completed?.type, 'completed');
+    assert.equal(completed?.response.text, 'stable');
+    assert.deepEqual(session.getMessages().map(({ content }) => content), [`message-${index}`, 'stable']);
+  }
+});
+
+test('assistant core concatenates 1000 small deltas exactly once', async () => {
+  const deltas = Array.from({ length: 1000 }, (_, index) => String(index % 10));
+  const core = new AssistantCore({ provider: new MockAIProvider({ streamDeltas: deltas }) });
+  const events = [];
+  for await (const event of core.respondStream(core.createSession(), 'many')) events.push(event);
+  assert.equal(events.filter((event) => event.type === 'text_delta').map((event) => event.delta).join(''), deltas.join(''));
+  assert.equal(events.at(-1)?.type, 'completed');
 });
 
 test('assistant core executes an allowlisted local time tool and keeps protocol messages ephemeral', async () => {
@@ -351,6 +434,38 @@ test('assistant core injects memory data after personality and never stores it i
   assert.equal(requests[0]?.tools?.some(({ function: definition }) => definition.name.includes('memory')) ?? false, false);
   assert.equal(requests[0]?.messages.at(-1)?.content, 'How am I called?');
   assert.deepEqual(requests[0]?.messages.filter(({ role }) => role === 'user').map(({ content }) => content), ['How am I called?']);
+});
+
+test('assistant core streaming preserves personality and one memory snapshot', async () => {
+  const requests: AIRequest[] = [];
+  const personality: PersonalitySnapshot = {
+    personalityId: 'yuki',
+    profileVersion: '1.0.0',
+    schemaVersion: 1,
+    identity: { displayName: 'Yuki' },
+    instructions: Object.freeze([{ id: 'identity', layer: 'identity', priority: 1, text: 'You are Yuki.' }]),
+    fingerprint: 'stream-fingerprint',
+  };
+  const memory: MemorySnapshot = Object.freeze({
+    version: 1,
+    entries: Object.freeze([{ key: 'name', value: 'Jhon' }]),
+  });
+  const core = new AssistantCore({
+    provider: new MockAIProvider({
+      streamDeltas: ['remembered'],
+      responder: (request) => {
+        requests.push(request);
+        return { text: 'remembered', provider: 'mock', model: 'mock-model', finishReason: 'stop' };
+      },
+    }),
+  });
+  const session = core.createSession();
+  for await (const event of core.respondStream(session, 'How am I called?', { personality, memory })) { void event; }
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]?.messages[0]?.content, 'You are Yuki.');
+  assert.match(requests[0]?.messages[1]?.content ?? '', /Jhon/);
+  assert.equal(session.getMessages().some(({ content }) => content.includes('Jhon')), false);
 });
 
 test('memory values are bounded data and cannot add provider instructions', async () => {

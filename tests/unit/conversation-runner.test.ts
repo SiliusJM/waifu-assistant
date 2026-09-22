@@ -55,6 +55,38 @@ test('conversation runner reuses one session and preserves multi-turn order', as
   ]);
 });
 
+test('conversation runner forwards streaming deltas and completes without duplicating text', async () => {
+  const output: string[] = [];
+  const runner = new ConversationRunner(new AssistantCore({
+    provider: new MockAIProvider({ responseText: 'Hello Yuki', streamDeltas: ['Hello', ' ', 'Yuki'] }),
+  }));
+  const result = await runner.run(inputs(['hello', '/exit']), {
+    onDelta: (delta) => { output.push(delta); },
+  });
+
+  assert.equal(output.join(''), 'Hello Yuki');
+  assert.equal(result.responses[0]?.text, 'Hello Yuki');
+  assert.deepEqual(result.session.getMessages().map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'hello' },
+    { role: 'assistant', content: 'Hello Yuki' },
+  ]);
+});
+
+test('conversation runner cooperatively cancels an in-flight stream', async () => {
+  const controller = new AbortController();
+  const runner = new ConversationRunner(new AssistantCore({
+    provider: new MockAIProvider({ responseText: 'late', streamDeltas: ['late'], streamDelayMs: 100 }),
+  }));
+  const pending = runner.run(inputs(['hello']), { signal: controller.signal });
+  setTimeout(() => controller.abort(), 10);
+  const result = await pending;
+
+  assert.equal(result.status, 'cancelled');
+  assert.deepEqual(result.session.getMessages().map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'hello' },
+  ]);
+});
+
 test('restored Session history is sent on the next conversational turn', async () => {
   let observedMessages: readonly { role: string; content: string }[] = [];
   const provider = new MockAIProvider({

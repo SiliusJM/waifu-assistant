@@ -67,5 +67,12 @@ export interface RetryPolicy {
 
 export type AIStreamEvent =
   | { readonly type: 'text_delta'; readonly delta: string }
+  | {
+    readonly type: 'tool_call_delta';
+    readonly index: number;
+    readonly id?: string;
+    readonly name?: string;
+    readonly argumentsDelta?: string;
+  }
   | { readonly type: 'completed'; readonly response: AIResponse }
   | { readonly type: 'error'; readonly error: AssistantError };
