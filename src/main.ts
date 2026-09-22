@@ -14,6 +14,7 @@ import {
   executeLocalTime,
   formatCalculation,
   formatLocalTime,
+  LOCAL_TOOL_ALLOWLIST,
 } from './tools/local-tool-manager.js';
 import { CONVERSATION_HELP_COMMAND, LOCAL_COMMAND_HELP } from './core/conversation-runner.js';
 
@@ -32,11 +33,13 @@ export async function main(
 
   const config = loadConfig(env);
   const logger = createLogger({ scope: 'waifu-assistant', sink: console });
+  const localToolManager = createLocalToolManager();
   const core = new AssistantCore({
     provider: createAIProvider(config),
     logger,
+    toolManager: localToolManager,
+    toolAllowlist: LOCAL_TOOL_ALLOWLIST,
   });
-  const localToolManager = createLocalToolManager();
   const personality = new PersonalityCompiler().compile({
     profile: new PersonalityRegistry().defaultProfile,
   });

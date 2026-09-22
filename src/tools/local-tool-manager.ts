@@ -1,10 +1,12 @@
 import { ToolManager } from './tool-manager.js';
 import { ToolRegistry } from './tool-registry.js';
 import type { ToolResult } from './tool-types.js';
+import { LLM_TOOL_CALL_AUTHORIZATION_SOURCE } from './tool-types.js';
 import { createCalculatorTool, LOCAL_CALCULATOR_TOOL_ID, type CalculatorValue } from './calculator-tool.js';
 import { LOCAL_TIME_TOOL_ID, createLocalTimeTool, type LocalTimeValue, type TimeSource } from './time-tool.js';
 
 export const LOCAL_TIME_COMMAND = '/time';
+export const LOCAL_TOOL_ALLOWLIST = [LOCAL_TIME_TOOL_ID, LOCAL_CALCULATOR_TOOL_ID] as const;
 
 export interface LocalCommandOptions {
   readonly signal?: AbortSignal;
@@ -22,10 +24,14 @@ export function createLocalToolManager(now?: TimeSource): ToolManager {
         const command = context.metadata.command;
         const isTimeCommand = command === LOCAL_TIME_COMMAND;
         const isCalculatorCommand = command === '/calc' || (typeof command === 'string' && command.startsWith('/calc '));
+        const explicitCommand = ((tool.id === LOCAL_TIME_TOOL_ID && isTimeCommand)
+          || (tool.id === LOCAL_CALCULATOR_TOOL_ID && isCalculatorCommand))
+          && context.authorization?.source === 'explicit-cli-command';
+        const llmCommand = context.authorization?.source === LLM_TOOL_CALL_AUTHORIZATION_SOURCE
+          && context.metadata.source === LLM_TOOL_CALL_AUTHORIZATION_SOURCE
+          && context.metadata.toolId === tool.id;
         return {
-          allowed: ((tool.id === LOCAL_TIME_TOOL_ID && isTimeCommand)
-            || (tool.id === LOCAL_CALCULATOR_TOOL_ID && isCalculatorCommand))
-            && context.authorization?.source === 'explicit-cli-command',
+          allowed: explicitCommand || llmCommand,
         reason: 'The tool requires an explicit local command.',
         authorization: context.authorization,
         };

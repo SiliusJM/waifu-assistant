@@ -14,6 +14,7 @@ export {
   type ConversationRunResult,
   type ConversationRunStatus,
 } from './core/conversation-runner.js';
+export { LOCAL_TOOL_ALLOWLIST } from './tools/local-tool-manager.js';
 export {
   LOCAL_TIME_COMMAND,
   createLocalToolManager,
@@ -35,6 +36,7 @@ export type {
   AIResponse,
   AIStreamEvent,
   FinishReason,
+  ProviderToolDefinition,
   ProviderCallOptions,
   RetryPolicy,
   ToolCallRequest,

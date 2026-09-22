@@ -4,6 +4,7 @@ import { ToolError } from './errors.js';
 import type { ToolRegistry } from './tool-registry.js';
 import { validateToolArguments } from './validation.js';
 import type {
+  Tool,
   ToolAuthorizer,
   ToolExecutionContext,
   ToolExecutionOptions,
@@ -56,6 +57,10 @@ export class ToolManager {
     this.registry = options.registry;
     this.authorizer = options.authorizer;
     this.logger = options.logger ?? createLogger();
+  }
+
+  getTool(id: string): Tool | undefined {
+    return this.registry.get(id);
   }
 
   async execute<Result = unknown>(

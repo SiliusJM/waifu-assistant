@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createServer, type ServerResponse } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import { DirectAIProvider } from '../../src/ai/direct-ai-provider.js';
@@ -22,6 +22,23 @@ async function withServer(
   run: (baseURL: string) => Promise<void>,
 ): Promise<void> {
   const server = createServer((_request, response) => handler(response));
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address() as AddressInfo;
+  try {
+    await run('http://127.0.0.1:' + address.port + '/v1');
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+async function withRequestServer(
+  handler: (request: IncomingMessage, response: ServerResponse) => void,
+  run: (baseURL: string) => Promise<void>,
+): Promise<void> {
+  const server = createServer(handler);
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', resolve);
@@ -86,6 +103,74 @@ test('direct provider accepts tool calls without textual content', async () => {
       assert.equal(result.finishReason, 'tool_calls');
     },
   );
+});
+
+test('direct provider serializes tools and tool protocol messages for OpenAI-compatible APIs', async () => {
+  let received: Record<string, unknown> | undefined;
+  await withRequestServer(
+    (incoming, response) => {
+      const chunks: Buffer[] = [];
+      incoming.on('data', (chunk: Buffer) => chunks.push(chunk));
+      incoming.on('end', () => {
+        received = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
+        sendJson(response, 200, {
+          model: 'test-model',
+          choices: [{ message: { content: 'done' }, finish_reason: 'stop' }],
+        });
+      });
+    },
+    async (baseURL) => {
+      await provider(baseURL).complete({
+        sessionId: 'tool-serialization-test',
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'local_time',
+            description: 'Read local time.',
+            parameters: { type: 'object', properties: {}, additionalProperties: false },
+          },
+        }],
+        messages: [
+          {
+            role: 'assistant',
+            content: '',
+            toolCalls: [{ id: 'call-1', name: 'local_time', argumentsJson: '{}' }],
+          },
+          {
+            role: 'tool',
+            content: '{"status":"success"}',
+            toolCallId: 'call-1',
+            name: 'local_time',
+          },
+        ],
+      });
+    },
+  );
+  assert.deepEqual(received?.tools, [{
+    type: 'function',
+    function: {
+      name: 'local_time',
+      description: 'Read local time.',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  }]);
+  assert.deepEqual(received?.messages, [
+    {
+      role: 'assistant',
+      content: '',
+      tool_calls: [{
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'local_time', arguments: '{}' },
+      }],
+    },
+    {
+      role: 'tool',
+      content: '{"status":"success"}',
+      tool_call_id: 'call-1',
+      name: 'local_time',
+    },
+  ]);
 });
 
 test('direct provider stream emits the completed response', async () => {

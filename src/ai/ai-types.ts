@@ -5,12 +5,30 @@ export type ProviderRole = 'system' | 'user' | 'assistant' | 'tool';
 export interface ProviderMessage {
   readonly role: ProviderRole;
   readonly content: string;
+  readonly toolCalls?: readonly ToolCallRequest[];
+  readonly toolCallId?: string;
+  readonly name?: string;
+}
+
+export interface ProviderToolDefinition {
+  readonly type: 'function';
+  readonly function: {
+    readonly name: string;
+    readonly description: string;
+    readonly parameters: {
+      readonly type: 'object';
+      readonly properties: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+      readonly required?: readonly string[];
+      readonly additionalProperties: boolean;
+    };
+  };
 }
 
 export interface AIRequest {
   readonly sessionId: string;
   readonly messages: readonly ProviderMessage[];
   readonly model?: string;
+  readonly tools?: readonly ProviderToolDefinition[];
 }
 
 export type FinishReason = 'stop' | 'length' | 'tool_calls' | 'unknown';

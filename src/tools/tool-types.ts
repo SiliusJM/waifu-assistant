@@ -3,6 +3,7 @@ import type { ToolErrorCode } from './errors.js';
 
 export const TOOL_RISK_LEVELS = ['safe', 'low', 'medium', 'high', 'critical'] as const;
 export type ToolRiskLevel = (typeof TOOL_RISK_LEVELS)[number];
+export const LLM_TOOL_CALL_AUTHORIZATION_SOURCE = 'llm-tool-call';
 
 export const TOOL_ARGUMENT_TYPES = ['string', 'number', 'boolean', 'object', 'array'] as const;
 export type ToolArgumentType = (typeof TOOL_ARGUMENT_TYPES)[number];
