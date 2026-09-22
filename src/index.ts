@@ -6,6 +6,7 @@ export { Session } from './core/session.js';
 export {
   CONVERSATION_EXIT_COMMAND,
   CONVERSATION_TIME_COMMAND,
+  CONVERSATION_CALC_COMMAND,
   ConversationRunner,
   type ConversationRunOptions,
   type ConversationRunResult,
@@ -15,9 +16,14 @@ export {
   LOCAL_TIME_COMMAND,
   createLocalToolManager,
   executeLocalTime,
+  executeLocalCalculation,
+  formatCalculation,
   formatLocalTime,
   createLocalTimeTool,
+  createCalculatorTool,
+  evaluateExpression,
 } from './tools/local-tool-manager.js';
+export type { CalculatorValue } from './tools/calculator-tool.js';
 export type { LocalTimeValue, TimeSource } from './tools/time-tool.js';
 export { DirectAIProvider } from './ai/direct-ai-provider.js';
 export { MockAIProvider } from './ai/mock-ai-provider.js';

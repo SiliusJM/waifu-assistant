@@ -10,7 +10,9 @@ import { AssistantError } from './shared/errors.js';
 import { createLogger } from './shared/logger.js';
 import {
   createLocalToolManager,
+  executeLocalCalculation,
   executeLocalTime,
+  formatCalculation,
   formatLocalTime,
 } from './tools/local-tool-manager.js';
 
@@ -53,15 +55,23 @@ export async function main(
       signal: controller.signal,
       personality,
       onResponse: (response): void => { process.stdout.write(response.text + '\n'); },
-      onCommand: async (_command, context): Promise<void> => {
-        const result = await executeLocalTime(localToolManager, context);
-        if (result.status !== 'success') {
-          throw new AssistantError(result.error.message, {
-            code: result.error.code,
-            retryable: result.error.retryable,
-          });
+      onCommand: async (command, context): Promise<void> => {
+        if (command === '/time') {
+          const result = await executeLocalTime(localToolManager, context);
+          if (result.status !== 'success') {
+            process.stdout.write(`No pude obtener la hora local: ${result.error.message}\n`);
+            return;
+          }
+          process.stdout.write(formatLocalTime(result.value) + '\n');
+          return;
         }
-        process.stdout.write(formatLocalTime(result.value) + '\n');
+        const expression = command.slice('/calc'.length).trim();
+        const result = await executeLocalCalculation(localToolManager, expression, context);
+        if (result.status !== 'success') {
+          process.stdout.write(`No pude calcular esa expresión: ${result.error.message}\n`);
+          return;
+        }
+        process.stdout.write(formatCalculation(result.value) + '\n');
       },
     });
   } finally {

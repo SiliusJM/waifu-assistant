@@ -6,6 +6,7 @@ import { AssistantError } from '../shared/errors.js';
 
 export const CONVERSATION_EXIT_COMMAND = '/exit';
 export const CONVERSATION_TIME_COMMAND = '/time';
+export const CONVERSATION_CALC_COMMAND = '/calc';
 
 export type ConversationRunStatus = 'completed' | 'cancelled';
 
@@ -90,7 +91,8 @@ export class ConversationRunner {
           sourceFinished = true;
           return { status: 'completed', session: this.session, responses: [...responses] };
         }
-        if (input === CONVERSATION_TIME_COMMAND) {
+        if (input === CONVERSATION_TIME_COMMAND || input === CONVERSATION_CALC_COMMAND
+          || input.startsWith(`${CONVERSATION_CALC_COMMAND} `)) {
           if (!options.onCommand) {
             throw new AssistantError('The local time command is unavailable.', {
               code: 'TOOL_UNAVAILABLE_ERROR',

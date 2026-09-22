@@ -7,7 +7,12 @@ import { Session } from '../../src/core/session.js';
 import { DEFAULT_PERSONALITY_PROFILE } from '../../src/personality/default-profile.js';
 import { PersonalityCompiler } from '../../src/personality/personality-compiler.js';
 import { PersonalityRegistry } from '../../src/personality/personality-registry.js';
-import { createLocalToolManager, executeLocalTime, formatLocalTime } from '../../src/tools/local-tool-manager.js';
+import {
+  createLocalToolManager,
+  executeLocalCalculation,
+  executeLocalTime,
+  formatLocalTime,
+} from '../../src/tools/local-tool-manager.js';
 
 async function* inputs(values: readonly string[]): AsyncIterable<string> {
   yield* values;
@@ -139,6 +144,39 @@ test('explicit /time uses ToolManager without calling the provider or changing S
   assert.equal(requests[1]?.includes('/time'), false);
   assert.equal(requests[1]?.includes(output[0] ?? ''), false);
   assert.equal(requests[1]?.includes('message A'), true);
+});
+
+test('explicit /calc uses ToolManager without calling the provider or changing Session', async () => {
+  let providerCalls = 0;
+  const requests: string[][] = [];
+  const provider = new MockAIProvider({
+    responder: (request) => {
+      providerCalls += 1;
+      requests.push(request.messages.map(({ content }) => content));
+      return { text: `reply-${providerCalls}`, provider: 'mock', model: 'mock-model', finishReason: 'stop' };
+    },
+  });
+  const manager = createLocalToolManager();
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const results: string[] = [];
+
+  const result = await runner.run(inputs(['message A', '/calc 2 + 2', 'message B']), {
+    onCommand: async (command, context) => {
+      const calculation = await executeLocalCalculation(manager, command.slice('/calc'.length).trim(), context);
+      assert.equal(calculation.status, 'success');
+      if (calculation.status === 'success') results.push(String(calculation.value.result));
+    },
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(providerCalls, 2);
+  assert.deepEqual(results, ['4']);
+  assert.equal(requests[1]?.includes('/calc 2 + 2'), false);
+  assert.equal(requests[1]?.includes('4'), false);
+  assert.equal(requests[1]?.includes('message A'), true);
+  assert.deepEqual(result.session.getMessages().map(({ content }) => content), [
+    'message A', 'reply-1', 'message B', 'reply-2',
+  ]);
 });
 
 test('conversation runner cancels while waiting for input and closes the source', async () => {
