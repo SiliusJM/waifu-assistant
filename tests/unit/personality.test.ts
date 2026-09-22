@@ -185,7 +185,7 @@ test('registry defensively clones and freezes registered profiles and all access
     assert.ok(reference);
     assert.ok(Object.isFrozen(reference));
     assert.ok(Object.isFrozen(reference.identity));
-    assert.equal(reference.identity.displayName, 'Waifu Assistant');
+    assert.equal(reference.identity.displayName, 'Yuki');
     assert.equal(reference.traits[0]?.strength, 0.7);
     assert.throws(() => {
       (reference.identity as unknown as { displayName: string }).displayName = 'Runtime mutation';

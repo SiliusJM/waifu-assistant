@@ -158,6 +158,22 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
+function serializeMessages(request: AIRequest): readonly Record<string, unknown>[] {
+  return request.messages.map((message) => ({
+    role: message.role,
+    content: message.content,
+    ...(message.toolCalls ? {
+      tool_calls: message.toolCalls.map((toolCall) => ({
+        id: toolCall.id,
+        type: 'function',
+        function: { name: toolCall.name, arguments: toolCall.argumentsJson },
+      })),
+    } : {}),
+    ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+    ...(message.name ? { name: message.name } : {}),
+  }));
+}
+
 export class DirectAIProvider implements AIProvider {
   readonly name = 'direct-http';
   private readonly baseURL: string;
@@ -266,7 +282,8 @@ export class DirectAIProvider implements AIProvider {
           },
           body: JSON.stringify({
             model: request.model ?? this.model,
-            messages: request.messages,
+            messages: serializeMessages(request),
+            ...(request.tools ? { tools: request.tools } : {}),
           }),
           signal: controller.signal,
         },
