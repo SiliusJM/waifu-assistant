@@ -4,6 +4,7 @@ import { performance } from 'node:perf_hooks';
 import {
   MAX_PROVIDER_REQUESTS,
   acceptanceDecision,
+  classifyInterruptionResponse,
   classifyNonLive,
   classifyUnicode,
   evaluateInterruptionWindow,
@@ -113,6 +114,34 @@ test('interruption evaluator reports stale A output only after B ownership', () 
   assert.equal(result.staleDelta, true);
 });
 
+test('interruption semantic classifier distinguishes exact, correct-with-extra, wrong-value and wrong-task answers', () => {
+  assert.equal(classifyInterruptionResponse(' 256 \n'), 'FUNCTIONAL_PASS_EXACT');
+  assert.equal(classifyInterruptionResponse('La respuesta es 256.'), 'FUNCTIONAL_PASS_WITH_EXTRA_TEXT');
+  assert.equal(classifyInterruptionResponse('257'), 'FUNCTIONAL_FAIL_WRONG_ANSWER');
+  assert.equal(classifyInterruptionResponse('La respuesta es doscientos cincuenta y seis.'), 'FUNCTIONAL_FAIL_WRONG_TASK');
+  assert.equal(classifyInterruptionResponse('1256'), 'FUNCTIONAL_FAIL_WRONG_ANSWER');
+  assert.equal(classifyInterruptionResponse(''), 'FLOW_FAIL');
+});
+
+test('interruption window accepts the correct semantic answer without requiring exact-only output', () => {
+  const result = evaluateInterruptionWindow({
+    interactionId: 'semantic',
+    events: [
+      { interactionId: 'semantic', type: 'request-start', requestId: 'A', at: 1 },
+      { interactionId: 'semantic', type: 'request-abort', requestId: 'A', at: 2 },
+      { interactionId: 'semantic', type: 'request-start', requestId: 'B', at: 3 },
+      { interactionId: 'semantic', type: 'response', requestId: 'B', at: 4, text: 'La respuesta es 256.' },
+    ],
+    requestAId: 'A', requestBId: 'B', bOwnershipAt: 2.5,
+    assistantMessages: [{ requestId: 'B', content: 'La respuesta es 256.' }], maxActive: 1, allowExtraText: true,
+  });
+  assert.equal(result.status, 'PASS');
+  assert.equal(result.bCompleted, true);
+  assert.equal(result.bFinalExpected, false);
+  assert.equal(result.bSemanticAnswer, true);
+  assert.equal(result.classification, 'FUNCTIONAL_PASS_WITH_EXTRA_TEXT');
+});
+
 test('interruption lifecycle does not mistake intentional A abort for a provider error that skips B', async () => {
   const context = {
     budget: new ProviderRequestBudget(12), requests: [], events: [], active: new Set(),
@@ -125,7 +154,11 @@ test('interruption lifecycle does not mistake intentional A abort for a provider
     name: 'offline-interruption-v3',
     async complete() { throw new Error('stream expected'); },
     async *stream(request, { signal }) {
-      const requestRecord = { id: `fake-${++nextRequest}`, startedAt: performance.now(), abortedAt: undefined };
+      const userMessages = request.messages.filter(({ role }) => role === 'user').map(({ content }) => content);
+      const requestRecord = {
+        id: `fake-${++nextRequest}`, startedAt: performance.now(), abortedAt: undefined,
+        userText: userMessages.at(-1), userMessages,
+      };
       context.budget.countProviderRequest();
       context.requests.push(requestRecord);
       context.active.add(requestRecord.id);
@@ -133,7 +166,7 @@ test('interruption lifecycle does not mistake intentional A abort for a provider
       const userText = request.messages.filter(({ role }) => role === 'user').at(-1)?.content ?? '';
       try {
         if (userText.startsWith('Explícame detalladamente')) {
-          yield { type: 'text_delta', delta: 'Explicación parcial de una API.' };
+          yield { type: 'text_delta', delta: 'Explicación parcial suficientemente larga de una API.' };
           await new Promise((resolve) => {
             if (signal.aborted) resolve();
             else signal.addEventListener('abort', resolve, { once: true });
@@ -149,11 +182,17 @@ test('interruption lifecycle does not mistake intentional A abort for a provider
     },
   };
   context.core = new AssistantCore({ provider, logger: { info() {}, warn() {}, error() {} } });
-  const result = await runInterruption(context);
+  const secondPrompt = 'Detente. ¿Cuánto es 128 + 128? Responde brevemente.';
+  const result = await runInterruption(context, '256', { secondPrompt, allowExtraText: true });
   assert.equal(result.aIssued, true);
   assert.equal(result.aAborted, true);
   assert.equal(result.bIssued, true);
   assert.equal(result.bFinal256, true, JSON.stringify(result));
+  assert.equal(result.bCompleted, true);
+  assert.equal(result.bPromptCorrect, true);
+  assert.equal(result.bHistoryContainsA, true);
+  assert.equal(result.functionalClassification, 'FUNCTIONAL_PASS_EXACT');
+  assert.equal(result.safeBResponse, '256');
   assert.equal(result.staleDelta, false);
   assert.equal(result.staleCompletion, false);
   assert.equal(result.maxActive, 1);
