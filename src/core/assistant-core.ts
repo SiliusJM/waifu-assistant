@@ -14,6 +14,7 @@ import type { ToolManager } from '../tools/tool-manager.js';
 import { LLM_TOOL_CALL_AUTHORIZATION_SOURCE } from '../tools/tool-types.js';
 import type { ToolResult } from '../tools/tool-types.js';
 import type { MemorySnapshot } from '../memory/memory-types.js';
+import { CURRENT_DATA_HONESTY_POLICY } from './current-data-policy.js';
 
 const MAX_TOOL_ARGUMENTS_JSON_LENGTH = 4096;
 
@@ -223,10 +224,14 @@ export class AssistantCore {
         ].join('\n'),
       }]
       : [];
+    const currentDataPolicyMessage = [{
+      role: 'system' as const,
+      content: CURRENT_DATA_HONESTY_POLICY,
+    }];
     const tools = this.getToolDefinitions();
     return {
       sessionId: context.sessionId,
-      messages: [...personalityMessages, ...memoryMessages, ...context.messages.map(({ role, content: messageContent }) => ({
+      messages: [...personalityMessages, ...memoryMessages, ...currentDataPolicyMessage, ...context.messages.map(({ role, content: messageContent }) => ({
         role,
         content: messageContent,
       }))],

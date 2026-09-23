@@ -86,12 +86,12 @@ test('conversation runner reuses one session and preserves multi-turn order', as
   const result = await runner.run(inputs(['one', 'two']));
 
   assert.equal(result.session, session);
-  assert.deepEqual(result.responses.map(({ text }) => text), ['messages=1', 'messages=3']);
+  assert.deepEqual(result.responses.map(({ text }) => text), ['messages=2', 'messages=4']);
   assert.deepEqual(session.getMessages().map(({ role, content }) => ({ role, content })), [
     { role: 'user', content: 'one' },
-    { role: 'assistant', content: 'messages=1' },
+    { role: 'assistant', content: 'messages=2' },
     { role: 'user', content: 'two' },
-    { role: 'assistant', content: 'messages=3' },
+    { role: 'assistant', content: 'messages=4' },
   ]);
 });
 
@@ -168,8 +168,8 @@ test('conversation runner reuses one compiled default personality snapshot acros
   assert.equal(requests.length, 2);
   assert.equal(requests[0]?.messages[0]?.content, snapshot.instructions[0]?.text);
   assert.equal(requests[1]?.messages[0]?.content, snapshot.instructions[0]?.text);
-  assert.equal(requests[0]?.messages.filter(({ role }) => role === 'system').length, snapshot.instructions.length);
-  assert.equal(requests[1]?.messages.filter(({ role }) => role === 'system').length, snapshot.instructions.length);
+  assert.equal(requests[0]?.messages.filter(({ role }) => role === 'system').length, snapshot.instructions.length + 1);
+  assert.equal(requests[1]?.messages.filter(({ role }) => role === 'system').length, snapshot.instructions.length + 1);
   assert.equal(snapshot.personalityId, DEFAULT_PERSONALITY_PROFILE.personalityId);
   assert.equal(snapshot.identity.displayName, 'Yuki');
   assert.ok(Object.isFrozen(snapshot));
@@ -425,7 +425,7 @@ test('clear command resets only the current in-memory Session', async () => {
   const provider = new MockAIProvider({
     responder: (request) => {
       providerCalls += 1;
-      requests.push(request.messages.map(({ content }) => content));
+      requests.push(request.messages.filter(({ role }) => role !== 'system').map(({ content }) => content));
       return { text: `reply-${providerCalls}`, provider: 'mock', model: 'mock-model', finishReason: 'stop' };
     },
   });
