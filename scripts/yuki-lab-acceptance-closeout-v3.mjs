@@ -50,6 +50,15 @@ export function classifyUnicode(text) {
   return 'MINOR_MODEL_INSTRUCTION_FAILURE';
 }
 
+export function classifyInterruptionResponse(text, expectedText = '256') {
+  const value = String(text ?? '').trim();
+  if (!value) return 'FLOW_FAIL';
+  if (value === expectedText) return 'FUNCTIONAL_PASS_EXACT';
+  const escaped = expectedText.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  if (new RegExp(`(?<!\\d)${escaped}(?!\\d)`, 'u').test(value)) return 'FUNCTIONAL_PASS_WITH_EXTRA_TEXT';
+  return /\d/u.test(value) ? 'FUNCTIONAL_FAIL_WRONG_ANSWER' : 'FUNCTIONAL_FAIL_WRONG_TASK';
+}
+
 export function evaluateStreamingRounds({ rounds, finalText }) {
   if (!Array.isArray(rounds) || typeof finalText !== 'string') return 'NOT_VERIFIED';
   const ids = rounds.map(({ requestId }) => requestId).filter(Boolean);
@@ -60,22 +69,27 @@ export function evaluateStreamingRounds({ rounds, finalText }) {
   return finalRound.deltas.join('') === finalText ? 'PASS' : 'FAIL';
 }
 
-export function evaluateInterruptionWindow({ interactionId, events, requestAId, requestBId, bOwnershipAt, assistantMessages, maxActive, expectedText = '256' }) {
+export function evaluateInterruptionWindow({ interactionId, events, requestAId, requestBId, bOwnershipAt, assistantMessages, maxActive, expectedText = '256', allowExtraText = false }) {
   if (!interactionId || !Array.isArray(events) || !Number.isFinite(bOwnershipAt)) return { status: 'NOT_VERIFIED' };
   const local = events.filter((event) => event.interactionId === interactionId);
   const requestA = local.find((event) => event.type === 'request-start' && event.requestId === requestAId);
   const requestB = local.find((event) => event.type === 'request-start' && event.requestId === requestBId);
   const aAborted = local.some((event) => event.type === 'request-abort' && event.requestId === requestAId);
-  const bFinal = local.some((event) => event.type === 'response' && event.requestId === requestBId && event.text?.trim() === expectedText);
+  const bResponse = local.find((event) => event.type === 'response' && event.requestId === requestBId);
+  const bClassification = classifyInterruptionResponse(bResponse?.text, expectedText);
+  const bFinal = bClassification === 'FUNCTIONAL_PASS_EXACT';
+  const bSemanticAnswer = bFinal || (allowExtraText && bClassification === 'FUNCTIONAL_PASS_WITH_EXTRA_TEXT');
   const staleDelta = local.some((event) => event.type === 'delta' && event.requestId === requestAId && event.at >= bOwnershipAt);
   const staleCompletion = local.some((event) => event.type === 'response' && event.requestId === requestAId && event.at >= bOwnershipAt);
   const partialA = assistantMessages?.some((message) => message.requestId === requestAId) ?? false;
-  const complete = Boolean(requestA && aAborted && requestB && bFinal && !partialA
+  const complete = Boolean(requestA && aAborted && requestB && bResponse && bSemanticAnswer && !partialA
     && !staleDelta && !staleCompletion && maxActive === 1);
   return {
     status: complete ? 'PASS' : requestA && requestB && aAborted && Number.isInteger(maxActive) ? 'FAIL' : 'NOT_VERIFIED',
     aIssued: Boolean(requestA), aAborted, bIssued: Boolean(requestB),
-    expectedText, bFinalExpected: bFinal, ...(expectedText === '256' ? { bFinal256: bFinal } : {}),
+    bCompleted: Boolean(bResponse), expectedText, bFinalExpected: bFinal, bSemanticAnswer,
+    classification: bClassification,
+    ...(expectedText === '256' ? { bFinal256: bFinal } : {}),
     partialAPersisted: partialA, staleDelta, staleCompletion, maxActive,
   };
 }
@@ -117,6 +131,7 @@ export function createLiveContext(budget) {
       policyPresent: Array.isArray(body?.messages) && body.messages.some((message) => message?.role === 'system'
         && typeof message.content === 'string' && message.content.includes(CURRENT_DATA_HONESTY_POLICY)),
       userMessageCount: Array.isArray(body?.messages) ? body.messages.filter((message) => message?.role === 'user').length : 0,
+      userMessages: Array.isArray(body?.messages) ? body.messages.filter((message) => message?.role === 'user').map((message) => message.content) : [],
       toolRound: Array.isArray(body?.messages) && body.messages.some((message) => message?.role === 'tool' || message?.tool_calls),
       model: safeModel(body?.model),
       ttftMs: undefined,
@@ -133,6 +148,7 @@ export function createLiveContext(budget) {
       active.delete(id);
     };
     const onAbort = () => {
+      if (request.abortedAt !== undefined) return;
       request.abortedAt ??= performance.now();
       events.push({ type: 'request-abort', requestId: id, at: request.abortedAt });
       if (context) {
@@ -153,9 +169,11 @@ export function createLiveContext(budget) {
     } catch (error) {
       settle();
       init.signal?.removeEventListener('abort', onAbort);
-      if (!init.signal?.aborted) context?.onProviderError?.();
-      if (context) {
-        if (!init.signal?.aborted) context.errors.transport += 1;
+      const expectedCancellation = request.abortedAt !== undefined || init.signal?.aborted === true;
+      if (expectedCancellation && request.abortedAt === undefined) onAbort();
+      if (!expectedCancellation) {
+        context?.onProviderError?.();
+        if (context) context.errors.transport += 1;
       }
       throw error;
     }
@@ -181,8 +199,12 @@ export function createLiveContext(budget) {
         } catch (error) {
           settle();
           init.signal?.removeEventListener('abort', onAbort);
-          if (!init.signal?.aborted) context?.onProviderError?.();
-          if (context && !init.signal?.aborted) context.errors.transport += 1;
+          const expectedCancellation = request.abortedAt !== undefined || init.signal?.aborted === true;
+          if (expectedCancellation && request.abortedAt === undefined) onAbort();
+          if (!expectedCancellation) {
+            context?.onProviderError?.();
+            if (context) context.errors.transport += 1;
+          }
           controller.error(error);
         }
       },
@@ -296,7 +318,10 @@ async function runUnicode(context) {
   return { ...result, status: classification, exact: classification === 'PASS', classification };
 }
 
-export async function runInterruption(context, expectedText = '256') {
+export async function runInterruption(context, expectedText = '256', {
+  secondPrompt = `Detente. Responde únicamente: ${expectedText}`,
+  allowExtraText = false,
+} = {}) {
   if (!context.budget.canReserve(2)) return { status: 'NOT_VERIFIED', reason: 'BUDGET_RESERVE' };
   const interactionId = `interrupt-${Math.round(performance.now())}`;
   const requestStart = context.requests.length;
@@ -307,13 +332,16 @@ export async function runInterruption(context, expectedText = '256') {
   let bOwnershipAt;
   let aRequestId;
   let bRequestId;
+  let bResponseText;
+  let firstPromptVisibleChars = 0;
   const timer = setTimeout(() => exitReady.resolve(), context.interruptionTimeoutMs ?? 45_000);
   context.onProviderError = () => { inputReady.resolve(); exitReady.resolve(); };
   try {
     const run = await runConversation(context, (async function* () {
-      yield 'Explícame detalladamente cómo funciona una API y da varios ejemplos.';
+      const firstPrompt = 'Explícame detalladamente cómo funciona una API y dame varios ejemplos.';
+      yield firstPrompt;
       await inputReady.promise;
-      yield `Detente. Responde únicamente: ${expectedText}`;
+      yield secondPrompt;
       await exitReady.promise;
       yield '/exit';
     }()), {
@@ -321,7 +349,8 @@ export async function runInterruption(context, expectedText = '256') {
       onDelta(delta, event) {
         const request = context.requests.find((item) => item.id === event.requestId);
         if (!bOwnershipAt) {
-          if (delta.trim() && !aRequestId) {
+          firstPromptVisibleChars += delta.trim().length;
+          if (firstPromptVisibleChars >= 32 && !aRequestId) {
             aRequestId = request?.id;
             inputReady.resolve();
           }
@@ -331,7 +360,10 @@ export async function runInterruption(context, expectedText = '256') {
       onResponse(response, event) {
         const request = context.requests.find((item) => item.id === event.requestId);
         if (!bOwnershipAt) inputReady.resolve();
-        else if (!bRequestId && request?.startedAt >= bOwnershipAt) bRequestId = request.id;
+        else if (request?.startedAt >= bOwnershipAt) {
+          bRequestId ??= request.id;
+          bResponseText = response.text;
+        }
         context.events.push({ interactionId, type: 'response', requestId: request?.id, at: event.at, text: response.text });
         if (request?.id === bRequestId || request?.startedAt >= bOwnershipAt) exitReady.resolve();
       },
@@ -353,15 +385,37 @@ export async function runInterruption(context, expectedText = '256') {
     ];
     const assistantMessages = run.session.getMessages().filter(({ role }) => role === 'assistant')
       .map((message, index) => ({ content: message.content, requestId: run.responses[index]?.requestId }));
+    const firstPrompt = 'Explícame detalladamente cómo funciona una API y dame varios ejemplos.';
+    const bRequest = localRequests.find((request) => request.id === bRequestId);
+    const bPromptCorrect = bRequest?.userText === secondPrompt;
+    const bHistoryContainsA = bRequest?.userMessages?.includes(firstPrompt) ?? false;
     const evidence = evaluateInterruptionWindow({
       interactionId, events, requestAId: aRequestId, requestBId: bRequestId,
-      bOwnershipAt, assistantMessages, maxActive: context.maxActiveRequests, expectedText,
+      bOwnershipAt, assistantMessages, maxActive: context.maxActiveRequests, expectedText, allowExtraText,
     });
-    return { ...evidence, status: run.result?.status === 'completed' ? evidence.status : 'NOT_VERIFIED', requestCount: localRequests.length, error: run.error };
+    const functionalClassification = bResponseText === undefined ? 'FLOW_FAIL'
+      : classifyInterruptionResponse(bResponseText, expectedText);
+    const semanticPass = functionalClassification === 'FUNCTIONAL_PASS_EXACT'
+      || (allowExtraText && functionalClassification === 'FUNCTIONAL_PASS_WITH_EXTRA_TEXT');
+    const status = run.result?.status !== 'completed' ? 'NOT_VERIFIED'
+      : bPromptCorrect && bHistoryContainsA && semanticPass && evidence.status === 'PASS' ? 'PASS'
+        : evidence.status === 'NOT_VERIFIED' ? 'NOT_VERIFIED' : 'FAIL';
+    return {
+      ...evidence,
+      status,
+      bCompleted: bResponseText !== undefined,
+      bPromptCorrect,
+      bHistoryContainsA,
+      functionalClassification,
+      safeBResponse: excerpt(bResponseText, 200),
+      requestCount: localRequests.length,
+      error: run.error,
+    };
   } finally {
     clearTimeout(timer);
     context.onProviderError = undefined;
     exitReady.resolve();
+    for (const request of context.requests.slice(requestStart)) delete request.userMessages;
   }
 }
 
