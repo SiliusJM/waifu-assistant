@@ -504,3 +504,54 @@ test('matrix continuation can account for prior real calls without resetting the
   assert.equal(report.providers.groq.inferenceCalls, 0);
   assert.equal(report.providers.gemini.inferenceCalls, 0);
 });
+
+test('bounded direct live-gate configuration excludes OpenRouter and enforces 14 total / 7 per provider offline', async () => {
+  const env = {
+    ...baseEnv('groq'),
+    ...baseEnv('gemini'),
+  };
+  const providerCalls = { groq: 0, gemini: 0 };
+  const fetchImpl = async (input, init = {}) => {
+    const url = String(input);
+    const providerKey = url.includes('groq.com') ? 'groq' : 'gemini';
+    if (url.endsWith('/models')) {
+      const model = providerKey === 'groq'
+        ? { id: 'fixture-groq-model', created: 1 }
+        : { id: 'gemini-2.5-flash-lite', supportedGenerationMethods: ['generateContent'] };
+      return Response.json({ data: [model] });
+    }
+    providerCalls[providerKey] += 1;
+    const body = JSON.parse(init.body);
+    const prompt = String(body.messages.at(-1)?.content ?? '');
+    if (prompt.includes('DIRECT-OK')) return sseResponse({ content: 'DIRECT-OK', signal: init.signal });
+    if (prompt.includes('ñ á ü 🌸')) return sseResponse({ content: 'ñ á ü 🌸', signal: init.signal });
+    if (prompt.includes('¿Cuál era mi código temporal?')) return sseResponse({ content: 'NEBULA-731', signal: init.signal });
+    if (prompt.includes('Mi código temporal')) return sseResponse({ content: 'Hola Yuki, estoy disponible. Recordaré NEBULA-731.', signal: init.signal });
+    if (prompt.includes('¿qué es una API?')) return sseResponse({ content: 'Una API conecta aplicaciones.', signal: init.signal });
+    if (prompt.includes('precio actual de Bitcoin')) return sseResponse({ content: 'Hola Yuki, estoy disponible. No puedo verificar datos actuales y no inventaré el precio.', signal: init.signal });
+    if (prompt.includes('Usa la calculadora')) return sseResponse({ content: '355', signal: init.signal });
+    return sseResponse({ content: 'Respuesta fixture.', signal: init.signal });
+  };
+  const report = await runCompatibilityMatrix({
+    env,
+    fetchImpl,
+    providerKeys: ['groq', 'gemini'],
+    maxTotalInferenceRequests: 14,
+    maxProviderInferenceRequests: 7,
+  });
+  assert.deepEqual(Object.keys(report.providers), ['groq', 'gemini']);
+  assert.equal(report.totalInferenceRequests, 14);
+  assert.equal(report.inferenceBudget, '14/14');
+  assert.deepEqual(providerCalls, { groq: 7, gemini: 7 });
+  for (const providerReport of Object.values(report.providers)) {
+    assert.equal(providerReport.basicCompletion, 'PASS');
+    assert.equal(providerReport.unicode, 'PASS');
+    assert.equal(providerReport.context, 'PASS');
+    assert.equal(providerReport.fullStackYuki, 'PASS');
+    assert.equal(providerReport.currentDataHonesty, 'PASS');
+    assert.equal(providerReport.toolCalling, 'TOOL_NOT_VERIFIED');
+    assert.equal(providerReport.interruption.status, 'NOT RUN');
+    assert.equal(providerReport.inferenceCalls, 7);
+    assert.equal(providerReport.retries, 0);
+  }
+});

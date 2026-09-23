@@ -358,9 +358,11 @@ function budgetError() {
   return error;
 }
 
-function hasInferenceCapacity(globalBudget, perProviderBudget, count = 1) {
-  return globalBudget.providerRequests + count <= MAX_TOTAL_INFERENCE_REQUESTS
-    && perProviderBudget.providerRequests + count <= MAX_PROVIDER_INFERENCE_REQUESTS
+function hasInferenceCapacity(globalBudget, perProviderBudget, count = 1,
+  maxTotalInferenceRequests = MAX_TOTAL_INFERENCE_REQUESTS,
+  maxProviderInferenceRequests = MAX_PROVIDER_INFERENCE_REQUESTS) {
+  return globalBudget.providerRequests + count <= maxTotalInferenceRequests
+    && perProviderBudget.providerRequests + count <= maxProviderInferenceRequests
     && globalBudget.canReserve(count) && perProviderBudget.canReserve(count);
 }
 
@@ -370,7 +372,9 @@ function quietLogger() {
   } });
 }
 
-function createProviderContext(config, model, globalBudget, perProviderBudget, fetchImpl = fetch, timeoutMs = MATRIX_TIMEOUT_MS) {
+function createProviderContext(config, model, globalBudget, perProviderBudget, fetchImpl = fetch, timeoutMs = MATRIX_TIMEOUT_MS,
+  maxTotalInferenceRequests = MAX_TOTAL_INFERENCE_REQUESTS,
+  maxProviderInferenceRequests = MAX_PROVIDER_INFERENCE_REQUESTS) {
   const requests = [];
   const active = new Set();
   let maxActiveRequests = 0;
@@ -467,7 +471,7 @@ function createProviderContext(config, model, globalBudget, perProviderBudget, f
     let body;
     try { body = JSON.parse(String(init.body ?? '{}')); } catch { body = undefined; }
     const kind = requestKind(body);
-    if (!hasInferenceCapacity(globalBudget, perProviderBudget)) throw budgetError();
+    if (!hasInferenceCapacity(globalBudget, perProviderBudget, 1, maxTotalInferenceRequests, maxProviderInferenceRequests)) throw budgetError();
     globalBudget.countProviderRequest({ kind });
     perProviderBudget.countProviderRequest({ kind });
     return observedFetch(input, { ...init, redirect: 'error' });
@@ -564,7 +568,8 @@ function summarizeLatency(requests) {
 }
 
 async function runInterruption(context, graceMs = 5000) {
-  if (!hasInferenceCapacity(context.globalBudget, context.perProviderBudget, 2)) return { status: 'NOT RUN', reason: 'BUDGET' };
+  if (!hasInferenceCapacity(context.globalBudget, context.perProviderBudget, 2,
+    context.maxTotalInferenceRequests, context.maxProviderInferenceRequests)) return { status: 'NOT RUN', reason: 'BUDGET' };
   const runner = new ConversationRunner(context.core);
   const initialRequestIndex = context.requests.length;
   let aId;
@@ -721,15 +726,21 @@ function currentDataHonest(text) {
 
 async function runProviderValidationInternal(providerKey, {
   env = process.env,
-  globalBudget = new ProviderRequestBudget(MAX_TOTAL_INFERENCE_REQUESTS),
+  globalBudget,
   fetchImpl = fetch,
   timeoutMs = MATRIX_TIMEOUT_MS,
   interruptionGraceMs = 5000,
   priorInferenceRequests = 0,
+  maxTotalInferenceRequests = MAX_TOTAL_INFERENCE_REQUESTS,
+  maxProviderInferenceRequests = MAX_PROVIDER_INFERENCE_REQUESTS,
 } = {}) {
-  if (!Number.isInteger(priorInferenceRequests) || priorInferenceRequests < 0 || priorInferenceRequests > MAX_PROVIDER_INFERENCE_REQUESTS) {
+  if (!Number.isInteger(maxTotalInferenceRequests) || maxTotalInferenceRequests < 1
+    || !Number.isInteger(maxProviderInferenceRequests) || maxProviderInferenceRequests < 1
+    || !Number.isInteger(priorInferenceRequests) || priorInferenceRequests < 0
+    || priorInferenceRequests > maxProviderInferenceRequests) {
     throw new TypeError('Invalid prior provider inference usage.');
   }
+  globalBudget ??= new ProviderRequestBudget(maxTotalInferenceRequests);
   const config = readProviderConfig(providerKey, env);
   const report = newProviderReport(config);
   report.inferenceCalls = priorInferenceRequests;
@@ -749,7 +760,7 @@ async function runProviderValidationInternal(providerKey, {
     report.limitations.push('Configured model override is malformed; no inference was sent.');
     return { report, globalBudget };
   }
-  const perProviderBudget = new ProviderRequestBudget(MAX_PROVIDER_INFERENCE_REQUESTS);
+  const perProviderBudget = new ProviderRequestBudget(maxProviderInferenceRequests);
   perProviderBudget.providerRequests = priorInferenceRequests;
   const discovery = await discoverProviderModels(config, { fetchImpl, budget: perProviderBudget });
   report.metadataRequests = perProviderBudget.metadataRequests;
@@ -779,12 +790,16 @@ async function runProviderValidationInternal(providerKey, {
     return { report, globalBudget };
   }
 
-  const context = createProviderContext(config, selection.selectedModel, globalBudget, perProviderBudget, fetchImpl, timeoutMs);
+  const context = createProviderContext(config, selection.selectedModel, globalBudget, perProviderBudget, fetchImpl, timeoutMs,
+    maxTotalInferenceRequests, maxProviderInferenceRequests);
+  context.maxTotalInferenceRequests = maxTotalInferenceRequests;
+  context.maxProviderInferenceRequests = maxProviderInferenceRequests;
   context.timeoutMs = timeoutMs;
   const runner = new ConversationRunner(context.core);
   const stop = { value: false };
   const invoke = async (prompt, targetRunner = runner) => {
-    if (stop.value || !hasInferenceCapacity(globalBudget, perProviderBudget)) return undefined;
+    if (stop.value || !hasInferenceCapacity(globalBudget, perProviderBudget, 1,
+      maxTotalInferenceRequests, maxProviderInferenceRequests)) return undefined;
     const result = await runTurn(context, targetRunner, prompt);
     const lastRequest = result.requests.at(-1);
     if (lastRequest?.failureClass && ['AUTH_FAILURE', 'MODEL_UNAVAILABLE', 'MODEL_UNSUPPORTED_CAPABILITY', 'PROTOCOL_INCOMPATIBLE', 'PAID_ONLY_OR_NOT_FREE'].includes(lastRequest.failureClass)) {
@@ -816,7 +831,8 @@ async function runProviderValidationInternal(providerKey, {
         : /[�]|(?:ÃƒÂ±|ÃƒÂ¡|ÃƒÂ¼|Ã°Å¸)/u.test(normalized) ? 'UTF8_TRANSPORT_FAILURE' : 'FAIL';
     }
   }
-  if (!stop.value && hasInferenceCapacity(globalBudget, perProviderBudget, 3)) {
+  if (!stop.value && hasInferenceCapacity(globalBudget, perProviderBudget, 3,
+    maxTotalInferenceRequests, maxProviderInferenceRequests)) {
     const sessionRunner = new ConversationRunner(context.core);
     const first = await invoke('Mi código temporal es NEBULA-731. Confírmalo brevemente.', sessionRunner);
     const second = !stop.value ? await invoke('Responde brevemente: ¿qué es una API?', sessionRunner) : undefined;
@@ -827,7 +843,8 @@ async function runProviderValidationInternal(providerKey, {
     if (third?.run.status !== 'completed' || !hasSemanticInteger(thirdText, 'NEBULA-731')) stop.value = true;
   } else if (!stop.value) report.context = 'NOT RUN';
 
-  if (!stop.value && hasInferenceCapacity(globalBudget, perProviderBudget)) {
+  if (!stop.value && hasInferenceCapacity(globalBudget, perProviderBudget, 1,
+    maxTotalInferenceRequests, maxProviderInferenceRequests)) {
     const fullStack = await invoke(
       'Hola Yuki. Responde brevemente en español, confirma que estás disponible. Además, ¿cuál es el precio actual de Bitcoin? Si no puedes verificar datos actuales, dilo claramente y no inventes una cifra.',
     );
@@ -838,7 +855,8 @@ async function runProviderValidationInternal(providerKey, {
     }
   }
 
-  if (!stop.value && hasInferenceCapacity(globalBudget, perProviderBudget)) {
+  if (!stop.value && hasInferenceCapacity(globalBudget, perProviderBudget, 1,
+    maxTotalInferenceRequests, maxProviderInferenceRequests)) {
     const toolStart = context.requests.length;
     const toolTurn = await invoke('Usa la calculadora disponible para calcular: (27 * 13) + 4.');
     const toolRequests = context.requests.slice(toolStart);
@@ -856,7 +874,8 @@ async function runProviderValidationInternal(providerKey, {
     });
   }
 
-  if (!stop.value && hasInferenceCapacity(globalBudget, perProviderBudget, 2)) {
+  if (!stop.value && hasInferenceCapacity(globalBudget, perProviderBudget, 2,
+    maxTotalInferenceRequests, maxProviderInferenceRequests)) {
     report.interruption = await runInterruption(context, interruptionGraceMs);
     if (report.interruption.status === 'FAIL' && report.interruption.requestErrors?.length) {
       const last = report.interruption.requestErrors.at(-1);
@@ -909,24 +928,34 @@ export async function runCompatibilityMatrix({
   fetchImpl = fetch,
   priorInferenceRequests = {},
   priorMetadataRequests = 0,
+  providerKeys = Object.keys(PROVIDER_DEFINITIONS),
+  maxTotalInferenceRequests = MAX_TOTAL_INFERENCE_REQUESTS,
+  maxProviderInferenceRequests = MAX_PROVIDER_INFERENCE_REQUESTS,
 } = {}) {
+  if (!Array.isArray(providerKeys) || providerKeys.length === 0 || new Set(providerKeys).size !== providerKeys.length
+    || providerKeys.some((providerKey) => !Object.hasOwn(PROVIDER_DEFINITIONS, providerKey))
+    || !Number.isInteger(maxTotalInferenceRequests) || maxTotalInferenceRequests < 1
+    || !Number.isInteger(maxProviderInferenceRequests) || maxProviderInferenceRequests < 1) {
+    throw new TypeError('Invalid matrix scope or inference budget.');
+  }
   const configuredResults = {};
-  const globalBudget = new ProviderRequestBudget(MAX_TOTAL_INFERENCE_REQUESTS);
+  const globalBudget = new ProviderRequestBudget(maxTotalInferenceRequests);
   const priorTotal = Object.entries(priorInferenceRequests).reduce((sum, [providerKey, count]) => {
-    if (!Object.hasOwn(PROVIDER_DEFINITIONS, providerKey) || !Number.isInteger(count) || count < 0 || count > MAX_PROVIDER_INFERENCE_REQUESTS) {
+    if (!Object.hasOwn(PROVIDER_DEFINITIONS, providerKey) || !Number.isInteger(count) || count < 0 || count > maxProviderInferenceRequests) {
       throw new TypeError('Invalid prior provider inference usage.');
     }
     return sum + count;
   }, 0);
-  if (priorTotal > MAX_TOTAL_INFERENCE_REQUESTS || !Number.isInteger(priorMetadataRequests) || priorMetadataRequests < 0) {
+  if (priorTotal > maxTotalInferenceRequests || !Number.isInteger(priorMetadataRequests) || priorMetadataRequests < 0) {
     throw new TypeError('Invalid prior matrix usage.');
   }
   globalBudget.providerRequests = priorTotal;
   globalBudget.metadataRequests = priorMetadataRequests;
   let metadataRequests = priorMetadataRequests;
-  for (const providerKey of Object.keys(PROVIDER_DEFINITIONS)) {
+  for (const providerKey of providerKeys) {
     const result = await runProviderValidation(providerKey, {
       env, globalBudget, fetchImpl, priorInferenceRequests: priorInferenceRequests[providerKey] ?? 0,
+      maxTotalInferenceRequests, maxProviderInferenceRequests,
     });
     configuredResults[providerKey] = result.report;
     metadataRequests += result.report.metadataRequests;
@@ -934,7 +963,7 @@ export async function runCompatibilityMatrix({
   return {
     status: 'COMPLETED', costMode: 'FREE ONLY', billingEnabledByTask: false, creditsPurchased: false,
     totalInferenceRequests: globalBudget.providerRequests,
-    inferenceBudget: `${globalBudget.providerRequests}/${MAX_TOTAL_INFERENCE_REQUESTS}`,
+    inferenceBudget: `${globalBudget.providerRequests}/${maxTotalInferenceRequests}`,
     metadataRequests,
     secretExposure: false,
     providers: configuredResults,
@@ -959,7 +988,11 @@ export function assertSafeReport(report, env = process.env) {
 }
 
 export async function main() {
-  const report = await runCompatibilityMatrix();
+  const report = await runCompatibilityMatrix({
+    providerKeys: ['groq', 'gemini'],
+    maxTotalInferenceRequests: 14,
+    maxProviderInferenceRequests: 7,
+  });
   assertSafeReport(report);
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   if (report.totalInferenceRequests > MAX_TOTAL_INFERENCE_REQUESTS) process.exitCode = 1;
