@@ -341,14 +341,55 @@ test('empty object arguments are valid while a missing argument fragment is inva
   assert.equal(emptyString.code, 'INVALID_RESPONSE_ERROR');
 });
 
-test('protocol-compatible null text alongside tool_calls exposes parser format incompatibility offline', async () => {
+test('protocol-compatible null text alongside tool_calls is accepted offline', async () => {
   const result = await parseOfflineToolStream([
     toolDelta([{ index: 0, id: 'call-null-content', function: { name: 'lookup', arguments: '{}' } }], 'tool_calls', { content: null }),
   ]);
-  assert.equal(result.accepted, false);
-  assert.equal(result.code, 'INVALID_RESPONSE_ERROR');
-  assert.equal(classifyToolFormatOutcome({ protocolCompatible: true, parserAccepted: false }), 'TOOL_FORMAT_INCOMPATIBLE');
+  assert.equal(result.accepted, true);
+  assert.equal(result.response.text, '');
+  assert.equal(result.response.finishReason, 'tool_calls');
+  assert.deepEqual(result.response.toolCalls, [{ id: 'call-null-content', name: 'lookup', argumentsJson: '{}' }]);
   assert.equal(result.fetchCalls, 1);
+});
+
+test('streamed tools accept omitted, empty and fragmented null content without producing text', async () => {
+  for (const content of [{}, { content: '' }, { content: null }]) {
+    const result = await parseOfflineToolStream([
+      toolDelta([{ index: 0, id: 'call-fragment', function: { name: 'lookup', arguments: '{' } }], null, content),
+      toolDelta([{ index: 0, function: { arguments: '}' } }], 'tool_calls', content),
+    ]);
+    assert.equal(result.accepted, true);
+    assert.equal(result.response.text, '');
+    assert.equal(result.response.finishReason, 'tool_calls');
+    assert.deepEqual(result.response.toolCalls, [{ id: 'call-fragment', name: 'lookup', argumentsJson: '{}' }]);
+  }
+});
+
+test('streamed tools still reject invalid content and incomplete or invalid tool fields', async () => {
+  const valid = { index: 0, id: 'call-safe', function: { name: 'lookup', arguments: '{}' } };
+  for (const content of [0, false, [], {}]) {
+    const result = await parseOfflineToolStream([toolDelta([valid], 'tool_calls', { content })]);
+    assert.equal(result.accepted, false);
+    assert.equal(result.code, 'INVALID_RESPONSE_ERROR');
+  }
+  for (const call of [
+    { ...valid, id: undefined },
+    { ...valid, id: 1 },
+    { ...valid, function: { arguments: '{}' } },
+    { ...valid, function: { name: 1, arguments: '{}' } },
+    { ...valid, function: { name: 'lookup' } },
+    { ...valid, function: { name: 'lookup', arguments: '' } },
+    { ...valid, function: { name: 'lookup', arguments: {} } },
+  ]) {
+    const result = await parseOfflineToolStream([toolDelta([call], 'tool_calls', { content: null })]);
+    assert.equal(result.accepted, false);
+    assert.equal(result.code, 'INVALID_RESPONSE_ERROR');
+  }
+  const oversized = await parseOfflineToolStream([
+    toolDelta([{ ...valid, function: { name: 'lookup', arguments: 'x'.repeat(4097) } }], 'tool_calls', { content: null }),
+  ]);
+  assert.equal(oversized.accepted, false);
+  assert.equal(oversized.code, 'TOOL_ARGUMENTS_ERROR');
 });
 
 test('request budgets count inference separately and enforce hard maxima', () => {

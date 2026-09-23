@@ -234,6 +234,30 @@ test('direct provider parses SSE deltas split across chunks and requests streami
   );
 });
 
+test('direct provider accepts null content alongside streamed tool calls', async () => {
+  await withServer(
+    (response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.end(`data: ${JSON.stringify({ choices: [{
+        delta: { content: null, tool_calls: [{ index: 0, id: 'call-null', function: { name: 'local_time', arguments: '{}' } }] },
+        finish_reason: 'tool_calls',
+      }] })}\n\ndata: [DONE]\n\n`);
+    },
+    async (baseURL) => {
+      const events: AIStreamEvent[] = [];
+      for await (const event of provider(baseURL).stream(request)) events.push(event);
+      assert.equal(events.some((event) => event.type === 'text_delta'), false);
+      const completed = events.at(-1);
+      assert.equal(completed?.type, 'completed');
+      if (completed?.type === 'completed') {
+        assert.equal(completed.response.text, '');
+        assert.equal(completed.response.finishReason, 'tool_calls');
+        assert.deepEqual(completed.response.toolCalls, [{ id: 'call-null', name: 'local_time', argumentsJson: '{}' }]);
+      }
+    },
+  );
+});
+
 test('direct provider reconstructs fragmented streamed tool calls with a bounded argument', async () => {
   await withServer(
     (response) => {

@@ -392,7 +392,7 @@ export class DirectAIProvider implements AIProvider {
           const { choice, delta, usage: eventUsage } = parseStreamChoice(payload);
           usage = eventUsage ?? usage;
           if (Object.keys(choice).length === 0) continue;
-          if (typeof delta.content !== 'undefined') {
+          if (delta.content !== undefined && delta.content !== null) {
             if (typeof delta.content !== 'string') {
               throw new AssistantError('The provider returned an invalid text delta.', {
                 code: 'INVALID_RESPONSE_ERROR', retryable: false,
