@@ -104,6 +104,14 @@ La CLI reconoce `/help`, `/time`, `/calc <expression>`, `/status`, `/history`,
 LLM. La memoria explícita se guarda localmente y puede redirigirse mediante
 `YUKI_MEMORY_PATH`; no se mezcla con las sesiones guardadas.
 
+### Exportar conversaciones
+
+En el modo interactivo, `/export` guarda la conversación actual como Markdown;
+`/export charla-yuki` permite elegir un nombre de archivo. Los archivos se
+guardan en `~/.waifu-assistant/exports`. La exportación es explícita, no modifica
+la Session ni incluye memoria persistente, datos internos de herramientas o
+metadatos del proveedor.
+
 ## MVP local con LLM real
 
 Sin `AI_PROVIDER` ni `AI_PROVIDER_PROFILE`, el CLI usa `MockAIProvider` y no realiza llamadas externas.

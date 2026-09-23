@@ -373,6 +373,32 @@ test('saved-session commands stay local and do not call the provider or contamin
   ]);
 });
 
+test('/export is routed locally, appears in help, and does not become a conversation turn', async () => {
+  let providerCalls = 0;
+  const provider = new MockAIProvider({
+    responder: () => {
+      providerCalls += 1;
+      return { text: 'reply', provider: 'mock', model: 'mock-model', finishReason: 'stop' };
+    },
+  });
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const commands: string[] = [];
+  const result = await runner.run(inputs(['message A', '/export', '/export charla-yuki', 'message B']), {
+    onCommand: async (command) => { commands.push(command); },
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(providerCalls, 2);
+  assert.deepEqual(commands, ['/export', '/export charla-yuki']);
+  assert.match(LOCAL_COMMAND_HELP, /\/export \[nombre\]/u);
+  assert.deepEqual(result.session.getMessages().map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'message A' },
+    { role: 'assistant', content: 'reply' },
+    { role: 'user', content: 'message B' },
+    { role: 'assistant', content: 'reply' },
+  ]);
+});
+
 test('unknown slash commands stay local and do not reach the provider or Session', async () => {
   let providerCalls = 0;
   const provider = new MockAIProvider({
