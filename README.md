@@ -144,3 +144,4 @@ Los proveedores reales de STT/TTS se evaluarán mediante un spike comparativo in
 - `docs/phases/phase-06-personality-system.md`: alcance, contratos, seguridad y verificación de Phase 6.
 - `docs/phases/phase-07-avatar-system.md`: definición, implementación acotada y criterios de Phase 7.
 - `docs/adr/ADR-010-avatar-system-definition.md`: decisión arquitectónica de Avatar System y límites de implementación.
+Interactive responses are streamed progressively. While a response is active, a new normal input replaces it; `/cancel` stops the active response and `/exit` closes the session cleanly.

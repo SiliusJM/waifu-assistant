@@ -1,5 +1,4 @@
-import type { AssistantCore } from './assistant-core.js';
-import type { AssistantStreamEvent } from './assistant-core.js';
+import type { AssistantCore, AssistantStreamEvent } from './assistant-core.js';
 import type { Response } from './response.js';
 import type { Session } from './session.js';
 import type { PersonalitySnapshot } from '../personality/personality-types.js';
@@ -7,6 +6,7 @@ import { AssistantError } from '../shared/errors.js';
 import type { MemorySnapshot } from '../memory/memory-types.js';
 
 export const CONVERSATION_EXIT_COMMAND = '/exit';
+export const CONVERSATION_CANCEL_COMMAND = '/cancel';
 export const CONVERSATION_HELP_COMMAND = '/help';
 export const CONVERSATION_TIME_COMMAND = '/time';
 export const CONVERSATION_CALC_COMMAND = '/calc';
@@ -23,19 +23,20 @@ export const CONVERSATION_DELETE_SESSION_COMMAND = '/delete-session';
 export const LOCAL_COMMAND_HELP = [
   'Comandos disponibles:',
   '  /help              Muestra esta ayuda',
+  '  /cancel            Interrumpe la respuesta activa',
   '  /time              Muestra la hora local',
-  '  /calc <expresión>  Calcula una expresión aritmética',
-  '  /exit              Cierra la conversación',
-  '  /status            Muestra el estado de la sesión',
+  '  /calc <expresion>  Calcula una expresion aritmetica',
+  '  /exit              Cierra la conversacion',
+  '  /status            Muestra el estado de la sesion',
   '  /history           Muestra el historial conversacional',
-  '  /clear             Limpia la sesión actual',
-  '  /remember <key> <value>  Guarda una memoria explícita',
+  '  /clear             Limpia la sesion actual',
+  '  /remember <key> <value>  Guarda una memoria explicita',
   '  /memory            Lista las memorias guardadas',
   '  /forget <key>      Elimina una memoria',
-  '  /save-session <name>  Guarda la sesión actual',
+  '  /save-session <name>  Guarda la sesion actual',
   '  /sessions           Lista las sesiones guardadas',
-  '  /load-session <name>  Carga una sesión guardada',
-  '  /delete-session <name>  Elimina una sesión guardada',
+  '  /load-session <name>  Carga una sesion guardada',
+  '  /delete-session <name>  Elimina una sesion guardada',
 ].join('\n');
 
 export type ConversationRunStatus = 'completed' | 'cancelled';
@@ -52,10 +53,14 @@ export interface ConversationRunOptions {
   readonly personality?: PersonalitySnapshot;
   readonly onResponse?: (response: Response) => void | Promise<void>;
   readonly onDelta?: (delta: string) => void | Promise<void>;
+  readonly onInterruption?: () => void | Promise<void>;
+  /** Enables live input replacement while a response is streaming. */
+  readonly interruptible?: boolean;
   readonly memory?: () => MemorySnapshot | Promise<MemorySnapshot>;
   readonly onCommand?: (command: string, context: {
     readonly signal?: AbortSignal;
     readonly sessionId: string;
+    readonly active: boolean;
   }) => void | Promise<void>;
 }
 
@@ -87,6 +92,16 @@ async function nextWithSignal(
   });
 }
 
+type TurnResult = { readonly status: 'completed'; readonly response: Response }
+  | { readonly status: 'cancelled' };
+
+interface ActiveTurn {
+  readonly generation: number;
+  readonly controller: AbortController;
+  promise: Promise<TurnResult>;
+  cancelRequested: boolean;
+}
+
 export class ConversationRunner {
   readonly session: Session;
 
@@ -105,16 +120,221 @@ export class ConversationRunner {
     const exitCommand = options.exitCommand ?? CONVERSATION_EXIT_COMMAND;
     const iterator = inputs[Symbol.asyncIterator]();
     let sourceFinished = false;
+    let inputPromise: Promise<IteratorResult<string> | undefined> | undefined = nextWithSignal(iterator, options.signal);
+    let pendingNormalInput: string | undefined;
+    let generation = 0;
+    let active: ActiveTurn | undefined;
+    let cancelled = false;
+
+    const requestCancel = (turn: ActiveTurn): void => {
+      turn.cancelRequested = true;
+      turn.controller.abort();
+    };
+    const onRunAbort = (): void => {
+      cancelled = true;
+      if (active) requestCancel(active);
+    };
+    if (options.signal?.aborted) onRunAbort();
+    else options.signal?.addEventListener('abort', onRunAbort, { once: true });
+
+    const startTurn = (input: string): void => {
+      const turnGeneration = ++generation;
+      const controller = new AbortController();
+      const turn: ActiveTurn = {
+        generation: turnGeneration,
+        controller,
+        cancelRequested: false,
+        promise: Promise.resolve({ status: 'cancelled' }),
+      };
+      const onExternalAbort = (): void => requestCancel(turn);
+      if (options.signal?.aborted) onExternalAbort();
+      else options.signal?.addEventListener('abort', onExternalAbort, { once: true });
+      const promise = (async (): Promise<TurnResult> => {
+        try {
+          let response: Response | undefined;
+          let emittedDelta = false;
+          for await (const event of this.core.respondStream(this.session, input, {
+            signal: controller.signal,
+            personality: options.personality,
+            memory: await options.memory?.(),
+            isCurrent: () => active?.generation === turnGeneration && !turn.cancelRequested,
+          })) {
+            const streamEvent = event as AssistantStreamEvent;
+            if (streamEvent.type === 'text_delta') {
+              if (active?.generation !== turnGeneration || turn.cancelRequested) continue;
+              emittedDelta = true;
+              await options.onDelta?.(streamEvent.delta);
+            } else {
+              response = streamEvent.response;
+            }
+          }
+          if (!response || turn.cancelRequested || active?.generation !== turnGeneration) {
+            return { status: 'cancelled' };
+          }
+          if (!emittedDelta && response.text) await options.onDelta?.(response.text);
+          return { status: 'completed', response };
+        } catch (error) {
+          if (controller.signal.aborted || turn.cancelRequested) return { status: 'cancelled' };
+          throw error;
+        } finally {
+          options.signal?.removeEventListener('abort', onExternalAbort);
+        }
+      })();
+      turn.promise = promise;
+      active = turn;
+    };
+
+    const commandContext = (activeAtArrival: boolean) => ({
+      signal: options.signal,
+      sessionId: this.session.id,
+      active: activeAtArrival,
+    });
+
+    const isLocalCommand = (input: string): boolean => input === CONVERSATION_HELP_COMMAND
+      || input === CONVERSATION_CANCEL_COMMAND
+      || input === CONVERSATION_TIME_COMMAND
+      || input === CONVERSATION_CALC_COMMAND
+      || input.startsWith(`${CONVERSATION_CALC_COMMAND} `)
+      || input === CONVERSATION_STATUS_COMMAND
+      || input === CONVERSATION_HISTORY_COMMAND
+      || input === CONVERSATION_CLEAR_COMMAND
+      || input === CONVERSATION_MEMORY_COMMAND
+      || input === CONVERSATION_REMEMBER_COMMAND
+      || input.startsWith(`${CONVERSATION_REMEMBER_COMMAND} `)
+      || input === CONVERSATION_FORGET_COMMAND
+      || input.startsWith(`${CONVERSATION_FORGET_COMMAND} `)
+      || input === CONVERSATION_SAVE_SESSION_COMMAND
+      || input.startsWith(`${CONVERSATION_SAVE_SESSION_COMMAND} `)
+      || input === CONVERSATION_SESSIONS_COMMAND
+      || input === CONVERSATION_LOAD_SESSION_COMMAND
+      || input.startsWith(`${CONVERSATION_LOAD_SESSION_COMMAND} `)
+      || input === CONVERSATION_DELETE_SESSION_COMMAND
+      || input.startsWith(`${CONVERSATION_DELETE_SESSION_COMMAND} `);
+
+    const executeLocalCommand = async (input: string, activeAtArrival: boolean): Promise<void> => {
+      if (!options.onCommand) {
+        throw new AssistantError('The local command is unavailable.', {
+          code: 'TOOL_UNAVAILABLE_ERROR', retryable: false,
+        });
+      }
+      await options.onCommand(input, commandContext(activeAtArrival));
+    };
+
+    const completeActive = async (): Promise<void> => {
+      if (!active) return;
+      const finished = active;
+      const result = await finished.promise;
+      active = undefined;
+      if (result.status === 'completed') {
+        responses.push(result.response);
+        await options.onResponse?.(result.response);
+      }
+    };
 
     try {
       while (true) {
-        const next = await nextWithSignal(iterator, options.signal);
+        if (active) {
+          if (options.interruptible !== true) {
+            const result = await active.promise;
+            active = undefined;
+            if (result.status === 'completed') {
+              responses.push(result.response);
+              await options.onResponse?.(result.response);
+            }
+            if (cancelled) {
+              return { status: 'cancelled', session: this.session, responses: [...responses] };
+            }
+            if (pendingNormalInput) {
+              const nextInput = pendingNormalInput;
+              pendingNormalInput = undefined;
+              startTurn(nextInput);
+            } else if (sourceFinished) {
+              return { status: 'completed', session: this.session, responses: [...responses] };
+            }
+            continue;
+          }
+          const turnPromise = active.promise.then((result) => ({ kind: 'turn' as const, result }));
+          const nextInputPromise = inputPromise?.then((next) => ({ kind: 'input' as const, next }));
+          const event = nextInputPromise
+            ? await Promise.race([turnPromise, nextInputPromise])
+            : await turnPromise;
+
+          if (event.kind === 'turn') {
+            const result = event.result;
+            active = undefined;
+            if (result.status === 'completed') {
+              responses.push(result.response);
+              await options.onResponse?.(result.response);
+            }
+            if (pendingNormalInput) {
+              const nextInput = pendingNormalInput;
+              pendingNormalInput = undefined;
+              startTurn(nextInput);
+            } else if (sourceFinished) {
+              return { status: 'completed', session: this.session, responses: [...responses] };
+            }
+            continue;
+          }
+
+          const next = event.next;
+          inputPromise = nextWithSignal(iterator, options.signal);
+          if (next === undefined) {
+            cancelled = true;
+            requestCancel(active);
+            await completeActive();
+            return { status: 'cancelled', session: this.session, responses: [...responses] };
+          }
+          if (next.done) {
+            sourceFinished = true;
+            cancelled = options.signal?.aborted === true;
+            inputPromise = undefined;
+            continue;
+          }
+          const input = next.value.trim();
+          if (!input) continue;
+          if (input === exitCommand) {
+            requestCancel(active);
+            await completeActive();
+            await options.onInterruption?.();
+            return { status: 'completed', session: this.session, responses: [...responses] };
+          }
+          if (input === CONVERSATION_CANCEL_COMMAND) {
+            requestCancel(active);
+            await completeActive();
+            await options.onInterruption?.();
+            await executeLocalCommand(input, true);
+            continue;
+          }
+          if (input.startsWith('/')) {
+            requestCancel(active);
+            await completeActive();
+            await options.onInterruption?.();
+            await executeLocalCommand(input, true);
+            continue;
+          }
+          const wasPending = pendingNormalInput !== undefined;
+          requestCancel(active);
+          pendingNormalInput = input;
+          if (!wasPending) await options.onInterruption?.();
+          continue;
+        }
+
+        if (pendingNormalInput) {
+          const nextInput = pendingNormalInput;
+          pendingNormalInput = undefined;
+          startTurn(nextInput);
+          continue;
+        }
+        if (sourceFinished) return { status: 'completed', session: this.session, responses: [...responses] };
+        const next = inputPromise ? await inputPromise : undefined;
+        inputPromise = nextWithSignal(iterator, options.signal);
         if (next === undefined) {
           return { status: 'cancelled', session: this.session, responses: [...responses] };
         }
         if (next.done) {
           sourceFinished = true;
-          return { status: 'completed', session: this.session, responses: [...responses] };
+          inputPromise = undefined;
+          continue;
         }
 
         const input = next.value.trim();
@@ -123,83 +343,22 @@ export class ConversationRunner {
           sourceFinished = true;
           return { status: 'completed', session: this.session, responses: [...responses] };
         }
-        if (input === CONVERSATION_HELP_COMMAND || input === CONVERSATION_TIME_COMMAND
-          || input === CONVERSATION_CALC_COMMAND
-          || input.startsWith(`${CONVERSATION_CALC_COMMAND} `)
-          || input === CONVERSATION_STATUS_COMMAND
-          || input === CONVERSATION_HISTORY_COMMAND
-          || input === CONVERSATION_CLEAR_COMMAND
-          || input === CONVERSATION_MEMORY_COMMAND
-          || input === CONVERSATION_REMEMBER_COMMAND
-          || input.startsWith(`${CONVERSATION_REMEMBER_COMMAND} `)
-          || input === CONVERSATION_FORGET_COMMAND
-          || input.startsWith(`${CONVERSATION_FORGET_COMMAND} `)
-          || input === CONVERSATION_SAVE_SESSION_COMMAND
-          || input.startsWith(`${CONVERSATION_SAVE_SESSION_COMMAND} `)
-          || input === CONVERSATION_SESSIONS_COMMAND
-          || input === CONVERSATION_LOAD_SESSION_COMMAND
-          || input.startsWith(`${CONVERSATION_LOAD_SESSION_COMMAND} `)
-          || input === CONVERSATION_DELETE_SESSION_COMMAND
-          || input.startsWith(`${CONVERSATION_DELETE_SESSION_COMMAND} `)) {
-          if (!options.onCommand) {
-            throw new AssistantError('The local command is unavailable.', {
-              code: 'TOOL_UNAVAILABLE_ERROR',
-              retryable: false,
-            });
-          }
-          await options.onCommand(input, {
-            signal: options.signal,
-            sessionId: this.session.id,
-          });
+        if (isLocalCommand(input)) {
+          await executeLocalCommand(input, false);
           continue;
         }
-
         if (input.startsWith('/')) {
-          if (!options.onCommand) {
-            throw new AssistantError('The local command is unavailable.', {
-              code: 'TOOL_UNAVAILABLE_ERROR',
-              retryable: false,
-            });
-          }
-          await options.onCommand(input, {
-            signal: options.signal,
-            sessionId: this.session.id,
-          });
+          await executeLocalCommand(input, false);
           continue;
         }
-
-        try {
-          let response: Response | undefined;
-          let emittedDelta = false;
-          for await (const event of this.core.respondStream(this.session, input, {
-            signal: options.signal,
-            personality: options.personality,
-            memory: await options.memory?.(),
-          })) {
-            const streamEvent = event as AssistantStreamEvent;
-            if (streamEvent.type === 'text_delta') {
-              emittedDelta = true;
-              await options.onDelta?.(streamEvent.delta);
-            } else {
-              response = streamEvent.response;
-            }
-          }
-          if (!response) {
-            throw new AssistantError('The conversation stream ended without a response.', {
-              code: 'INVALID_RESPONSE_ERROR', retryable: false,
-            });
-          }
-          if (!emittedDelta && response.text) await options.onDelta?.(response.text);
-          responses.push(response);
-          await options.onResponse?.(response);
-        } catch (error) {
-          if (options.signal?.aborted) {
-            return { status: 'cancelled', session: this.session, responses: [...responses] };
-          }
-          throw error;
-        }
+        startTurn(input);
       }
     } finally {
+      if (active) {
+        requestCancel(active);
+        await active.promise.catch(() => undefined);
+      }
+      options.signal?.removeEventListener('abort', onRunAbort);
       if (!sourceFinished) await iterator.return?.();
     }
   }

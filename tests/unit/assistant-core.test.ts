@@ -7,6 +7,15 @@ import type { PersonalitySnapshot } from '../../src/personality/personality-type
 import { AssistantCore } from '../../src/core/assistant-core.js';
 import { MockAIProvider } from '../../src/ai/mock-ai-provider.js';
 import { createLocalToolManager, LOCAL_TOOL_ALLOWLIST } from '../../src/tools/local-tool-manager.js';
+import { ToolManager } from '../../src/tools/tool-manager.js';
+import { ToolRegistry } from '../../src/tools/tool-registry.js';
+import type { Tool } from '../../src/tools/tool-types.js';
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => { resolve = nextResolve; });
+  return { promise, resolve };
+}
 
 function toolResponse(name: string, argumentsJson: string, id = 'call-1') {
   return {
@@ -372,6 +381,97 @@ test('assistant core rejects a second tool round', async () => {
     (error: unknown) => error instanceof Error && 'code' in error && error.code === 'TOOL_EXECUTION_ERROR',
   );
   assert.equal(calls, 2);
+});
+
+test('assistant core cancels during a tool and does not start provider round two', async () => {
+  const toolStarted = deferred<void>();
+  const registry = new ToolRegistry();
+  const blockingTool: Tool = {
+    id: 'test.blocking',
+    name: 'Blocking test tool',
+    description: 'A deterministic cancellation test tool.',
+    risk: 'safe',
+    argumentSchema: { type: 'object', properties: {} },
+    execute: async (_argumentsValue, context) => {
+      toolStarted.resolve();
+      await new Promise<void>((resolve) => {
+        if (context.signal.aborted) { resolve(); return; }
+        context.signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+      return { status: 'success', value: 'late' };
+    },
+  };
+  registry.register(blockingTool);
+  const toolManager = new ToolManager({
+    registry,
+    authorizer: { authorize: () => ({ allowed: true }) },
+  });
+  let providerCalls = 0;
+  const provider = new MockAIProvider({
+    responder: () => {
+      providerCalls += 1;
+      return toolResponse('test_blocking', '{}');
+    },
+  });
+  const controller = new AbortController();
+  const core = new AssistantCore({ provider, toolManager, toolAllowlist: ['test.blocking'] });
+  const session = core.createSession();
+  const pending = (async () => {
+    for await (const event of core.respondStream(session, 'Use the blocking tool.', { signal: controller.signal })) {
+      void event;
+    }
+  })();
+  await toolStarted.promise;
+  controller.abort();
+
+  await assert.rejects(() => pending, (error: unknown) => error instanceof Error
+    && 'code' in error && error.code === 'CANCELLATION_ERROR');
+  assert.equal(providerCalls, 1);
+  assert.deepEqual(session.getMessages().map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'Use the blocking tool.' },
+  ]);
+});
+
+test('assistant core cancellation during streamed provider round two makes no third request', async () => {
+  const secondStarted = deferred<void>();
+  let providerCalls = 0;
+  const provider: AIProvider = {
+    name: 'tool-round-interruptible',
+    complete: async () => ({ text: 'unused', provider: 'tool-round-interruptible', model: 'test', finishReason: 'stop' }),
+    async *stream(_request, options) {
+      providerCalls += 1;
+      if (providerCalls === 1) {
+        yield { type: 'completed', response: toolResponse('local_time', '{}') };
+        return;
+      }
+      secondStarted.resolve();
+      await new Promise<void>((resolve) => {
+        if (options?.signal?.aborted) { resolve(); return; }
+        options?.signal?.addEventListener('abort', () => resolve(), { once: true });
+      });
+      throw new Error('second stream cancelled');
+    },
+  };
+  const controller = new AbortController();
+  const core = new AssistantCore({
+    provider,
+    toolManager: createLocalToolManager(() => new Date('2026-09-22T17:34:56.000Z')),
+    toolAllowlist: LOCAL_TOOL_ALLOWLIST,
+  });
+  const session = core.createSession();
+  const pending = (async () => {
+    for await (const event of core.respondStream(session, 'What time is it?', { signal: controller.signal })) {
+      void event;
+    }
+  })();
+  await secondStarted.promise;
+  controller.abort();
+
+  await assert.rejects(() => pending);
+  assert.equal(providerCalls, 2);
+  assert.deepEqual(session.getMessages().map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'What time is it?' },
+  ]);
 });
 
 test('assistant core stops a tool round when the caller is already cancelled', async () => {
