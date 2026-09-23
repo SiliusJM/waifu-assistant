@@ -96,7 +96,7 @@ function lastUser(messages) {
   return [...messages].reverse().find((message) => message?.role === 'user')?.content ?? '';
 }
 
-function createLiveContext(budget) {
+export function createLiveContext(budget) {
   const baseURL = process.env.AI_BASE_URL?.trim();
   const apiKey = process.env.AI_API_KEY?.trim();
   if (!baseURL || !apiKey) throw new Error('Direct provider configuration is incomplete.');
