@@ -7,6 +7,7 @@ import {
   classifyInterruptionResponse,
   classifyNonLive,
   classifyUnicode,
+  createLiveContext,
   evaluateInterruptionWindow,
   evaluateStreamingRounds,
   runInterruption,
@@ -33,6 +34,163 @@ test('V3 safe error telemetry preserves classification and cause identifiers wit
   });
   assert.equal('message' in result, false);
   assert.equal('stack' in result, false);
+});
+
+const telemetryRequest = {
+  sessionId: 'request-error-telemetry-test',
+  messages: [{ role: 'user', content: 'offline stream test' }],
+};
+
+function sseResponse({ frame, error, signal }) {
+  let delivered = false;
+  const body = new ReadableStream({
+    pull(controller) {
+      if (!delivered) {
+        delivered = true;
+        controller.enqueue(new TextEncoder().encode(frame));
+        return;
+      }
+      if (error) {
+        controller.error(error);
+        return;
+      }
+      if (signal) {
+        return new Promise((resolve) => {
+          const onAbort = () => {
+            signal.removeEventListener('abort', onAbort);
+            controller.error(new DOMException('aborted', 'AbortError'));
+            resolve();
+          };
+          if (signal.aborted) onAbort();
+          else signal.addEventListener('abort', onAbort, { once: true });
+        });
+      }
+      controller.close();
+    },
+  }, { highWaterMark: 0 });
+  return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+}
+
+const partialFrame = 'data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}\n\n';
+
+function createOfflineLiveContext(budget, fetchImpl) {
+  const previous = {
+    baseURL: process.env.AI_BASE_URL,
+    apiKey: process.env.AI_API_KEY,
+    timeout: process.env.AI_TIMEOUT_MS,
+  };
+  process.env.AI_BASE_URL = 'http://offline.invalid/v1';
+  process.env.AI_API_KEY = 'offline-test-key';
+  process.env.AI_TIMEOUT_MS = '1000';
+  try {
+    return createLiveContext(budget, { upstreamFetch: fetchImpl });
+  } finally {
+    if (previous.baseURL === undefined) delete process.env.AI_BASE_URL;
+    else process.env.AI_BASE_URL = previous.baseURL;
+    if (previous.apiKey === undefined) delete process.env.AI_API_KEY;
+    else process.env.AI_API_KEY = previous.apiKey;
+    if (previous.timeout === undefined) delete process.env.AI_TIMEOUT_MS;
+    else process.env.AI_TIMEOUT_MS = previous.timeout;
+  }
+}
+
+test('V3 stores TypeError SSE read telemetry on the matching HTTP 200 request', async () => {
+  const cause = Object.assign(new Error('socket detail'), { code: 'UND_ERR_SOCKET' });
+  const readError = new TypeError('stream read failed', { cause });
+  const context = createOfflineLiveContext(
+    new ProviderRequestBudget(1), async () => sseResponse({ frame: partialFrame, error: readError }),
+  );
+  const events = [];
+
+  await assert.rejects(async () => {
+    for await (const event of context.provider.stream(telemetryRequest)) events.push(event);
+  }, { code: 'NETWORK_ERROR' });
+
+  const request = context.requests[0];
+  assert.ok(request.id);
+  assert.equal(request.statusCode, 200);
+  assert.deepEqual(request.streamError, {
+    classification: 'TRANSPORT',
+    name: 'TypeError',
+    code: 'UNKNOWN_ERROR',
+    cause: { name: 'Error', code: 'UND_ERR_SOCKET' },
+    statusCode: 200,
+  });
+  assert.equal(context.errors.transport, 1);
+  assert.equal(events.some((event) => event.type === 'text_delta'), true);
+});
+
+test('V3 stores generic SSE read errors safely without messages, stacks or raw causes', async () => {
+  const cause = Object.assign(new Error('token=CAUSESECRET'), { code: 'EPIPE' });
+  const readError = Object.assign(new Error('Bearer SUPERSECRET'), {
+    cause,
+    stack: 'Error: C:\\secret\\private-path',
+  });
+  const context = createOfflineLiveContext(
+    new ProviderRequestBudget(1), async () => sseResponse({ frame: partialFrame, error: readError }),
+  );
+
+  await assert.rejects(async () => {
+    for await (const event of context.provider.stream(telemetryRequest)) void event;
+  }, { code: 'PROVIDER_ERROR' });
+
+  const request = context.requests[0];
+  assert.deepEqual(request.streamError, {
+    classification: 'TRANSPORT',
+    name: 'Error',
+    code: 'UNKNOWN_ERROR',
+    cause: { name: 'Error', code: 'EPIPE' },
+    statusCode: 200,
+  });
+  const serialized = JSON.stringify({ requestId: request.id, error: request.streamError });
+  for (const forbidden of ['SUPERSECRET', 'Bearer', 'token=', 'CAUSESECRET', 'private-path', 'message', 'stack']) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+  assert.equal(context.errors.transport, 1);
+});
+
+test('V3 records caller abort per request without counting it as unexpected transport', async () => {
+  const abortController = new AbortController();
+  const context = createOfflineLiveContext(
+    new ProviderRequestBudget(1), async (_input, init) => sseResponse({ frame: partialFrame, signal: init.signal }),
+  );
+  const iterator = context.provider.stream(telemetryRequest, { signal: abortController.signal })[Symbol.asyncIterator]();
+  const first = await iterator.next();
+  assert.equal(first.value?.type, 'text_delta');
+  const pending = iterator.next();
+  await new Promise((resolve) => setImmediate(resolve));
+  abortController.abort();
+
+  await assert.rejects(pending, { code: 'CANCELLATION_ERROR' });
+
+  const request = context.requests[0];
+  assert.ok(request.abortedAt);
+  assert.equal(request.streamError?.classification, 'CANCELLATION');
+  assert.equal(request.streamError?.statusCode, 200);
+  assert.equal(context.errors.aborted, 1);
+  assert.equal(context.errors.transport, 0);
+});
+
+test('V3 stores safe fetch-level transport errors on their request', async () => {
+  const cause = Object.assign(new Error('socket secret'), { code: 'UND_ERR_SOCKET' });
+  const fetchError = new TypeError('Bearer FETCHSECRET', { cause });
+  const context = createOfflineLiveContext(
+    new ProviderRequestBudget(1), async () => { throw fetchError; },
+  );
+
+  await assert.rejects(async () => {
+    for await (const event of context.provider.stream(telemetryRequest)) void event;
+  }, { code: 'NETWORK_ERROR' });
+
+  const request = context.requests[0];
+  assert.deepEqual(request.fetchError, {
+    classification: 'TRANSPORT',
+    name: 'TypeError',
+    code: 'UNKNOWN_ERROR',
+    cause: { name: 'Error', code: 'UND_ERR_SOCKET' },
+  });
+  assert.equal(JSON.stringify(request.fetchError).includes('FETCHSECRET'), false);
+  assert.equal(context.errors.transport, 1);
 });
 
 test('V3 provider request budget hard-blocks request 13 before dispatch', () => {

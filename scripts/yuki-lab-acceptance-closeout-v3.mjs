@@ -106,15 +106,16 @@ function safeErrorCode(value) {
   return typeof value === 'string' && /^[A-Z0-9_]{1,64}$/u.test(value) ? value : 'UNKNOWN_ERROR';
 }
 
-export function safeError(error) {
+export function safeError(error, { classification: classificationOverride, statusCode } = {}) {
   const code = safeErrorCode(error?.code);
   const cause = error?.cause;
-  const classification = code === 'TIMEOUT_ERROR' ? 'TIMEOUT'
+  const inferredClassification = code === 'TIMEOUT_ERROR' ? 'TIMEOUT'
     : code === 'CANCELLATION_ERROR' ? 'CANCELLATION'
       : code === 'NETWORK_ERROR' ? 'TRANSPORT'
-        : code === 'INVALID_RESPONSE_ERROR' ? 'INVALID_RESPONSE' : 'PROVIDER_ERROR';
+        : code === 'INVALID_RESPONSE_ERROR' ? 'INVALID_RESPONSE'
+          : error?.name === 'TypeError' ? 'TRANSPORT' : 'PROVIDER_ERROR';
   return {
-    classification,
+    classification: classificationOverride ?? inferredClassification,
     name: safeErrorName(error?.name),
     code,
     ...(cause === undefined ? {} : {
@@ -123,15 +124,23 @@ export function safeError(error) {
         code: safeErrorCode(cause?.code),
       },
     }),
-    statusCode: typeof error?.statusCode === 'number' ? error.statusCode : undefined,
+    ...(typeof statusCode === 'number' ? { statusCode }
+      : typeof error?.statusCode === 'number' ? { statusCode: error.statusCode } : {}),
   };
+}
+
+function requestErrorDetails(requests) {
+  return requests.flatMap((request) => [
+    ...(request.fetchError ? [{ requestId: request.id, stage: 'fetch', ...request.fetchError }] : []),
+    ...(request.streamError ? [{ requestId: request.id, stage: 'stream', ...request.streamError }] : []),
+  ]);
 }
 
 function lastUser(messages) {
   return [...messages].reverse().find((message) => message?.role === 'user')?.content ?? '';
 }
 
-export function createLiveContext(budget) {
+export function createLiveContext(budget, { upstreamFetch = fetch } = {}) {
   const baseURL = process.env.AI_BASE_URL?.trim();
   const apiKey = process.env.AI_API_KEY?.trim();
   if (!baseURL || !apiKey) throw new Error('Direct provider configuration is incomplete.');
@@ -180,7 +189,7 @@ export function createLiveContext(budget) {
     init.signal?.addEventListener('abort', onAbort, { once: true });
     let response;
     try {
-      response = await fetch(input, init);
+      response = await upstreamFetch(input, init);
       request.statusCode = response.status;
       if (context) {
         if (response.status >= 400 && response.status < 500) context.errors.http4xx += 1;
@@ -191,6 +200,10 @@ export function createLiveContext(budget) {
       settle();
       init.signal?.removeEventListener('abort', onAbort);
       const expectedCancellation = request.abortedAt !== undefined || init.signal?.aborted === true;
+      request.fetchError = safeError(error, {
+        classification: expectedCancellation ? 'CANCELLATION' : 'TRANSPORT',
+        statusCode: request.statusCode,
+      });
       if (expectedCancellation && request.abortedAt === undefined) onAbort();
       if (!expectedCancellation) {
         context?.onProviderError?.();
@@ -221,6 +234,10 @@ export function createLiveContext(budget) {
           settle();
           init.signal?.removeEventListener('abort', onAbort);
           const expectedCancellation = request.abortedAt !== undefined || init.signal?.aborted === true;
+          request.streamError = safeError(error, {
+            classification: expectedCancellation ? 'CANCELLATION' : 'TRANSPORT',
+            statusCode: request.statusCode,
+          });
           if (expectedCancellation && request.abortedAt === undefined) onAbort();
           if (!expectedCancellation) {
             context?.onProviderError?.();
@@ -317,6 +334,7 @@ async function runOne(context, prompt, { retainEvaluationText = false } = {}) {
     sessionContaminated: userMessages.length !== 1 || userMessages[0]?.content !== prompt,
     providerRequests: requests.length,
     statusCodes: requests.map(({ statusCode }) => statusCode),
+    requestErrors: requestErrorDetails(requests),
     runStatus: run.result?.status ?? 'failed',
     error: run.error,
     deltaCounts: roundDeltas(run, requests).map(({ deltas }) => deltas.length),
@@ -430,6 +448,7 @@ export async function runInterruption(context, expectedText = '256', {
       functionalClassification,
       safeBResponse: excerpt(bResponseText, 200),
       requestCount: localRequests.length,
+      requestErrors: requestErrorDetails(localRequests),
       error: run.error,
     };
   } finally {
