@@ -3,9 +3,13 @@ import assert from 'node:assert/strict';
 import {
   MAX_PROVIDER_INFERENCE_REQUESTS,
   MAX_TOTAL_INFERENCE_REQUESTS,
+  FREE_MODE_STRATEGIES,
+  HISTORICAL_OPENROUTER_TOOL_OBSERVATION,
+  TOOL_CLASSIFICATIONS,
   assertSafeReport,
   classifyProviderFailure,
   classifyToolCapability,
+  classifyToolFormatOutcome,
   classifyToolRun,
   discoverProviderModels,
   explicitFreeEvidence,
@@ -15,6 +19,7 @@ import {
   selectCandidate,
 } from './direct-provider-compatibility-matrix-v1.mjs';
 import { ProviderRequestBudget } from './provider-call-budget.mjs';
+import { DirectAIProvider } from '../dist/ai/direct-ai-provider.js';
 
 const zeroPriceModel = (id) => ({
   id,
@@ -72,6 +77,34 @@ function sseResponse({ content = '', holdUntilAbort = false, holdOpenAfterDone =
   return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } });
 }
 
+async function parseOfflineToolStream(chunks) {
+  let fetchCalls = 0;
+  const body = `${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join('')}data: [DONE]\n\n`;
+  const provider = new DirectAIProvider({
+    baseURL: 'https://offline.invalid/v1', apiKey: 'offline-secret', model: 'fixture-model',
+    timeoutMs: 100, retryPolicy: { maxAttempts: 1, baseDelayMs: 0, maxDelayMs: 0 },
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    },
+  });
+  const events = [];
+  try {
+    for await (const event of provider.stream({
+      sessionId: 'offline-tool-format',
+      messages: [{ role: 'user', content: 'fixture only' }],
+      tools: [{ type: 'function', function: { name: 'lookup', description: 'fixture', parameters: { type: 'object', properties: {}, additionalProperties: false } } }],
+    })) events.push(event);
+    return { accepted: true, response: events.at(-1)?.response, fetchCalls };
+  } catch (error) {
+    return { accepted: false, code: error?.code, fetchCalls };
+  }
+}
+
+function toolDelta(toolCalls, finishReason = null, extraDelta = {}) {
+  return { choices: [{ delta: { ...extraDelta, tool_calls: toolCalls }, finish_reason: finishReason }] };
+}
+
 test('provider configuration is isolated and never projects credentials', () => {
   const env = { ...baseEnv('groq'), GROQ_TEST_MODEL: 'public-model-v2' };
   const config = readProviderConfig('groq', env);
@@ -102,20 +135,81 @@ test('malformed override is not silently replaced by automatic selection', () =>
 });
 
 test('free-only selection supports catalog churn and zero-price evidence', () => {
-  assert.equal(explicitFreeEvidence(zeroPriceModel('provider/new-free-v2')), true);
   const selection = selectCandidate('groq', [
-    { id: 'provider/retired', deprecated: true, pricing: { prompt: '0', completion: '0' } },
-    zeroPriceModel('provider/new-free-v2'),
+    { id: 'provider/retired', deprecated: true },
+    { id: 'provider/new-chat-v2' },
   ]);
-  assert.equal(selection.selectedModel, 'provider/new-free-v2');
+  assert.equal(selection.selectedModel, 'provider/new-chat-v2');
   assert.equal(selection.selectionSource, 'AUTO');
+  assert.equal(explicitFreeEvidence(zeroPriceModel('provider/new-free-v2')), true);
+  assert.equal(selectCandidate('openrouter', [zeroPriceModel('provider/new-free-v2')], 'provider/new-free-v2').status, 'SELECTED');
 });
 
-test('overrides require a listed, eligible, explicitly free model', () => {
-  assert.equal(selectCandidate('gemini', [zeroPriceModel('flash-free-v2')], 'flash-free-v2').status, 'SELECTED');
-  assert.equal(selectCandidate('gemini', [zeroPriceModel('flash-free-v2')], 'missing-model').status, 'MODEL_UNAVAILABLE');
-  assert.equal(selectCandidate('gemini', [{ id: 'flash-unknown-price' }], 'flash-unknown-price').status, 'INCONCLUSIVE');
-  assert.equal(selectCandidate('gemini', [{ id: 'flash-priced', pricing: { prompt: '0.01', completion: '0.02' } }], 'flash-priced').status, 'PAID_ONLY_OR_NOT_FREE');
+test('provider-specific free strategies allow nominally priced Groq and unpriced Gemini candidates', () => {
+  assert.deepEqual(FREE_MODE_STRATEGIES, {
+    groq: 'ACCOUNT_FREE_QUOTA', gemini: 'ACCOUNT_FREE_TIER', openrouter: 'ZERO_PRICE_MODEL',
+  });
+  assert.deepEqual(TOOL_CLASSIFICATIONS, [
+    'TOOL_PASS', 'TOOL_MODEL_UNSUPPORTED', 'TOOL_FORMAT_INCOMPATIBLE', 'TOOL_INVALID_RESPONSE', 'TOOL_NOT_VERIFIED',
+  ]);
+  const groq = selectCandidate('groq', [
+    { id: 'audio-chat-model', pricing: { prompt: '0.01', completion: '0.02' } },
+    { id: 'image-chat-model', architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] } },
+    { id: 'deprecated-chat', deprecated: true, pricing: { prompt: '0.01', completion: '0.02' } },
+    { id: 'chat-text-priced', pricing: { prompt: '0.01', completion: '0.02' }, architecture: { input_modalities: ['text'], output_modalities: ['text'] } },
+  ]);
+  assert.equal(groq.status, 'SELECTED');
+  assert.equal(groq.selectedModel, 'chat-text-priced');
+  assert.equal(groq.freeEvidence, 'ACCOUNT_FREE_QUOTA');
+
+  const gemini = selectCandidate('gemini', [
+    { id: 'models/gemini-text-pro', supportedGenerationMethods: ['generateContent'] },
+    { id: 'models/gemini-old-flash', displayName: 'Flash', deprecated: true, supportedGenerationMethods: ['generateContent'] },
+    { id: 'models/gemini-new-flash-lite', displayName: 'Flash-Lite', supportedGenerationMethods: ['generateContent'] },
+    { id: 'models/gemini-embedding', supportedGenerationMethods: ['embedContent'] },
+  ]);
+  assert.equal(gemini.status, 'SELECTED');
+  assert.equal(gemini.selectedModel, 'models/gemini-new-flash-lite');
+  assert.equal(gemini.freeEvidence, 'ACCOUNT_FREE_TIER');
+  assert.equal(selectCandidate('gemini', [{ id: 'models/unknown', supportedGenerationMethods: ['embedContent'] }]).status, 'MODEL_UNAVAILABLE');
+});
+
+test('Groq and Gemini overrides use account strategy while OpenRouter rejects paid override', () => {
+  const priced = { id: 'model-new', pricing: { prompt: '0.1', completion: '0.2' }, supportedGenerationMethods: ['generateContent'] };
+  assert.equal(selectCandidate('groq', [priced], 'model-new').status, 'SELECTED');
+  assert.equal(selectCandidate('gemini', [priced], 'model-new').status, 'SELECTED');
+  assert.equal(selectCandidate('gemini', [priced], 'missing-model').status, 'MODEL_UNAVAILABLE');
+  assert.equal(selectCandidate('openrouter', [{ ...priced, architecture: { input_modalities: ['text'], output_modalities: ['text'] } }], 'model-new').status, 'PAID_ONLY_OR_NOT_FREE');
+});
+
+test('Gemini prefers efficient Flash/Lite class dynamically and accepts catalog churn', () => {
+  const oldCatalog = [{ id: 'models/gemini-old-flash', supportedGenerationMethods: ['generateContent'] }];
+  const newCatalog = [
+    { id: 'models/gemini-pro-new', supportedGenerationMethods: ['generateContent'] },
+    { id: 'models/gemini-flash-lite-new', supportedGenerationMethods: ['generateContent'] },
+  ];
+  assert.equal(selectCandidate('gemini', oldCatalog).selectedModel, 'models/gemini-old-flash');
+  assert.equal(selectCandidate('gemini', newCatalog).selectedModel, 'models/gemini-flash-lite-new');
+});
+
+test('OpenRouter permits only the free router or explicit zero-price entries', () => {
+  const result = selectCandidate('openrouter', [
+    zeroPriceModel('catalog/zero'),
+    { id: 'catalog/paid', pricing: { prompt: '0.01', completion: '0.02' }, architecture: { input_modalities: ['text'], output_modalities: ['text'] } },
+  ], 'catalog/zero');
+  assert.equal(result.selectedModel, 'catalog/zero');
+  assert.equal(selectCandidate('openrouter', [
+    { id: 'openrouter/free', architecture: { input_modalities: ['text'], output_modalities: ['text'] } },
+  ], 'openrouter/free').selectedModel, 'openrouter/free');
+  assert.equal(selectCandidate('openrouter', [
+    { id: 'openrouter/free', active: false, architecture: { input_modalities: ['text'], output_modalities: ['text'] } },
+  ], 'openrouter/free').status, 'MODEL_UNAVAILABLE');
+  assert.equal(selectCandidate('openrouter', [], 'openrouter/free').status, 'MODEL_UNAVAILABLE');
+  assert.equal(selectCandidate('openrouter', [
+    { id: 'catalog/paid', pricing: { prompt: '0.01', completion: '0.02' }, architecture: { input_modalities: ['text'], output_modalities: ['text'] } },
+  ]).status, 'PAID_ONLY_OR_NOT_FREE');
+  assert.equal(selectCandidate('openrouter', [{ id: 'catalog/free-flag-only', free: true }]).status, 'INCONCLUSIVE');
+  assert.equal(selectCandidate('openrouter', [{ id: 'catalog/model:free' }]).status, 'INCONCLUSIVE');
 });
 
 test('model discovery filters to safe catalog fields and counts metadata separately', async () => {
@@ -141,24 +235,25 @@ test('model discovery filters to safe catalog fields and counts metadata separat
 });
 
 test('missing free-price evidence is INCONCLUSIVE, not falsely called paid', () => {
-  assert.equal(selectCandidate('groq', [{ id: 'visible-chat-model' }]).status, 'INCONCLUSIVE');
-  assert.equal(selectCandidate('groq', [{ id: 'visible-paid-model', pricing: { prompt: '0.1', completion: '0.2' } }]).status, 'PAID_ONLY_OR_NOT_FREE');
+  assert.equal(selectCandidate('openrouter', [{ id: 'visible-chat-model' }]).status, 'INCONCLUSIVE');
+  assert.equal(selectCandidate('openrouter', [{ id: 'visible-paid-model', pricing: { prompt: '0.1', completion: '0.2' } }]).status, 'PAID_ONLY_OR_NOT_FREE');
 });
 
-test('OpenRouter free router is the only permitted discovery fallback', () => {
+test('OpenRouter free router is selected only when catalog or explicit override supports it', () => {
   const selection = selectCandidate('openrouter', [zeroPriceModel('ordinary/free-catalog-model')]);
   assert.equal(selection.status, 'SELECTED');
-  assert.equal(selection.selectedModel, 'openrouter/free');
-  assert.equal(selection.freeEvidence, 'OPENROUTER_FREE_ROUTER');
-  assert.equal(selectCandidate('openrouter', [], 'openrouter/free').status, 'SELECTED');
+  assert.equal(selection.selectedModel, 'ordinary/free-catalog-model');
+  assert.equal(selection.freeEvidence, 'CATALOG_ZERO_PRICE');
+  assert.equal(selectCandidate('openrouter', [], 'openrouter/free').status, 'MODEL_UNAVAILABLE');
 });
 
 test('deprecated models are skipped and overrides do not silently churn', () => {
   const result = selectCandidate('gemini', [
-    { ...zeroPriceModel('old-free'), deprecated: true }, zeroPriceModel('new-free'),
+    { id: 'models/old-free', deprecated: true, supportedGenerationMethods: ['generateContent'] },
+    { id: 'models/new-free', supportedGenerationMethods: ['generateContent'] },
   ]);
-  assert.equal(result.selectedModel, 'new-free');
-  assert.equal(selectCandidate('gemini', [{ ...zeroPriceModel('old-free'), deprecated: true }], 'old-free').status, 'MODEL_UNAVAILABLE');
+  assert.equal(result.selectedModel, 'models/new-free');
+  assert.equal(selectCandidate('gemini', [{ id: 'models/old-free', deprecated: true, supportedGenerationMethods: ['generateContent'] }], 'models/old-free').status, 'MODEL_UNAVAILABLE');
 });
 
 test('failure taxonomy separates auth, billing, free quota, rate, model and protocol', () => {
@@ -172,11 +267,88 @@ test('failure taxonomy separates auth, billing, free quota, rate, model and prot
 });
 
 test('tool capability requires emitted call, local execution and provider second round', () => {
-  assert.equal(classifyToolCapability({ toolDefinitionSent: true, toolCallEmitted: true, localToolExecuted: true, secondRound: true, finalAnswer: true }), 'PASS');
-  assert.equal(classifyToolCapability({ toolDefinitionSent: true, toolCallEmitted: false, localToolExecuted: false, secondRound: false, finalAnswer: true }), 'NOT_VERIFIED');
-  assert.equal(classifyToolCapability({ toolDefinitionSent: true, toolCallEmitted: false, localToolExecuted: false, secondRound: false, finalAnswer: false }), 'MODEL_UNSUPPORTED_CAPABILITY');
-  assert.equal(classifyToolRun({ requestFailed: true, failureClass: 'PROTOCOL_INCOMPATIBLE', toolDefinitionSent: true }), 'NOT_VERIFIED');
-  assert.equal(classifyToolRun({ requestFailed: true, failureClass: 'MODEL_UNSUPPORTED_CAPABILITY' }), 'MODEL_UNSUPPORTED_CAPABILITY');
+  assert.equal(classifyToolCapability({ toolDefinitionSent: true, toolCallEmitted: true, localToolExecuted: true, secondRound: true, finalAnswer: true }), 'TOOL_PASS');
+  assert.equal(classifyToolCapability({ toolDefinitionSent: true, toolCallEmitted: false, localToolExecuted: false, secondRound: false, finalAnswer: true }), 'TOOL_NOT_VERIFIED');
+  assert.equal(classifyToolCapability({ toolDefinitionSent: true, toolCallEmitted: false, localToolExecuted: false, secondRound: false, finalAnswer: false }), 'TOOL_NOT_VERIFIED');
+  assert.equal(classifyToolRun({ requestFailed: true, failureClass: 'PROTOCOL_INCOMPATIBLE', toolDefinitionSent: true }), 'TOOL_INVALID_RESPONSE');
+  assert.equal(classifyToolRun({ requestFailed: true, failureClass: 'MODEL_UNSUPPORTED_CAPABILITY' }), 'TOOL_MODEL_UNSUPPORTED');
+  assert.equal(classifyToolFormatOutcome({ protocolCompatible: true, parserAccepted: true }), 'TOOL_PASS');
+  assert.equal(classifyToolFormatOutcome({ protocolCompatible: true, parserAccepted: false }), 'TOOL_FORMAT_INCOMPATIBLE');
+  assert.equal(classifyToolFormatOutcome({ protocolCompatible: true, parserAccepted: false, responseWellFormed: false }), 'TOOL_INVALID_RESPONSE');
+  assert.equal(classifyToolFormatOutcome({ protocolCompatible: false, parserAccepted: false }), 'TOOL_NOT_VERIFIED');
+  assert.deepEqual(HISTORICAL_OPENROUTER_TOOL_OBSERVATION, {
+    httpStatus: 200, providerErrorCode: 'INVALID_RESPONSE_ERROR', rawResponseAvailable: false,
+    classification: 'TOOL_NOT_VERIFIED',
+  });
+});
+
+test('offline OpenAI-compatible tool-call fixtures classify one-chunk, fragmented, indexed and multi-call streams', async () => {
+  const single = await parseOfflineToolStream([
+    toolDelta([{ index: 0, id: 'call-one', type: 'function', function: { name: 'lookup', arguments: '{}' } }], 'tool_calls'),
+  ]);
+  assert.equal(single.accepted, true);
+  assert.deepEqual(single.response.toolCalls, [{ id: 'call-one', name: 'lookup', argumentsJson: '{}' }]);
+  assert.equal(single.response.finishReason, 'tool_calls');
+  assert.equal(classifyToolFormatOutcome({ protocolCompatible: true, parserAccepted: single.accepted }), 'TOOL_PASS');
+  assert.equal(single.fetchCalls, 1);
+
+  const fragmented = await parseOfflineToolStream([
+    toolDelta([{ index: 0, id: 'call-fragmented' }]),
+    toolDelta([{ index: 0, function: { name: 'look', arguments: '{"q":' } }]),
+    toolDelta([{ index: 0, function: { name: 'up', arguments: '"x"}' } }], 'tool_calls'),
+  ]);
+  assert.equal(fragmented.accepted, true);
+  assert.deepEqual(fragmented.response.toolCalls, [{ id: 'call-fragmented', name: 'lookup', argumentsJson: '{"q":"x"}' }]);
+
+  const indexed = await parseOfflineToolStream([
+    toolDelta([
+      { index: 1, id: 'call-one', function: { name: 'second', arguments: '{}' } },
+      { index: 0, id: 'call-zero', function: { name: 'first', arguments: '{}' } },
+    ], 'tool_calls'),
+  ]);
+  assert.equal(indexed.accepted, true);
+  assert.deepEqual(indexed.response.toolCalls.map((call) => call.name), ['first', 'second']);
+
+  const multipleDeltas = await parseOfflineToolStream([
+    toolDelta([{ index: 0, id: 'call-a', function: { name: 'alpha', arguments: '{' } }]),
+    toolDelta([
+      { index: 1, id: 'call-b', function: { name: 'beta', arguments: '{}' } },
+      { index: 0, function: { arguments: '}' } },
+    ], 'tool_calls'),
+  ]);
+  assert.equal(multipleDeltas.accepted, true);
+  assert.deepEqual(multipleDeltas.response.toolCalls.map((call) => call.name), ['alpha', 'beta']);
+});
+
+test('empty object arguments are valid while a missing argument fragment is invalid', async () => {
+  const emptyObject = await parseOfflineToolStream([
+    toolDelta([{ index: 0, id: 'call-empty-object', function: { name: 'no_args', arguments: '{}' } }], 'tool_calls'),
+  ]);
+  assert.equal(emptyObject.accepted, true);
+  assert.equal(emptyObject.response.toolCalls[0].argumentsJson, '{}');
+
+  const missing = await parseOfflineToolStream([
+    toolDelta([{ index: 0, id: 'call-missing', function: { name: 'no_args' } }], 'tool_calls'),
+  ]);
+  assert.equal(missing.accepted, false);
+  assert.equal(missing.code, 'INVALID_RESPONSE_ERROR');
+  assert.equal(classifyToolFormatOutcome({ protocolCompatible: true, parserAccepted: false, responseWellFormed: false }), 'TOOL_INVALID_RESPONSE');
+
+  const emptyString = await parseOfflineToolStream([
+    toolDelta([{ index: 0, id: 'call-empty-string', function: { name: 'no_args', arguments: '' } }], 'tool_calls'),
+  ]);
+  assert.equal(emptyString.accepted, false);
+  assert.equal(emptyString.code, 'INVALID_RESPONSE_ERROR');
+});
+
+test('protocol-compatible null text alongside tool_calls exposes parser format incompatibility offline', async () => {
+  const result = await parseOfflineToolStream([
+    toolDelta([{ index: 0, id: 'call-null-content', function: { name: 'lookup', arguments: '{}' } }], 'tool_calls', { content: null }),
+  ]);
+  assert.equal(result.accepted, false);
+  assert.equal(result.code, 'INVALID_RESPONSE_ERROR');
+  assert.equal(classifyToolFormatOutcome({ protocolCompatible: true, parserAccepted: false }), 'TOOL_FORMAT_INCOMPATIBLE');
+  assert.equal(result.fetchCalls, 1);
 });
 
 test('request budgets count inference separately and enforce hard maxima', () => {
@@ -240,7 +412,7 @@ test('full offline provider flow uses injected transport, records upstream model
   assert.equal(report.context, 'PASS');
   assert.equal(report.fullStackYuki, 'PASS');
   assert.equal(report.currentDataHonesty, 'PASS');
-  assert.equal(report.toolCalling, 'PASS', JSON.stringify({ toolCalling: report.toolCalling, inferenceCalls: report.inferenceCalls, errors: report.errors }));
+  assert.equal(report.toolCalling, 'TOOL_PASS', JSON.stringify({ toolCalling: report.toolCalling, inferenceCalls: report.inferenceCalls, errors: report.errors }));
   assert.equal(report.interruption.status, 'PASS', JSON.stringify({ interruption: report.interruption, calls }));
   assert.equal(report.result, 'PROVIDER_COMPATIBLE');
   assert.deepEqual(report.errors, []);
@@ -269,22 +441,13 @@ test('provider auth and catalog failure stop before inference', async () => {
   assert.equal(inferenceCalls, 0);
 });
 
-test('explicitly priced catalog models are skipped in free-only mode', async () => {
-  let inferenceCalls = 0;
-  const { report } = await runProviderValidation('groq', {
-    env: baseEnv('groq'),
-    fetchImpl: async (url) => {
-      if (String(url).endsWith('/models')) return Response.json({ data: [
-        { id: 'listed-chat-model', pricing: { prompt: '0.01', completion: '0.02' }, architecture: { input_modalities: ['text'], output_modalities: ['text'] } },
-      ] });
-      inferenceCalls += 1;
-      return sseResponse({ content: 'not allowed' });
-    },
-  });
-  assert.equal(report.result, 'PAID_ONLY_OR_NOT_FREE');
-  assert.equal(report.inferenceCalls, 0);
-  assert.equal(inferenceCalls, 0);
-  assert.match(report.limitations[0], /explicit positive-price metadata/u);
+test('account-based strategy remains explicit in safe report without claiming catalog price proof', async () => {
+  const { report } = await runProviderValidation('groq', { env: baseEnv('groq'), fetchImpl: async () => {
+    throw new Error('Synthetic offline transport failure.');
+  } });
+  assert.equal(report.freeModeStrategy, 'ACCOUNT_FREE_QUOTA');
+  assert.equal(report.freePriceVerified, false);
+  assert.equal(JSON.stringify(report).includes(baseEnv('groq').GROQ_API_KEY), false);
 });
 
 test('matrix continuation can account for prior real calls without resetting the hard cap', async () => {
