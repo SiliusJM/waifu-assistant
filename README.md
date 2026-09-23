@@ -106,7 +106,7 @@ LLM. La memoria explícita se guarda localmente y puede redirigirse mediante
 
 ## MVP local con LLM real
 
-Sin `AI_PROVIDER`, el CLI usa `MockAIProvider` y no realiza llamadas externas.
+Sin `AI_PROVIDER` ni `AI_PROVIDER_PROFILE`, el CLI usa `MockAIProvider` y no realiza llamadas externas.
 Para usar el `DirectAIProvider`, configura temporalmente `AI_PROVIDER=direct`,
 `AI_BASE_URL`, `AI_API_KEY` y `AI_MODEL`. La personalidad se mantiene durante
 la ejecución; el historial solo se conserva entre procesos cuando el usuario
@@ -120,6 +120,39 @@ $env:AI_PROVIDER="direct"; $env:AI_BASE_URL="<ENDPOINT>"; $env:AI_API_KEY="<API_
 
 El comando consume una llamada real, no forma parte de `npm test` ni de
 `npm run check`, y nunca imprime la API key ni el header de autorización.
+
+## Provider Profiles
+
+`AI_PROVIDER_PROFILE` selecciona `omniroute`, `groq`, `gemini` u `openrouter`.
+Por ejemplo, carga previamente `GROQ_API_KEY` desde tu secret loader y establece
+`AI_PROVIDER_PROFILE=groq` y `GROQ_MODEL=<modelo-vigente>` antes de iniciar Yuki.
+Cada perfil exige su propia `<PROVIDER>_MODEL` y `<PROVIDER>_API_KEY`; no hay
+modelos permanentes incorporados ni mezcla con `AI_BASE_URL/AI_MODEL/AI_API_KEY`.
+Un perfil desconocido o incompleto produce un error de configuración.
+
+Los endpoints incorporados son `http://localhost:20128/v1` (OmniRoute),
+`https://api.groq.com/openai/v1`, `https://generativelanguage.googleapis.com/v1beta/openai`
+y `https://openrouter.ai/api/v1`. `<PROVIDER>_BASE_URL` permite reemplazarlos;
+solo se aceptan URLs HTTP(S) sin credenciales, query ni fragmento.
+`AI_TIMEOUT_MS` y los controles de retry existentes siguen siendo globales.
+El modelo puede cambiar por environment sin cambiar código. No hay discovery
+al iniciar ni fallback entre proveedores. `/status` muestra perfil, modelo,
+host y presencia de credencial; nunca la clave.
+
+Sin selector (o vacío), la configuración legacy `AI_PROVIDER=direct` más
+`AI_BASE_URL/AI_API_KEY/AI_MODEL` sigue disponible, al igual que mock.
+El smoke opt-in existente conserva su contrato legacy.
+
+V1 utiliza `CredentialResolver` respaldado por el environment del proceso,
+incluidas configuraciones inyectadas al bootstrap. Puedes seguir cargando tus
+credenciales protegidas desde PowerShell antes de lanzar VS Code/Yuki; para un
+perfil OmniRoute el loader debe definir `OMNIROUTE_API_KEY` (legacy usa `AI_API_KEY`).
+Yuki no lee los XML de credenciales, no lanza PowerShell y no persiste claves.
+Los objetos resueltos ocultan la clave de JSON, enumeración e inspección estándar;
+`toSafeProviderConfig` proporciona una representación explícita para diagnóstico.
+Esto no convierte el environment en un almacén permanente seguro: integración
+OS Secret Store / first-run credential bootstrap queda diferida para V2.
+Nunca incluyas claves en Git ni archivos de configuración de texto plano.
 
 ## Próximo paso
 

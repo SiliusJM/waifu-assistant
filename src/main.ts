@@ -4,6 +4,7 @@ import { AssistantCore } from './core/assistant-core.js';
 import { ConversationRunner } from './core/conversation-runner.js';
 import { createAIProvider } from './config/provider-factory.js';
 import { loadConfig } from './config/config.js';
+import { formatProviderStatus } from './config/provider-config.js';
 import { PersonalityCompiler } from './personality/personality-compiler.js';
 import { PersonalityRegistry } from './personality/personality-registry.js';
 import { AssistantError } from './shared/errors.js';
@@ -105,7 +106,7 @@ export async function main(
             `Mensajes: ${runner.session.getMessages().length}`,
             `Memorias persistentes: ${await memoryStore.count()}`,
             `Sesiones guardadas: ${await savedSessionStore.count()}`,
-            `Proveedor: ${config.ai.provider}`,
+            ...formatProviderStatus(config.ai),
             'Personalidad: Yuki',
             'Herramientas locales:',
             '- local.time',
