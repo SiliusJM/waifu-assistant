@@ -84,8 +84,57 @@ export function createCountingFetch({ budget, fetchImpl = fetch } = {}) {
       body = undefined;
     }
     budget.countProviderRequest({ kind: requestKind(body) });
-    const onAbort = () => budget.noteIssuedRequestAborted();
+    let settled = false;
+    const cleanup = () => init.signal?.removeEventListener('abort', onAbort);
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      budget.noteIssuedRequestAborted();
+      cleanup();
+    };
     init.signal?.addEventListener('abort', onAbort, { once: true });
-    return fetchImpl(input, init);
+    let response;
+    try {
+      response = await fetchImpl(input, init);
+    } catch (error) {
+      if (init.signal?.aborted) onAbort();
+      settled = true;
+      cleanup();
+      throw error;
+    }
+    if (!response?.body || typeof response.body.getReader !== 'function') {
+      settled = true;
+      cleanup();
+      return response;
+    }
+    const reader = response.body.getReader();
+    const bodyStream = new ReadableStream({
+      async pull(controller) {
+        try {
+          const next = await reader.read();
+          if (next.done) {
+            settled = true;
+            cleanup();
+            controller.close();
+          } else {
+            controller.enqueue(next.value);
+          }
+        } catch (error) {
+          settled = true;
+          cleanup();
+          controller.error(error);
+        }
+      },
+      async cancel(reason) {
+        settled = true;
+        cleanup();
+        await reader.cancel(reason);
+      },
+    });
+    return new Response(bodyStream, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
   };
 }

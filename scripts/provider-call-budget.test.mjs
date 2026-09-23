@@ -58,6 +58,17 @@ test('counts an issued request that is later aborted', async () => {
   assert.equal(budget.abortedIssuedRequests, 1);
 });
 
+test('does not count caller cleanup after a response body completed', async () => {
+  const budget = new ProviderRequestBudget();
+  const controller = new AbortController();
+  const countingFetch = createCountingFetch({ budget, fetchImpl: async () => response() });
+  const result = await countingFetch('http://test/chat/completions', { ...request(), signal: controller.signal });
+  await result.text();
+  controller.abort();
+  assert.equal(budget.providerRequests, 1);
+  assert.equal(budget.abortedIssuedRequests, 0);
+});
+
 test('hard budget blocks request 37 before the underlying fetch', async () => {
   const budget = new ProviderRequestBudget(2);
   let networkCalls = 0;
