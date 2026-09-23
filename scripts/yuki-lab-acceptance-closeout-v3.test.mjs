@@ -10,10 +10,30 @@ import {
   evaluateInterruptionWindow,
   evaluateStreamingRounds,
   runInterruption,
+  safeError,
 } from './yuki-lab-acceptance-closeout-v3.mjs';
 import { ProviderRequestBudget } from './provider-call-budget.mjs';
 import { evaluationAccepted, requestedToolIds } from './yuki-lab-final-acceptance-v2.mjs';
 import { AssistantCore } from '../dist/core/assistant-core.js';
+
+test('V3 safe error telemetry preserves classification and cause identifiers without message or stack', () => {
+  const cause = Object.assign(new Error('sensitive transport detail'), { code: 'UND_ERR_SOCKET' });
+  const error = Object.assign(new Error('sensitive top-level detail', { cause }), {
+    code: 'NETWORK_ERROR',
+    statusCode: 502,
+  });
+
+  const result = safeError(error);
+  assert.deepEqual(result, {
+    classification: 'TRANSPORT',
+    name: 'Error',
+    code: 'NETWORK_ERROR',
+    cause: { name: 'Error', code: 'UND_ERR_SOCKET' },
+    statusCode: 502,
+  });
+  assert.equal('message' in result, false);
+  assert.equal('stack' in result, false);
+});
 
 test('V3 provider request budget hard-blocks request 13 before dispatch', () => {
   const budget = new ProviderRequestBudget(MAX_PROVIDER_REQUESTS);
