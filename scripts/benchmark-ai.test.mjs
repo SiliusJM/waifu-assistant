@@ -5,6 +5,9 @@ import {
   executeIsolatedCall,
   selectFinalist,
   summarizeRoutes,
+  classifyModelCategory,
+  selectFreeChatCandidates,
+  rankRouteSummary,
 } from './benchmark-ai-core.mjs';
 
 test('isolates a cancelled route and continues with the next route', async () => {
@@ -112,4 +115,38 @@ test('all-fail matrices still produce one safe record per attempted route', asyn
 
   assert.equal(records.length, routes.length);
   assert.deepEqual(summarizeRoutes(routes, records).map(({ attempts, successes }) => [attempts, successes]), [[1, 0], [1, 0], [1, 0]]);
+});
+
+test('classifies model catalog entries without treating image or embedding routes as chat', () => {
+  assert.equal(classifyModelCategory({ id: 'openrouter/qwen/qwen3.8-27b:free' }), 'CHAT/TEXT');
+  assert.equal(classifyModelCategory({ id: 'openrouter/openai/text-embedding-3-small' }), 'EMBEDDING');
+  assert.equal(classifyModelCategory({ id: 'openrouter/black-forest-labs/flux.2-pro' }), 'IMAGE');
+  assert.equal(classifyModelCategory({ id: 'openrouter/openai/whisper' }), 'AUDIO');
+  assert.equal(classifyModelCategory({}), 'UNKNOWN');
+});
+
+test('selects deterministic free chat candidates and excludes the known image route', () => {
+  const models = [
+    { id: 'zeta:free' },
+    { id: 'free-only' },
+    { id: 'fast' },
+    { id: 'openrouter/qwen/qwen3.8-27b:free' },
+    { id: 'openrouter/openai/text-embedding-3-small' },
+    { id: 'kc/openrouter/free' },
+  ];
+  assert.deepEqual(selectFreeChatCandidates(models, 4).map(({ id }) => id), [
+    'free-only',
+    'kc/openrouter/free',
+    'openrouter/qwen/qwen3.8-27b:free',
+    'zeta:free',
+  ]);
+});
+
+test('ranks successful routes deterministically by success, TTFT, total time and id', () => {
+  const ranked = rankRouteSummary([
+    { route: 'b', successRate: 1, ttftAvgMs: 30, totalAvgMs: 100 },
+    { route: 'c', successRate: 1, ttftAvgMs: 20, totalAvgMs: 200 },
+    { route: 'a', successRate: 0.5, ttftAvgMs: 1, totalAvgMs: 1 },
+  ]);
+  assert.deepEqual(ranked.map(({ route }) => route), ['c', 'b', 'a']);
 });
