@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import type { AIProvider } from '../../src/ai/ai-provider.js';
+import type { AIRequest, AIResponse, AIStreamEvent, ProviderCallOptions } from '../../src/ai/ai-types.js';
 import { MockAIProvider } from '../../src/ai/mock-ai-provider.js';
 import { AssistantCore } from '../../src/core/assistant-core.js';
 import { ConversationRunner, LOCAL_COMMAND_HELP } from '../../src/core/conversation-runner.js';
@@ -17,6 +19,44 @@ import {
 
 async function* inputs(values: readonly string[]): AsyncIterable<string> {
   yield* values;
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => { resolve = nextResolve; });
+  return { promise, resolve };
+}
+
+function interruptibleProvider(): AIProvider & { readonly firstStarted: Promise<void>; readonly calls: string[] } {
+  const firstStarted = deferred<void>();
+  const calls: string[] = [];
+  const provider: AIProvider & { readonly firstStarted: Promise<void>; readonly calls: string[] } = {
+    name: 'interruptible-test',
+    firstStarted: firstStarted.promise,
+    calls,
+    complete: async (): Promise<AIResponse> => ({
+      text: 'unused', provider: 'interruptible-test', model: 'test', finishReason: 'stop',
+    }),
+    async *stream(request: AIRequest, options?: ProviderCallOptions): AsyncIterable<AIStreamEvent> {
+      const input = request.messages.at(-1)?.content;
+      if (input) calls.push(input);
+      if (input?.startsWith('A')) {
+        yield { type: 'text_delta', delta: 'partial-A' };
+        firstStarted.resolve();
+        await new Promise<void>((resolve) => {
+          if (options?.signal?.aborted) { resolve(); return; }
+          options?.signal?.addEventListener('abort', () => resolve(), { once: true });
+        });
+        throw new Error('cancelled first turn');
+      }
+      yield { type: 'text_delta', delta: `answer-${input}` };
+      yield {
+        type: 'completed',
+        response: { text: `answer-${input}`, provider: 'interruptible-test', model: 'test', finishReason: 'stop' },
+      };
+    },
+  };
+  return provider;
 }
 
 test('conversation runner completes one turn through AssistantCore', async () => {
@@ -471,4 +511,185 @@ test('conversation runner propagates provider errors without destroying the sess
   assert.deepEqual(session.getMessages().map(({ role, content }) => ({ role, content })), [
     { role: 'user', content: 'hello' },
   ]);
+});
+
+test('conversation runner interrupts a streaming turn with the latest normal input', async () => {
+  const provider = interruptibleProvider();
+  const nextInput = deferred<string>();
+  const output: string[] = [];
+  const interruptions: number[] = [];
+  const source = (async function* (): AsyncIterable<string> {
+    yield 'A';
+    yield await nextInput.promise;
+  }());
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const pending = runner.run(source, {
+    interruptible: true,
+    onDelta: (delta) => { output.push(delta); },
+    onInterruption: () => { interruptions.push(1); },
+  });
+
+  await provider.firstStarted;
+  nextInput.resolve('B');
+  const result = await pending;
+
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(output, ['partial-A', 'answer-B']);
+  assert.equal(interruptions.length, 1);
+  assert.deepEqual(result.session.getMessages().map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'A' },
+    { role: 'user', content: 'B' },
+    { role: 'assistant', content: 'answer-B' },
+  ]);
+});
+
+test('conversation runner latest-input-wins replaces pending B with C', async () => {
+  const provider = interruptibleProvider();
+  const output: string[] = [];
+  const source = (async function* (): AsyncIterable<string> {
+    yield 'A';
+    yield 'B';
+    yield 'C';
+  }());
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const resultPromise = runner.run(source, { interruptible: true, onDelta: (delta) => { output.push(delta); } });
+  await provider.firstStarted;
+  const result = await resultPromise;
+
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(output, ['answer-C']);
+  assert.deepEqual(result.session.getMessages().map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'A' },
+    { role: 'user', content: 'C' },
+    { role: 'assistant', content: 'answer-C' },
+  ]);
+});
+
+test('conversation runner handles /cancel during a response and then continues', async () => {
+  const provider = interruptibleProvider();
+  const commands: Array<{ command: string; active: boolean }> = [];
+  const source = (async function* (): AsyncIterable<string> {
+    yield 'A';
+    yield '/cancel';
+    yield 'B';
+  }());
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const resultPromise = runner.run(source, {
+    interruptible: true,
+    onCommand: (command, context) => { commands.push({ command, active: context.active }); },
+  });
+  await provider.firstStarted;
+  const result = await resultPromise;
+
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(commands, [{ command: '/cancel', active: true }]);
+  assert.deepEqual(result.session.getMessages().map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'A' },
+    { role: 'user', content: 'B' },
+    { role: 'assistant', content: 'answer-B' },
+  ]);
+});
+
+test('conversation runner cancels before executing /clear and prevents stale repopulation', async () => {
+  const provider = interruptibleProvider();
+  const source = (async function* (): AsyncIterable<string> {
+    yield 'A';
+    yield '/clear';
+    yield 'B';
+  }());
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const resultPromise = runner.run(source, {
+    interruptible: true,
+    onCommand: (command) => {
+      assert.equal(command, '/clear');
+      runner.session.clear();
+    },
+  });
+  await provider.firstStarted;
+  const result = await resultPromise;
+
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(result.session.getMessages().map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'B' },
+    { role: 'assistant', content: 'answer-B' },
+  ]);
+});
+
+test('conversation runner /exit during a response cancels without persisting partial output', async () => {
+  const provider = interruptibleProvider();
+  const interruptions: number[] = [];
+  const source = (async function* (): AsyncIterable<string> {
+    yield 'A';
+    yield '/exit';
+  }());
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const resultPromise = runner.run(source, { interruptible: true, onInterruption: () => { interruptions.push(1); } });
+  await provider.firstStarted;
+  const result = await resultPromise;
+
+  assert.equal(result.status, 'completed');
+  assert.equal(result.responses.length, 0);
+  assert.equal(interruptions.length, 1);
+  assert.deepEqual(result.session.getMessages().map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'A' },
+  ]);
+});
+
+test('conversation runner survives 100 deterministic interruption cycles', async () => {
+  for (let index = 0; index < 100; index += 1) {
+    const provider = interruptibleProvider();
+    const runner = new ConversationRunner(new AssistantCore({ provider }));
+    const result = await runner.run((async function* (): AsyncIterable<string> {
+      yield `A-${index}`;
+      yield `B-${index}`;
+    }()), { interruptible: true });
+
+    assert.equal(result.status, 'completed');
+    assert.deepEqual(provider.calls, [`A-${index}`, `B-${index}`]);
+    assert.deepEqual(result.session.getMessages().map(({ role, content }) => ({ role, content })), [
+      { role: 'user', content: `A-${index}` },
+      { role: 'user', content: `B-${index}` },
+      { role: 'assistant', content: `answer-B-${index}` },
+    ]);
+  }
+});
+
+test('conversation runner bounds 50 rapid inputs to one active and one final turn', async () => {
+  const firstStarted = deferred<void>();
+  const allInputsConsumed = deferred<void>();
+  const cancelRelease = deferred<void>();
+  const calls: string[] = [];
+  const provider: AIProvider = {
+    name: 'rapid-interrupt-test',
+    complete: async () => ({ text: 'unused', provider: 'rapid-interrupt-test', model: 'test', finishReason: 'stop' }),
+    async *stream(request, options) {
+      const input = request.messages.at(-1)?.content ?? '';
+      calls.push(input);
+      if (input === 'A') {
+        yield { type: 'text_delta', delta: 'partial-A' };
+        firstStarted.resolve();
+        await cancelRelease.promise;
+        if (options?.signal?.aborted) throw new Error('cancelled first turn');
+      }
+      yield { type: 'text_delta', delta: `answer-${input}` };
+      yield { type: 'completed', response: { text: `answer-${input}`, provider: 'rapid-interrupt-test', model: 'test', finishReason: 'stop' } };
+    },
+  };
+  const rapidInputs = Array.from({ length: 50 }, (_, index) => `input-${index}`);
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const resultPromise = runner.run((async function* (): AsyncIterable<string> {
+    yield 'A';
+    for (const input of rapidInputs) {
+      yield input;
+      if (input === 'input-49') allInputsConsumed.resolve();
+    }
+  }()), { interruptible: true });
+  await firstStarted.promise;
+  await allInputsConsumed.promise;
+  cancelRelease.resolve();
+  const result = await resultPromise;
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(calls, ['A', 'input-49']);
+  assert.equal(result.session.getMessages().at(-1)?.content, 'answer-input-49');
+  assert.equal(result.session.getMessages().filter(({ role }) => role === 'assistant').length, 1);
 });

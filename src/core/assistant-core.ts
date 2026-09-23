@@ -26,6 +26,8 @@ export interface AssistantCoreOptions {
 
 export interface RespondOptions {
   readonly signal?: AbortSignal;
+  /** Prevents a late stream completion from committing after interruption. */
+  readonly isCurrent?: () => boolean;
   readonly model?: string;
   /** A per-interaction immutable snapshot; it never becomes a Session message. */
   readonly personality?: PersonalitySnapshot;
@@ -157,9 +159,19 @@ export class AssistantCore {
 
     try {
       const first = yield* this.consumeStream(request, options, true);
+      if (options.isCurrent && !options.isCurrent()) {
+        throw new AssistantError('The AI response was superseded.', {
+          code: 'CANCELLATION_ERROR', retryable: false,
+        });
+      }
       const finalResponse = first.toolCalls?.length
         ? yield* this.streamToolRound(request, first.toolCalls, options)
         : first;
+      if (options.isCurrent && !options.isCurrent()) {
+        throw new AssistantError('The AI response was superseded.', {
+          code: 'CANCELLATION_ERROR', retryable: false,
+        });
+      }
       if (!finalResponse.text && !finalResponse.toolCalls?.length) {
         throw new AssistantError('The provider returned an empty response.', {
           code: 'INVALID_RESPONSE_ERROR', retryable: false,
@@ -292,6 +304,9 @@ export class AssistantCore {
     toolCalls: readonly ToolCallRequest[],
     options: RespondOptions,
   ): AsyncGenerator<AssistantStreamEvent, AIResponse, unknown> {
+    if (options.signal?.aborted || (options.isCurrent && !options.isCurrent())) {
+      throw new AssistantError('The tool call was cancelled.', { code: 'CANCELLATION_ERROR', retryable: false });
+    }
     const toolRequest = await this.prepareToolRoundRequest(request, toolCalls, options.signal);
     if (options.signal?.aborted) {
       throw new AssistantError('The tool call was cancelled.', { code: 'CANCELLATION_ERROR', retryable: false });
@@ -333,6 +348,9 @@ export class AssistantCore {
     }
     const toolMessages: ProviderMessage[] = [];
     for (const toolCall of toolCalls) {
+      if (signal?.aborted) {
+        throw new AssistantError('The tool call was cancelled.', { code: 'CANCELLATION_ERROR', retryable: false });
+      }
       const toolId = this.toolAllowlist.find((id) => this.providerToolName(id) === toolCall.name);
       if (!toolId || !this.toolManager) {
         toolMessages.push(this.toolFailureMessage(toolCall, 'TOOL_NOT_FOUND_ERROR', 'The requested tool is not allowed.'));

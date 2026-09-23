@@ -18,6 +18,7 @@ import {
 } from './tools/local-tool-manager.js';
 import {
   CONVERSATION_CLEAR_COMMAND,
+  CONVERSATION_CANCEL_COMMAND,
   CONVERSATION_CALC_COMMAND,
   CONVERSATION_FORGET_COMMAND,
   CONVERSATION_HISTORY_COMMAND,
@@ -80,11 +81,19 @@ export async function main(
     const runner = new ConversationRunner(core);
     await runner.run(terminal, {
       signal: controller.signal,
+      interruptible: true,
       personality,
       memory: () => memoryStore.snapshot(),
       onDelta: (delta): void => { process.stdout.write(delta); },
       onResponse: (): void => { process.stdout.write('\n'); },
+      onInterruption: (): void => { process.stdout.write('\n[Respuesta interrumpida]\n'); },
       onCommand: async (command, context): Promise<void> => {
+        if (command === CONVERSATION_CANCEL_COMMAND) {
+          process.stdout.write(context.active
+            ? 'Respuesta cancelada.\n'
+            : 'No hay una respuesta activa para cancelar.\n');
+          return;
+        }
         if (command === CONVERSATION_HELP_COMMAND) {
           process.stdout.write(LOCAL_COMMAND_HELP + '\n');
           return;
