@@ -154,6 +154,28 @@ Esto no convierte el environment en un almacén permanente seguro: integración
 OS Secret Store / first-run credential bootstrap queda diferida para V2.
 Nunca incluyas claves en Git ni archivos de configuración de texto plano.
 
+### Windows credential setup
+
+En Windows, configura una credencial por perfil una sola vez:
+
+```powershell
+.\scripts\setup-provider-credentials.ps1 -Profile groq
+.\scripts\start-yuki.ps1 -Profile groq
+```
+
+Usa `omniroute`, `groq`, `gemini` u `openrouter` como perfil. En el diálogo
+seguro, pega la API key en el campo Password; el nombre de usuario es solo una
+etiqueta. Las credenciales quedan fuera del repositorio en
+`%APPDATA%\WaifuAssistant` mediante `Export-Clixml`, protegido para el usuario
+de Windows que las creó; no se debe asumir que otro usuario o equipo pueda
+descifrarlas. Un archivo existente se conserva; `-Force` reemplaza únicamente
+el perfil seleccionado. El launcher importa solo ese perfil y entrega su clave
+al proceso de Yuki mediante environment temporal, nunca como argumento CLI.
+El `<PROFILE>_MODEL` sigue siendo configuración pública independiente y debe
+estar configurado antes de iniciar. El flujo manual por environment sigue
+siendo compatible. La integración nativa con Windows Credential Manager,
+macOS Keychain o Linux Secret Service queda para una versión futura.
+
 ## Próximo paso
 
 Cerrar y revisar la unidad offline de contratos/base: datos web no confiables, policy URL pura, lifecycle, cancelación, mocks y adapters de `ToolManager`. La red, los providers reales, el browser, el egress y la ejecución del laboratorio siguen fuera de esta unidad; ADR-012 permanece provisional y el resultado debe conservar `PASS`, `FAIL`, `LIMITATION` o `NOT EXECUTED` sin convertir mocks en evidencia real.
