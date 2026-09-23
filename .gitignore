@@ -3,6 +3,15 @@
 .env.*
 !.env.example
 
+# Provider credential exports belong in the user's Windows profile, not Git.
+**/omniroute-credential.xml
+**/providers/groq-credential.xml
+**/providers/gemini-credential.xml
+**/providers/openrouter-credential.xml
+**/*.credential.tmp.xml
+**/credential-dumps/
+**/credentials/**/*.key
+
 # Node and generated output
 node_modules/
 dist/
