@@ -88,3 +88,55 @@ export function selectFinalist(routeSummary) {
     .sort((left, right) => (right.successRate - left.successRate)
       || ((left.ttftAvgMs ?? Infinity) - (right.ttftAvgMs ?? Infinity)))[0]?.route;
 }
+
+const FREE_CANDIDATE_PREFERENCE = [
+  'free-only',
+  'kc/openrouter/free',
+  'kilocode/openrouter/free',
+  'openrouter/nex-agi/nex-n2.5-mini:free',
+  'openrouter/qwen/qwen3.8-27b:free',
+  'openrouter/inclusionai/ling-3.0-flash-sante:free',
+  'openrouter/nvidia/nemotron-3-super-120b-a12b:free',
+  'openrouter/cohere/north-mini-code:free',
+];
+
+function modelId(model) {
+  return typeof model === 'string' ? model : model?.id;
+}
+
+export function classifyModelCategory(model) {
+  const id = modelId(model)?.toLowerCase() ?? '';
+  if (!id) return 'UNKNOWN';
+  if (/(embedding|embed|rerank)/u.test(id)) return 'EMBEDDING';
+  if (/(image|flux|vision)/u.test(id)) return 'IMAGE';
+  if (/(audio|speech|whisper|tts)/u.test(id)) return 'AUDIO';
+  return 'CHAT/TEXT';
+}
+
+export function selectFreeChatCandidates(models, limit = 8) {
+  const available = new Map(
+    models
+      .filter((model) => classifyModelCategory(model) === 'CHAT/TEXT')
+      .map((model) => [modelId(model), model]),
+  );
+  const isFree = (id) => id === 'free-only'
+    || id === 'kc/openrouter/free'
+    || id === 'kilocode/openrouter/free'
+    || id?.endsWith(':free');
+  const candidates = [...available.values()]
+    .filter((model) => isFree(modelId(model)) && modelId(model) !== 'fast')
+    .sort((left, right) => modelId(left).localeCompare(modelId(right)));
+  const preferred = FREE_CANDIDATE_PREFERENCE
+    .map((id) => available.get(id))
+    .filter(Boolean)
+    .filter((model) => isFree(modelId(model)));
+  const selected = [...new Map([...preferred, ...candidates].map((model) => [modelId(model), model])).values()];
+  return selected.slice(0, limit);
+}
+
+export function rankRouteSummary(routeSummary) {
+  return [...routeSummary].sort((left, right) => (right.successRate - left.successRate)
+    || ((left.ttftAvgMs ?? Infinity) - (right.ttftAvgMs ?? Infinity))
+    || ((left.totalAvgMs ?? Infinity) - (right.totalAvgMs ?? Infinity))
+    || left.route.localeCompare(right.route));
+}
