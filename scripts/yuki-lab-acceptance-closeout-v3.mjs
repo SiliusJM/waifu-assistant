@@ -98,10 +98,31 @@ function quietLogger() {
   return createLogger({ sink: { info() {}, warn() {}, error() {} } });
 }
 
-function safeError(error) {
+function safeErrorName(value) {
+  return typeof value === 'string' && /^[A-Za-z][A-Za-z0-9]{0,63}$/u.test(value) ? value : 'Error';
+}
+
+function safeErrorCode(value) {
+  return typeof value === 'string' && /^[A-Z0-9_]{1,64}$/u.test(value) ? value : 'UNKNOWN_ERROR';
+}
+
+export function safeError(error) {
+  const code = safeErrorCode(error?.code);
+  const cause = error?.cause;
+  const classification = code === 'TIMEOUT_ERROR' ? 'TIMEOUT'
+    : code === 'CANCELLATION_ERROR' ? 'CANCELLATION'
+      : code === 'NETWORK_ERROR' ? 'TRANSPORT'
+        : code === 'INVALID_RESPONSE_ERROR' ? 'INVALID_RESPONSE' : 'PROVIDER_ERROR';
   return {
-    name: typeof error?.name === 'string' && /^[A-Za-z][A-Za-z0-9]{0,63}$/u.test(error.name) ? error.name : 'Error',
-    code: typeof error?.code === 'string' && /^[A-Z0-9_]{1,64}$/u.test(error.code) ? error.code : 'UNKNOWN_ERROR',
+    classification,
+    name: safeErrorName(error?.name),
+    code,
+    ...(cause === undefined ? {} : {
+      cause: {
+        name: safeErrorName(cause?.name),
+        code: safeErrorCode(cause?.code),
+      },
+    }),
     statusCode: typeof error?.statusCode === 'number' ? error.statusCode : undefined,
   };
 }
