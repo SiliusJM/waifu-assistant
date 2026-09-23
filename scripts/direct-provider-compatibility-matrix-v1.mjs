@@ -16,6 +16,21 @@ export const MAX_TOTAL_INFERENCE_REQUESTS = 30;
 export const MAX_PROVIDER_INFERENCE_REQUESTS = 10;
 export const ROUTER_FREE_MODEL = 'openrouter/free';
 export const MATRIX_TIMEOUT_MS = 30_000;
+export const FREE_MODE_STRATEGIES = Object.freeze({
+  groq: 'ACCOUNT_FREE_QUOTA',
+  gemini: 'ACCOUNT_FREE_TIER',
+  openrouter: 'ZERO_PRICE_MODEL',
+});
+export const TOOL_CLASSIFICATIONS = Object.freeze([
+  'TOOL_PASS', 'TOOL_MODEL_UNSUPPORTED', 'TOOL_FORMAT_INCOMPATIBLE',
+  'TOOL_INVALID_RESPONSE', 'TOOL_NOT_VERIFIED',
+]);
+export const HISTORICAL_OPENROUTER_TOOL_OBSERVATION = Object.freeze({
+  httpStatus: 200,
+  providerErrorCode: 'INVALID_RESPONSE_ERROR',
+  rawResponseAvailable: false,
+  classification: 'TOOL_NOT_VERIFIED',
+});
 
 export const PROVIDER_DEFINITIONS = Object.freeze({
   groq: Object.freeze({
@@ -88,8 +103,7 @@ export function explicitFreeEvidence(model) {
     const request = pricing.request;
     if (zeroPrice(prompt) && zeroPrice(completion) && (request === undefined || zeroPrice(request))) return true;
   }
-  return model.free === true || model.is_free === true || model.isFree === true
-    || (typeof model.id === 'string' && /:free$/iu.test(model.id));
+  return false;
 }
 
 function explicitPaidEvidence(model) {
@@ -104,14 +118,38 @@ function explicitPaidEvidence(model) {
 
 function chatTextEligible(model) {
   const id = typeof model?.id === 'string' ? model.id.toLowerCase() : '';
-  if (!id || /(embedding|embed|whisper|transcri|moderation|rerank|imagegen|text-to-speech|tts)/u.test(id)) return false;
+  if (!id || /(embedding|embed|audio|whisper|transcri|moderation|rerank|image|vision|text-to-speech|tts)/u.test(id)) return false;
   const outputs = model.architecture?.output_modalities;
-  if (Array.isArray(outputs) && !outputs.includes('text')) return false;
+  if (Array.isArray(outputs) && (!outputs.includes('text') || outputs.some((modality) => modality !== 'text'))) return false;
   const inputs = model.architecture?.input_modalities;
-  if (Array.isArray(inputs) && !inputs.includes('text')) return false;
+  if (Array.isArray(inputs) && (!inputs.includes('text') || inputs.some((modality) => modality !== 'text'))) return false;
   const methods = model.supportedGenerationMethods ?? model.supported_generation_methods;
   if (Array.isArray(methods) && !methods.some((method) => /generateContent|chat|completion/iu.test(method))) return false;
   return true;
+}
+
+function accountEligible(providerKey, model) {
+  if (!['groq', 'gemini'].includes(providerKey)
+    || !chatTextEligible(model) || modelIsDeprecated(model) || model?.active === false) return false;
+  if (providerKey === 'gemini') {
+    const methods = model.supportedGenerationMethods ?? model.supported_generation_methods;
+    const label = `${model.id ?? ''} ${model.displayName ?? ''}`;
+    return Array.isArray(methods)
+      ? methods.some((method) => /generateContent/iu.test(method))
+      : /gemini|flash|text|chat/iu.test(label);
+  }
+  return true;
+}
+
+function geminiEfficiencyRank(model) {
+  const label = `${model.id ?? ''} ${model.displayName ?? ''}`.toLowerCase();
+  return /flash(?:[- ]lite)?/u.test(label) ? 0 : 1;
+}
+
+function candidateEvidence(providerKey) {
+  if (providerKey === 'groq') return 'ACCOUNT_FREE_QUOTA';
+  if (providerKey === 'gemini') return 'ACCOUNT_FREE_TIER';
+  return 'CATALOG_ZERO_PRICE';
 }
 
 export function modelIsDeprecated(model, now = Date.now()) {
@@ -131,46 +169,59 @@ function modelList(payload) {
 export function selectCandidate(providerKey, models, override) {
   if (!Object.hasOwn(PROVIDER_DEFINITIONS, providerKey)) throw new TypeError('Unknown provider key.');
   const catalog = Array.isArray(models) ? models.filter((model) => safeModel(model?.id)) : [];
+  const eligible = providerKey === 'openrouter'
+    ? (model) => chatTextEligible(model) && !modelIsDeprecated(model) && explicitFreeEvidence(model)
+    : (model) => accountEligible(providerKey, model);
   if (override) {
     if (providerKey === 'openrouter' && override === ROUTER_FREE_MODEL) {
-      return { status: 'SELECTED', selectedModel: ROUTER_FREE_MODEL, selectionSource: 'OVERRIDE', freeEvidence: 'OPENROUTER_FREE_ROUTER' };
+      const listedRouter = catalog.find((model) => model.id === ROUTER_FREE_MODEL);
+      if (listedRouter && listedRouter.active !== false && chatTextEligible(listedRouter) && !modelIsDeprecated(listedRouter)
+        && !explicitPaidEvidence(listedRouter)) {
+        return { status: 'SELECTED', selectedModel: ROUTER_FREE_MODEL, selectionSource: 'OVERRIDE', freeEvidence: 'OPENROUTER_FREE_ROUTER' };
+      }
+      return { status: 'MODEL_UNAVAILABLE', selectedModel: undefined, selectionSource: 'OVERRIDE' };
     }
     const selected = catalog.find((model) => model.id === override);
     if (!selected) return { status: 'MODEL_UNAVAILABLE', selectedModel: undefined, selectionSource: 'OVERRIDE' };
     if (modelIsDeprecated(selected)) {
-      const replacement = catalog.find((model) => model.id !== selected.id && chatTextEligible(model)
-        && !modelIsDeprecated(model) && explicitFreeEvidence(model));
+      const replacement = catalog.find((model) => model.id !== selected.id && eligible(model));
       if (replacement) return { status: 'MODEL_UNAVAILABLE', selectedModel: undefined, selectionSource: 'OVERRIDE', reason: 'OVERRIDE_DEPRECATED' };
     }
     if (!chatTextEligible(selected)) return { status: 'MODEL_UNSUPPORTED_CAPABILITY', selectedModel: undefined, selectionSource: 'OVERRIDE' };
-    if (!explicitFreeEvidence(selected)) return {
-      status: explicitPaidEvidence(selected) ? 'PAID_ONLY_OR_NOT_FREE' : 'INCONCLUSIVE',
+    if (modelIsDeprecated(selected) || selected.active === false) return { status: 'MODEL_UNAVAILABLE', selectedModel: undefined, selectionSource: 'OVERRIDE' };
+    if (!eligible(selected)) return {
+      status: providerKey === 'openrouter' && explicitPaidEvidence(selected) ? 'PAID_ONLY_OR_NOT_FREE' : 'INCONCLUSIVE',
       selectedModel: undefined, selectionSource: 'OVERRIDE',
     };
-    if (modelIsDeprecated(selected)) return { status: 'MODEL_UNAVAILABLE', selectedModel: undefined, selectionSource: 'OVERRIDE', reason: 'OVERRIDE_DEPRECATED' };
-    return { status: 'SELECTED', selectedModel: selected.id, selectionSource: 'OVERRIDE', freeEvidence: 'CATALOG_ZERO_PRICE' };
+    return { status: 'SELECTED', selectedModel: selected.id, selectionSource: 'OVERRIDE', freeEvidence: candidateEvidence(providerKey) };
   }
 
   if (providerKey === 'openrouter') {
     const listedRouter = catalog.find((model) => model.id === ROUTER_FREE_MODEL);
-    if (!listedRouter || (!modelIsDeprecated(listedRouter) && chatTextEligible(listedRouter) && !explicitPaidEvidence(listedRouter))) return {
+    if (listedRouter && listedRouter.active !== false && !modelIsDeprecated(listedRouter)
+      && chatTextEligible(listedRouter) && !explicitPaidEvidence(listedRouter)) return {
       status: 'SELECTED', selectedModel: ROUTER_FREE_MODEL, selectionSource: 'FREE_ROUTER_POLICY', freeEvidence: 'OPENROUTER_FREE_ROUTER',
     };
   }
 
-  const candidates = catalog.filter((model) => chatTextEligible(model) && !modelIsDeprecated(model) && explicitFreeEvidence(model));
+  const candidates = catalog.filter(eligible);
   candidates.sort((left, right) => {
+    if (providerKey === 'gemini') {
+      const rankDifference = geminiEfficiencyRank(left) - geminiEfficiencyRank(right);
+      if (rankDifference !== 0) return rankDifference;
+    }
     const leftCreated = Number(left.created ?? 0);
     const rightCreated = Number(right.created ?? 0);
     if (leftCreated !== rightCreated) return rightCreated - leftCreated;
     return left.id.localeCompare(right.id);
   });
   if (candidates.length) {
-    return { status: 'SELECTED', selectedModel: candidates[0].id, selectionSource: 'AUTO', freeEvidence: 'CATALOG_ZERO_PRICE' };
+    return { status: 'SELECTED', selectedModel: candidates[0].id, selectionSource: 'AUTO', freeEvidence: candidateEvidence(providerKey) };
   }
-  const usable = catalog.filter((model) => chatTextEligible(model) && !modelIsDeprecated(model));
+  const usable = catalog.filter((model) => chatTextEligible(model) && !modelIsDeprecated(model) && model.active !== false);
   return {
-    status: usable.some(explicitPaidEvidence) ? 'PAID_ONLY_OR_NOT_FREE' : usable.length ? 'INCONCLUSIVE' : 'MODEL_UNAVAILABLE',
+    status: providerKey === 'openrouter' && usable.some(explicitPaidEvidence)
+      ? 'PAID_ONLY_OR_NOT_FREE' : usable.length ? 'INCONCLUSIVE' : 'MODEL_UNAVAILABLE',
     selectedModel: undefined, selectionSource: 'AUTO',
   };
 }
@@ -208,16 +259,21 @@ export function classifyProviderFailure({ statusCode, code, detail = '' } = {}) 
   return 'INCONCLUSIVE';
 }
 
+export function classifyToolFormatOutcome({ protocolCompatible, parserAccepted, responseWellFormed = true } = {}) {
+  if (protocolCompatible !== true) return 'TOOL_NOT_VERIFIED';
+  if (parserAccepted === true) return 'TOOL_PASS';
+  return responseWellFormed ? 'TOOL_FORMAT_INCOMPATIBLE' : 'TOOL_INVALID_RESPONSE';
+}
+
 export function classifyToolCapability({ toolDefinitionSent, toolCallEmitted, localToolExecuted, secondRound, finalAnswer } = {}) {
-  if (toolDefinitionSent && toolCallEmitted && localToolExecuted && secondRound && finalAnswer) return 'PASS';
-  if (toolDefinitionSent && !toolCallEmitted && finalAnswer) return 'NOT_VERIFIED';
-  if (toolDefinitionSent && !toolCallEmitted && !finalAnswer) return 'MODEL_UNSUPPORTED_CAPABILITY';
-  return 'NOT_VERIFIED';
+  if (toolDefinitionSent && toolCallEmitted && localToolExecuted && secondRound && finalAnswer) return 'TOOL_PASS';
+  return 'TOOL_NOT_VERIFIED';
 }
 
 export function classifyToolRun({ requestFailed, failureClass, ...evidence } = {}) {
-  if (failureClass === 'MODEL_UNSUPPORTED_CAPABILITY') return 'MODEL_UNSUPPORTED_CAPABILITY';
-  if (requestFailed) return 'NOT_VERIFIED';
+  if (failureClass === 'MODEL_UNSUPPORTED_CAPABILITY') return 'TOOL_MODEL_UNSUPPORTED';
+  if (requestFailed && ['PROTOCOL_INCOMPATIBLE', 'INVALID_RESPONSE_ERROR'].includes(failureClass)) return 'TOOL_INVALID_RESPONSE';
+  if (requestFailed) return 'TOOL_NOT_VERIFIED';
   return classifyToolCapability(evidence);
 }
 
@@ -265,6 +321,8 @@ export async function discoverProviderModels(config, { fetchImpl = fetch, timeou
       ...(Array.isArray(model.supported_parameters) ? { supported_parameters: model.supported_parameters } : {}),
       ...(Array.isArray(model.supportedGenerationMethods) ? { supportedGenerationMethods: model.supportedGenerationMethods } : {}),
       ...(model.deprecated === true ? { deprecated: true } : {}),
+      ...(typeof model.active === 'boolean' ? { active: model.active } : {}),
+      ...(typeof model.displayName === 'string' ? { displayName: model.displayName.slice(0, 160) } : {}),
       ...(typeof model.status === 'string' ? { status: model.status } : {}),
       ...(typeof model.expiration_date === 'string' ? { expiration_date: model.expiration_date } : {}),
       ...(model.free === true ? { free: true } : {}),
@@ -623,11 +681,15 @@ async function runInterruption(context, graceMs = 5000) {
 function newProviderReport(config) {
   return {
     provider: config.name,
+    freeModeStrategy: FREE_MODE_STRATEGIES[config.providerKey],
+    ...(config.providerKey === 'openrouter' ? {
+      historicalToolObservation: HISTORICAL_OPENROUTER_TOOL_OBSERVATION,
+    } : {}),
     credentialsConfigured: config.configured,
     baseURLMatchesExpected: config.baseURLMatches,
     discovery: 'NOT RUN', modelsDiscovered: 0, selectedModel: undefined, selectionSource: undefined,
     basicCompletion: 'NOT RUN', unicode: 'NOT RUN', context: 'NOT RUN', streaming: 'NOT RUN',
-    toolCalling: 'NOT RUN', fullStackYuki: 'NOT RUN', currentDataHonesty: 'NOT RUN', interruption: 'NOT RUN',
+    toolCalling: 'TOOL_NOT_VERIFIED', fullStackYuki: 'NOT RUN', currentDataHonesty: 'NOT RUN', interruption: 'NOT RUN',
     metadataRequests: 0, inferenceCalls: 0, toolSecondRounds: 0, aborts: 0, retries: 0, errors: [],
     latency: { ttftMinMs: null, ttftAvgMs: null, ttftMaxMs: null, totalAvgMs: null },
     result: 'INCONCLUSIVE', limitations: [], upstreamModels: [], freePriceVerified: false, freeEvidence: undefined,
@@ -702,11 +764,14 @@ async function runProviderValidationInternal(providerKey, {
   report.selectedModel = selection.selectedModel;
   report.selectionSource = selection.selectionSource;
   report.freeEvidence = selection.freeEvidence;
-  report.freePriceVerified = selection.freeEvidence === 'OPENROUTER_FREE_ROUTER' || selection.freeEvidence === 'CATALOG_ZERO_PRICE';
+  report.freePriceVerified = FREE_MODE_STRATEGIES[providerKey] === 'ZERO_PRICE_MODEL'
+    && (selection.freeEvidence === 'OPENROUTER_FREE_ROUTER' || selection.freeEvidence === 'CATALOG_ZERO_PRICE');
   if (selection.status !== 'SELECTED') {
     report.result = selection.status;
     const reason = selection.status === 'INCONCLUSIVE'
-      ? 'No discovered candidate carried explicit zero-price/free evidence; inference skipped to enforce FREE ONLY.'
+      ? FREE_MODE_STRATEGIES[providerKey] === 'ZERO_PRICE_MODEL'
+        ? 'No discovered OpenRouter candidate carried explicit zero-price/free evidence; inference skipped.'
+        : 'No usable chat/text candidate was available under the declared account free-tier strategy; inference skipped.'
       : selection.status === 'PAID_ONLY_OR_NOT_FREE'
         ? 'Eligible catalog candidates carried explicit positive-price metadata; inference skipped to enforce FREE ONLY.'
         : selection.reason ?? 'No eligible model candidate was available.';
@@ -811,12 +876,15 @@ async function runProviderValidationInternal(providerKey, {
     .some((value) => value === 'FAIL' || value === 'UTF8_TRANSPORT_FAILURE') || report.streaming === 'BROKEN';
   const allCore = report.basicCompletion === 'PASS' && report.context === 'PASS'
     && report.fullStackYuki === 'PASS' && report.currentDataHonesty === 'PASS';
-  const fullyCompatible = allCore && report.unicode === 'PASS' && report.toolCalling === 'PASS' && report.interruption?.status === 'PASS';
+  const fullyCompatible = allCore && report.unicode === 'PASS' && report.toolCalling === 'TOOL_PASS' && report.interruption?.status === 'PASS';
   report.result = fullyCompatible ? 'PROVIDER_COMPATIBLE'
     : allCore && !anyFailedStatus ? 'PROVIDER_COMPATIBLE_WITH_LIMITATIONS'
       : report.errors.at(-1)?.classification ?? (hasTransportError ? 'TRANSPORT_LIMITATION'
         : report.basicCompletion === 'FAIL' ? 'PROTOCOL_INCOMPATIBLE' : 'INCONCLUSIVE');
-  if (report.toolCalling === 'NOT_VERIFIED' || report.toolCalling === 'MODEL_UNSUPPORTED_CAPABILITY') report.limitations.push(`tool_calling=${report.toolCalling}`);
+  if (report.toolCalling === 'TOOL_NOT_VERIFIED' || report.toolCalling === 'TOOL_MODEL_UNSUPPORTED'
+    || report.toolCalling === 'TOOL_FORMAT_INCOMPATIBLE' || report.toolCalling === 'TOOL_INVALID_RESPONSE') {
+    report.limitations.push(`tool_calling=${report.toolCalling}`);
+  }
   if (report.interruption?.status === 'FAIL') report.limitations.push('A→B interruption did not satisfy all acceptance conditions; request-level telemetry is retained.');
   if (report.interruption === 'NOT RUN') report.limitations.push('interruption=NOT RUN (provider stopped after an earlier capability failure or budget limit).');
   return { report, globalBudget, requestSummary: context.requests.map(summarizeRequest) };
