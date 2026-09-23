@@ -15,6 +15,7 @@ import {
   explicitFreeEvidence,
   readProviderConfig,
   runCompatibilityMatrix,
+  runOpenRouterFinalToolAwareInterruption,
   runOpenRouterToolInterruptionRetest,
   runProviderValidation,
   selectCandidate,
@@ -81,11 +82,11 @@ function sseResponse({ content = '', holdUntilAbort = false, holdWithAbortError 
   return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } });
 }
 
-function nullContentToolCallResponse(signal) {
+function nullContentToolCallResponse(signal, expression = '(27 * 13) + 4') {
   const body = [
     `data: ${JSON.stringify({ choices: [{
       delta: { content: null, tool_calls: [{ index: 0, id: 'call-openrouter', type: 'function',
-        function: { name: 'local_calculate', arguments: '{"expression":"(27 * 13) + 4"}' } }] },
+        function: { name: 'local_calculate', arguments: JSON.stringify({ expression }) } }] },
       finish_reason: 'tool_calls',
     }] })}\n\n`,
     'data: [DONE]\n\n',
@@ -663,4 +664,59 @@ test('OpenRouter interruption-only resume uses exactly two remaining requests an
   assert.equal(metadataCalls, 0);
   assert.equal(calls, 2);
   assert.equal(report.result, 'INTERRUPTION_SEGMENT_COMPLETED');
+});
+
+test('final OpenRouter interruption accepts a direct B answer within three requests', async () => {
+  let calls = 0;
+  const report = await runOpenRouterFinalToolAwareInterruption({
+    env: { ...baseEnv('openrouter') },
+    timeoutMs: 500,
+    interruptionGraceMs: 100,
+    fetchImpl: async (_input, init = {}) => {
+      calls += 1;
+      return calls === 1
+        ? sseResponse({ content: 'Una API comunica programas mediante solicitudes y respuestas. '.repeat(2), holdWithAbortError: true, signal: init.signal })
+        : sseResponse({ content: '128', signal: init.signal });
+    },
+  });
+  assert.equal(report.classification, 'PASS_DIRECT', JSON.stringify(report));
+  assert.equal(report.inferenceRequests, 2);
+  assert.equal(report.retries, 0);
+  assert.equal(calls, 2);
+  assert.equal(report.interruption.aAborted, true);
+  assert.equal(report.interruption.bDirectAnswer, true);
+  assert.equal(report.interruption.semantic128, 'PASS');
+});
+
+test('final OpenRouter interruption accepts B local.calculate plus provider follow-up at the exact three-request cap', async () => {
+  let calls = 0;
+  const report = await runOpenRouterFinalToolAwareInterruption({
+    env: { ...baseEnv('openrouter') },
+    timeoutMs: 500,
+    interruptionGraceMs: 100,
+    fetchImpl: async (_input, init = {}) => {
+      calls += 1;
+      if (calls === 1) return sseResponse({
+        content: 'Una API comunica programas mediante solicitudes y respuestas. '.repeat(2),
+        holdWithAbortError: true,
+        signal: init.signal,
+      });
+      if (calls === 2) return nullContentToolCallResponse(init.signal, '64 + 64');
+      assert.equal(JSON.parse(init.body).messages.at(-1)?.role, 'tool');
+      return sseResponse({ content: 'El resultado es 128.', signal: init.signal });
+    },
+  });
+  assert.equal(report.classification, 'PASS_WITH_TOOL', JSON.stringify(report));
+  assert.equal(report.inferenceRequests, 3);
+  assert.equal(report.retries, 0);
+  assert.equal(calls, 3);
+  assert.equal(report.interruption.aAborted, true);
+  assert.equal(report.interruption.toolDefinitionSent, true);
+  assert.equal(report.interruption.bToolCallEmitted, true);
+  assert.equal(report.interruption.toolName, 'local.calculate');
+  assert.equal(report.interruption.localCalculateExecuted, true);
+  assert.equal(report.interruption.toolResultInserted, true);
+  assert.equal(report.interruption.secondProviderRoundIssued, true);
+  assert.equal(report.interruption.finalResponse, '128');
+  assert.equal(report.interruption.semantic128, 'PASS');
 });

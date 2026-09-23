@@ -708,6 +708,9 @@ async function runInterruption(context, graceMs = 5000) {
   return {
     status: requestA?.abortedAt !== undefined && requestB?.finishedAt !== undefined && hasSemanticInteger(bText, 128)
       && !partialA && !staleDelta && context.maxActiveRequests === 1 ? 'PASS' : 'FAIL',
+    aRequestId: requestA?.requestId,
+    bRequestIds: requests.filter((request) => request.requestId !== aId).map((request) => request.requestId),
+    bText,
     aIssued: Boolean(requestA), aMeaningfulOutput: aCharacters >= 32,
     aAborted: requestA?.abortedAt !== undefined,
     aExpectedAbort: requestA?.abortedAt !== undefined,
@@ -720,6 +723,96 @@ async function runInterruption(context, graceMs = 5000) {
     maxActive: context.maxActiveRequests,
     requestErrors: requests.map(summarizeRequest).filter((request) => request.fetchError || request.streamError || request.providerError || request.error),
   };
+}
+
+export async function runOpenRouterFinalToolAwareInterruption({
+  env = process.env,
+  fetchImpl = fetch,
+  maxInferenceRequests = 3,
+  timeoutMs = MATRIX_TIMEOUT_MS,
+  interruptionGraceMs = 5000,
+} = {}) {
+  if (!Number.isInteger(maxInferenceRequests) || maxInferenceRequests !== 3) {
+    throw new TypeError('The final OpenRouter interruption run has a fixed three-request maximum.');
+  }
+  const config = readProviderConfig('openrouter', env);
+  const report = {
+    provider: 'OpenRouter', model: ROUTER_FREE_MODEL,
+    freeModeStrategy: 'ZERO_PRICE_MODEL', freeEvidence: 'OPENROUTER_FREE_ROUTER',
+    credentialsConfigured: config.configured, baseURLMatchesExpected: config.baseURLMatches,
+    discovery: 'NOT RUN', metadataRequests: 0, inferenceRequests: 0, retries: 0,
+    interruption: { status: 'NOT RUN' }, result: 'INCONCLUSIVE', requests: [],
+  };
+  if (!config.configured || !config.baseURLMatches) {
+    report.classification = 'INCONCLUSIVE';
+    report.reason = !config.configured ? 'CREDENTIALS_NOT_CONFIGURED' : 'BASE_URL_MISMATCH';
+    return report;
+  }
+  if (config.overrideInvalid || (config.modelOverride && config.modelOverride !== ROUTER_FREE_MODEL)) {
+    report.classification = 'INCONCLUSIVE';
+    report.reason = 'UNVERIFIED_MODEL_OVERRIDE';
+    return report;
+  }
+
+  const globalBudget = new ProviderRequestBudget(maxInferenceRequests);
+  const perProviderBudget = new ProviderRequestBudget(maxInferenceRequests);
+  const context = createProviderContext(config, ROUTER_FREE_MODEL, globalBudget, perProviderBudget,
+    fetchImpl, timeoutMs, maxInferenceRequests, maxInferenceRequests);
+  context.timeoutMs = timeoutMs;
+  context.maxTotalInferenceRequests = maxInferenceRequests;
+  context.maxProviderInferenceRequests = maxInferenceRequests;
+  const interruption = await runInterruption(context, interruptionGraceMs);
+  const bRequests = context.requests.filter((request) => interruption.bRequestIds?.includes(request.requestId));
+  const bToolRound = bRequests.find((request) => request.kind === 'tool-second-round');
+  const toolCallEmitted = Boolean(bToolRound);
+  const calculatorExecuted = Boolean(bToolRound?.localCalculatorSucceeded);
+  const secondProviderRoundIssued = Boolean(bToolRound);
+  const semantic128 = interruption.bCompleted && hasSemanticInteger(interruption.bText, 128);
+  const expectedAbortFailure = interruption.aRequestId;
+  const unexpectedErrors = (interruption.requestErrors ?? []).filter((request) =>
+    request.requestId !== expectedAbortFailure || !request.aborted);
+  const budgetExhausted = unexpectedErrors.some((request) =>
+    request.providerError?.cause?.code === 'BUDGET_EXHAUSTED'
+      || request.fetchError?.code === 'BUDGET_EXHAUSTED');
+
+  let classification;
+  if (interruption.status === 'PASS' && !toolCallEmitted) classification = 'PASS_DIRECT';
+  else if (interruption.status === 'PASS' && toolCallEmitted && calculatorExecuted && secondProviderRoundIssued) {
+    classification = 'PASS_WITH_TOOL';
+  } else if (budgetExhausted) classification = 'FAIL_BUDGET';
+  else if (toolCallEmitted && (!calculatorExecuted || !secondProviderRoundIssued || !semantic128)) classification = 'FAIL_TOOL_FLOW';
+  else if (interruption.aIssued && interruption.aAborted && interruption.bCompleted && !semantic128) classification = 'FAIL_MODEL_WRONG_ANSWER';
+  else if (unexpectedErrors.length > 0) classification = 'FAIL_TRANSPORT';
+  else if (interruption.aCompletedBeforeB || !interruption.aMeaningfulOutput || !interruption.bIssued) classification = 'FAIL_MODEL_WRONG_TASK';
+  else classification = 'INCONCLUSIVE';
+
+  report.inferenceRequests = globalBudget.providerRequests;
+  report.retries = globalBudget.retryRequests;
+  report.requests = context.requests.map(summarizeRequest);
+  report.interruption = {
+    run: true,
+    aIssued: interruption.aIssued,
+    aMeaningfulOutput: interruption.aMeaningfulOutput,
+    aAborted: interruption.aAborted,
+    bIssued: interruption.bIssued,
+    bDirectAnswer: semantic128 && !toolCallEmitted,
+    toolDefinitionSent: bRequests.some((request) => request.toolsSent),
+    bToolCallEmitted: toolCallEmitted,
+    toolName: toolCallEmitted ? 'local.calculate' : undefined,
+    localCalculateExecuted: calculatorExecuted,
+    toolResultInserted: calculatorExecuted,
+    secondProviderRoundIssued,
+    finalResponse: semantic128 ? '128' : 'NOT AVAILABLE',
+    semantic128: semantic128 ? 'PASS' : 'FAIL',
+    partialAPersisted: interruption.partialAPersisted,
+    staleDelta: interruption.staleADelta,
+    staleCompletion: interruption.staleACompletion,
+    maxActive: interruption.maxActive,
+  };
+  report.classification = classification;
+  report.result = classification === 'PASS_DIRECT' || classification === 'PASS_WITH_TOOL'
+    ? 'PROVIDER_COMPATIBLE' : 'PROVIDER_COMPATIBLE_WITH_LIMITATIONS';
+  return report;
 }
 
 function newProviderReport(config) {
