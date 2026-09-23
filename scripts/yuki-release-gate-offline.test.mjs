@@ -61,8 +61,8 @@ function requestText(request) {
   return request.messages.map(({ content }) => content).join('\n');
 }
 
-test('200 deterministic multi-turn captures retain turn-one context in request two', async () => {
-  for (let index = 0; index < 200; index += 1) {
+test('300 deterministic multi-turn captures retain turn-one context in request two', async () => {
+  for (let index = 0; index < 300; index += 1) {
     const token = `OFFLINE-CONTEXT-${index}`;
     const provider = captureProvider((request) => response(
       requestText(request).includes(token) ? token : 'missing',
@@ -81,12 +81,12 @@ test('200 deterministic multi-turn captures retain turn-one context in request t
   }
 });
 
-test('100 generated current-data prompts always carry the policy system block', async () => {
+test('200 generated current-data prompts always carry the policy system block', async () => {
   const provider = captureProvider();
   const core = new AssistantCore({ provider, logger: silentLogger() });
   const session = core.createSession();
 
-  for (let index = 0; index < 100; index += 1) {
+  for (let index = 0; index < 200; index += 1) {
     await core.respond(session, `¿Cuál es el dato actual de prueba ${index}?`);
     const request = provider.requests[index];
     assert.ok(request.messages.some(({ role, content }) => role === 'system' && content.startsWith(POLICY_PREFIX)));
@@ -119,6 +119,29 @@ test('tool second round preserves policy, personality and session context', asyn
   assert.ok(second.messages.some(({ role, toolCallId }) => role === 'tool' && toolCallId === 'time-1'));
   assert.equal(session.getMessages().some(({ content }) => content.includes(POLICY_PREFIX)), false);
   assert.equal(session.getMessages().some(({ content }) => content.includes('17:34:56')), false);
+});
+
+test('100 tool second-round contexts preserve policy and never start a third provider round', async () => {
+  for (let index = 0; index < 100; index += 1) {
+    const provider = captureProvider((_request, count) => count === 1
+      ? {
+        ...response(''),
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: `time-${index}`, name: 'local_time', argumentsJson: '{}' }],
+      }
+      : response(`tool-result-${index}`));
+    const core = new AssistantCore({
+      provider,
+      logger: silentLogger(),
+      toolManager: createLocalToolManager(() => new Date('2026-09-22T17:34:56.000Z')),
+      toolAllowlist: LOCAL_TOOL_ALLOWLIST,
+    });
+    const result = await core.respond(core.createSession(), `Tool context ${index}`);
+    assert.equal(result.text, `tool-result-${index}`);
+    assert.equal(provider.requests.length, 2);
+    assert.ok(provider.requests[1].messages.some(({ role }) => role === 'tool'));
+    assert.ok(provider.requests[1].messages.some(({ role, content }) => role === 'system' && content.startsWith(POLICY_PREFIX)));
+  }
 });
 
 test('200 interruption ownership cases never persist stale assistant A', async () => {
