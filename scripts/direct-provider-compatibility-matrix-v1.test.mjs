@@ -15,6 +15,7 @@ import {
   explicitFreeEvidence,
   readProviderConfig,
   runCompatibilityMatrix,
+  runOpenRouterToolInterruptionRetest,
   runProviderValidation,
   selectCandidate,
 } from './direct-provider-compatibility-matrix-v1.mjs';
@@ -45,7 +46,7 @@ function eventChunk({ content, toolCall, finishReason, model = 'upstream/public-
   return `data: ${JSON.stringify({ model, choices: [choice] })}\n\n`;
 }
 
-function sseResponse({ content = '', holdUntilAbort = false, holdOpenAfterDone = false, toolCall, signal }) {
+function sseResponse({ content = '', holdUntilAbort = false, holdWithAbortError = false, holdOpenAfterDone = false, toolCall, signal }) {
   const encoder = new TextEncoder();
   const chunks = toolCall
     ? [eventChunk({ toolCall }), eventChunk({ finishReason: 'tool_calls' }), 'data: [DONE]\n\n']
@@ -57,9 +58,12 @@ function sseResponse({ content = '', holdUntilAbort = false, holdOpenAfterDone =
     start(controller) {
       controllerRef = controller;
       controller.enqueue(encoder.encode(chunks[index++]));
-      if (holdUntilAbort) {
+      if (holdUntilAbort || holdWithAbortError) {
         abortListener = () => {
-          try { controller.close(); } catch { /* stream already cancelled */ }
+          try {
+            if (holdWithAbortError) controller.error(new DOMException('Aborted', 'AbortError'));
+            else controller.close();
+          } catch { /* stream already cancelled */ }
         };
         signal?.addEventListener('abort', abortListener, { once: true });
       }
@@ -75,6 +79,18 @@ function sseResponse({ content = '', holdUntilAbort = false, holdOpenAfterDone =
     },
   });
   return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+}
+
+function nullContentToolCallResponse(signal) {
+  const body = [
+    `data: ${JSON.stringify({ choices: [{
+      delta: { content: null, tool_calls: [{ index: 0, id: 'call-openrouter', type: 'function',
+        function: { name: 'local_calculate', arguments: '{"expression":"(27 * 13) + 4"}' } }] },
+      finish_reason: 'tool_calls',
+    }] })}\n\n`,
+    'data: [DONE]\n\n',
+  ].join('');
+  return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
 }
 
 async function parseOfflineToolStream(chunks) {
@@ -550,8 +566,101 @@ test('bounded direct live-gate configuration excludes OpenRouter and enforces 14
     assert.equal(providerReport.fullStackYuki, 'PASS');
     assert.equal(providerReport.currentDataHonesty, 'PASS');
     assert.equal(providerReport.toolCalling, 'TOOL_NOT_VERIFIED');
-    assert.equal(providerReport.interruption.status, 'NOT RUN');
+    assert.equal(providerReport.interruption, 'NOT RUN');
     assert.equal(providerReport.inferenceCalls, 7);
     assert.equal(providerReport.retries, 0);
   }
+});
+
+test('OpenRouter focused retest verifies null-content tool round and A-to-B interruption within five requests offline', async () => {
+  const env = { ...baseEnv('openrouter') };
+  let inferenceCalls = 0;
+  let metadataCalls = 0;
+  const fetchImpl = async (input, init = {}) => {
+    const url = String(input);
+    if (url.endsWith('/models')) {
+      metadataCalls += 1;
+      throw new Error('Focused retest must not perform catalog discovery.');
+    }
+    inferenceCalls += 1;
+    const body = JSON.parse(init.body);
+    const lastMessage = body.messages.at(-1);
+    if (String(lastMessage?.content).includes('Usa la calculadora')) {
+      assert.equal(body.model, 'openrouter/free');
+      assert.ok(Array.isArray(body.tools) && body.tools.some((tool) => tool.function?.name === 'local_calculate'));
+      return nullContentToolCallResponse(init.signal);
+    }
+    if (lastMessage?.role === 'tool') return sseResponse({ content: '355', signal: init.signal });
+    if (String(lastMessage?.content).includes('Explícame con cierto detalle')) {
+      return sseResponse({ content: 'Una API recibe solicitudes y entrega respuestas entre programas. '.repeat(2), holdWithAbortError: true, signal: init.signal });
+    }
+    if (String(lastMessage?.content).includes('¿Cuánto es 64 + 64?')) return sseResponse({ content: '128', signal: init.signal });
+    return sseResponse({ content: 'respuesta no esperada', signal: init.signal });
+  };
+  const report = await runOpenRouterToolInterruptionRetest({ env, fetchImpl, timeoutMs: 500, interruptionGraceMs: 100 });
+  assert.equal(report.discovery, 'NOT RUN');
+  assert.equal(report.metadataRequests, 0);
+  assert.equal(metadataCalls, 0);
+  assert.equal(report.inferenceCalls, 4);
+  assert.equal(inferenceCalls, 4);
+  assert.equal(report.retries, 0);
+  assert.equal(report.tool.toolDefinitionSent, true);
+  assert.equal(report.tool.toolCallEmitted, true);
+  assert.equal(report.tool.localCalculatorExecuted, true);
+  assert.equal(report.tool.secondProviderRound, true);
+  assert.equal(report.tool.finalAnswer355, 'PASS');
+  assert.equal(report.tool.nullContentToolVariantObserved, true);
+  assert.equal(report.tool.parserAcceptedNullContentVariant, 'PASS');
+  assert.equal(report.tool.classification, 'TOOL_PASS');
+  assert.equal(report.interruption.status, 'PASS', JSON.stringify(report.interruption));
+  assert.equal(report.interruption.aAborted, true);
+  assert.equal(report.interruption.bIssued, true);
+  assert.equal(report.interruption.bCompleted, true);
+  assert.equal(report.interruption.bSemantic128, true);
+  assert.equal(report.interruption.partialAPersisted, false);
+  assert.equal(report.interruption.staleADelta, false);
+  assert.equal(report.interruption.maxActive, 1);
+  assert.equal(JSON.stringify(report).includes(env.OPENROUTER_API_KEY), false);
+  assert.equal(JSON.stringify(report).includes('Authorization'), false);
+});
+
+test('OpenRouter focused retest rejects a non-free model override before inference', async () => {
+  let calls = 0;
+  const report = await runOpenRouterToolInterruptionRetest({
+    env: { ...baseEnv('openrouter'), OPENROUTER_TEST_MODEL: 'provider/possibly-paid' },
+    fetchImpl: async () => { calls += 1; throw new Error('Must not reach transport.'); },
+  });
+  assert.equal(report.reason, 'UNVERIFIED_MODEL_OVERRIDE');
+  assert.equal(report.inferenceCalls, 0);
+  assert.equal(calls, 0);
+});
+
+test('OpenRouter interruption-only resume uses exactly two remaining requests and does not repeat tool calling', async () => {
+  let calls = 0;
+  let metadataCalls = 0;
+  const report = await runOpenRouterToolInterruptionRetest({
+    env: { ...baseEnv('openrouter') },
+    priorInferenceRequests: 3,
+    resumeInterruptionOnly: true,
+    timeoutMs: 500,
+    interruptionGraceMs: 100,
+    fetchImpl: async (input, init = {}) => {
+      if (String(input).endsWith('/models')) { metadataCalls += 1; throw new Error('No discovery in resume mode.'); }
+      calls += 1;
+      if (calls === 1) {
+        return sseResponse({ content: 'Una API recibe y organiza solicitudes entre programas. '.repeat(2), holdWithAbortError: true, signal: init.signal });
+      }
+      return sseResponse({ content: '128', signal: init.signal });
+    },
+  });
+  assert.equal(report.tool.classification, 'NOT RUN IN THIS INVOCATION');
+  assert.equal(report.interruption.status, 'PASS', JSON.stringify(report.interruption));
+  assert.equal(report.inferenceCalls, 5);
+  assert.equal(report.inferenceRequestsThisInvocation, 2);
+  assert.equal(report.retries, 0);
+  assert.equal(report.discovery, 'NOT RUN');
+  assert.equal(report.metadataRequests, 0);
+  assert.equal(metadataCalls, 0);
+  assert.equal(calls, 2);
+  assert.equal(report.result, 'INTERRUPTION_SEGMENT_COMPLETED');
 });

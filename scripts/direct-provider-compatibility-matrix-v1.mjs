@@ -352,6 +352,36 @@ function hasSuccessfulCalculatorResult(body) {
   });
 }
 
+function observeNullContentToolVariant(request) {
+  let buffer = '';
+  const decoder = new TextDecoder();
+  const inspectEvent = (event) => {
+    const data = event.split(/\r?\n/u).filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trimStart()).join('\n');
+    if (!data || data === '[DONE]') return;
+    try {
+      const payload = JSON.parse(data);
+      request.nullContentToolVariantObserved ||= Array.isArray(payload?.choices)
+        && payload.choices.some((choice) => choice?.delta?.content === null
+          && Array.isArray(choice.delta.tool_calls) && choice.delta.tool_calls.length > 0);
+    } catch { /* A partial or non-JSON SSE event is not diagnostic evidence. */ }
+  };
+  const consume = (text, final = false) => {
+    buffer += text;
+    let separator;
+    while ((separator = /\r?\n\r?\n/u.exec(buffer)) !== null) {
+      inspectEvent(buffer.slice(0, separator.index));
+      buffer = buffer.slice(separator.index + separator[0].length);
+    }
+    if (buffer.length > 65_536) buffer = buffer.slice(-65_536);
+    if (final && buffer.trim()) inspectEvent(buffer);
+  };
+  return {
+    push(bytes) { consume(decoder.decode(bytes, { stream: true })); },
+    finish() { consume(decoder.decode(), true); },
+  };
+}
+
 function budgetError() {
   const error = new Error('Provider request budget exhausted.');
   error.code = 'BUDGET_EXHAUSTED';
@@ -391,6 +421,7 @@ function createProviderContext(config, model, globalBudget, perProviderBudget, f
       finishedAt: undefined, abortedAt: undefined, model: safeModel(body?.model), kind: requestKind(body),
       toolsSent: Array.isArray(body?.tools) && body.tools.length > 0,
       localCalculatorSucceeded: hasSuccessfulCalculatorResult(body),
+      nullContentToolVariantObserved: false,
       fetchError: undefined, streamError: undefined,
     };
     let downstreamCancelled = false;
@@ -419,7 +450,7 @@ function createProviderContext(config, model, globalBudget, perProviderBudget, f
           stage: 'http', name: safeErrorNameFromResponse(response.status),
           code: safeCode(String(response.status)), statusCode: response.status,
         };
-        context?.onProviderError?.(request.failureClass);
+        context?.onProviderError?.(request.failureClass, request);
       }
     } catch (error) {
       settle();
@@ -427,7 +458,7 @@ function createProviderContext(config, model, globalBudget, perProviderBudget, f
       request.fetchError = safeFailure(error, 'fetch');
       request.failureClass = classifyProviderFailure({ code: error?.code, detail: error?.name });
       if (request.abortedAt !== undefined || init.signal?.aborted) request.failureClass = 'TRANSPORT_LIMITATION';
-      context?.onProviderError?.(request.failureClass);
+      context?.onProviderError?.(request.failureClass, request);
       throw error;
     }
     if (!response.body) {
@@ -436,16 +467,19 @@ function createProviderContext(config, model, globalBudget, perProviderBudget, f
       return response;
     }
     const reader = response.body.getReader();
+    const nullContentObserver = observeNullContentToolVariant(request);
     const wrapped = new ReadableStream({
       async pull(controller) {
         try {
           const part = await reader.read();
           if (downstreamCancelled) return;
           if (part.done) {
+            nullContentObserver.finish();
             settle();
             init.signal?.removeEventListener('abort', onAbort);
             controller.close();
           } else {
+            nullContentObserver.push(part.value);
             request.ttftMs ??= Math.round(performance.now() - request.startedAt);
             controller.enqueue(part.value);
           }
@@ -455,7 +489,7 @@ function createProviderContext(config, model, globalBudget, perProviderBudget, f
           if (downstreamCancelled) return;
           request.streamError = safeFailure(error, 'stream');
           request.failureClass = classifyProviderFailure({ code: error?.code, detail: error?.name });
-          context?.onProviderError?.(request.failureClass);
+          context?.onProviderError?.(request.failureClass, request);
           controller.error(error);
         }
       },
@@ -539,6 +573,7 @@ function summarizeRequest(request) {
     localCalculatorSucceeded: request.localCalculatorSucceeded,
     ...(request.failureClass ? { classification: request.failureClass } : {}),
     ...(request.fetchError ? { fetchError: request.fetchError } : {}),
+    ...(request.nullContentToolVariantObserved ? { nullContentToolVariantObserved: true } : {}),
     ...(request.streamError ? { streamError: request.streamError } : {}),
     ...(request.providerError ? { providerError: request.providerError } : {}),
     ...(request.safeError ? { error: request.safeError } : {}),
@@ -634,11 +669,15 @@ async function runInterruption(context, graceMs = 5000) {
     },
   });
   const previousProviderError = context.onProviderError;
-  context.onProviderError = (classification) => {
+  context.onProviderError = (classification, request) => {
+    if (request?.requestId === aId && request.abortedAt !== undefined && aCharacters >= 32) {
+      previousProviderError?.(classification, request);
+      return;
+    }
     providerFailure = classification;
     releaseB();
     releaseEnd();
-    previousProviderError?.(classification);
+    previousProviderError?.(classification, request);
   };
   timer = setTimeout(() => { releaseB(); releaseEnd(); }, context.timeoutMs + graceMs);
   try { await run; } catch (error) {
@@ -646,7 +685,7 @@ async function runInterruption(context, graceMs = 5000) {
     if (request) {
       request.providerError = safeFailure(error);
       request.failureClass = classifyProviderFailure({ statusCode: error?.statusCode, code: error?.code, detail: error?.name });
-      context.onProviderError?.(request.failureClass);
+      context.onProviderError?.(request.failureClass, request);
     }
   }
   finally {
@@ -975,6 +1014,114 @@ export async function runCompatibilityMatrix({
       modelRetirementRequiresCodeChange: false,
     },
   };
+}
+
+export async function runOpenRouterToolInterruptionRetest({
+  env = process.env,
+  fetchImpl = fetch,
+  maxInferenceRequests = 5,
+  priorInferenceRequests = 0,
+  resumeInterruptionOnly = false,
+  timeoutMs = MATRIX_TIMEOUT_MS,
+  interruptionGraceMs = 5000,
+} = {}) {
+  if (!Number.isInteger(maxInferenceRequests) || maxInferenceRequests < 1 || maxInferenceRequests > 5) {
+    throw new TypeError('The OpenRouter retest allows at most five inference requests.');
+  }
+  if (!Number.isInteger(priorInferenceRequests) || priorInferenceRequests < 0 || priorInferenceRequests > 4
+    || (resumeInterruptionOnly && priorInferenceRequests !== 3)
+    || (!resumeInterruptionOnly && priorInferenceRequests !== 0)
+    || priorInferenceRequests >= maxInferenceRequests) {
+    throw new TypeError('Invalid bounded OpenRouter retest resume state.');
+  }
+  const config = readProviderConfig('openrouter', env);
+  const report = {
+    provider: 'OpenRouter', model: 'openrouter/free',
+    freeModeStrategy: 'ZERO_PRICE_MODEL', freeEvidence: 'OPENROUTER_FREE_ROUTER',
+    credentialsConfigured: config.configured, baseURLMatchesExpected: config.baseURLMatches,
+    discovery: 'NOT RUN', metadataRequests: 0, inferenceCalls: priorInferenceRequests,
+    inferenceRequestsThisInvocation: 0, retries: 0,
+    secretExposure: false, tool: { classification: resumeInterruptionOnly ? 'NOT RUN IN THIS INVOCATION' : 'TOOL_NOT_VERIFIED' },
+    interruption: { status: 'NOT RUN', reason: 'NOT STARTED' },
+    result: 'INCONCLUSIVE', errors: [],
+  };
+  if (!config.configured || !config.baseURLMatches) {
+    report.reason = !config.configured ? 'CREDENTIALS_NOT_CONFIGURED' : 'BASE_URL_MISMATCH';
+    return report;
+  }
+  if (config.overrideInvalid || (config.modelOverride && config.modelOverride !== ROUTER_FREE_MODEL)) {
+    report.reason = 'UNVERIFIED_MODEL_OVERRIDE';
+    return report;
+  }
+
+  const globalBudget = new ProviderRequestBudget(maxInferenceRequests);
+  const perProviderBudget = new ProviderRequestBudget(maxInferenceRequests);
+  globalBudget.providerRequests = priorInferenceRequests;
+  perProviderBudget.providerRequests = priorInferenceRequests;
+  const context = createProviderContext(config, ROUTER_FREE_MODEL, globalBudget, perProviderBudget,
+    fetchImpl, timeoutMs, maxInferenceRequests, maxInferenceRequests);
+  context.timeoutMs = timeoutMs;
+  context.maxTotalInferenceRequests = maxInferenceRequests;
+  context.maxProviderInferenceRequests = maxInferenceRequests;
+  const runner = new ConversationRunner(context.core);
+  const toolStart = context.requests.length;
+  let toolTurn;
+  let toolRequests = [];
+  if (!resumeInterruptionOnly) {
+    toolTurn = await runTurn(context, runner,
+      'Usa la calculadora disponible para calcular: (27 * 13) + 4.');
+    toolRequests = context.requests.slice(toolStart);
+  }
+  const failedToolRequest = toolRequests.find((request) => request.fetchError || request.streamError || request.providerError || request.safeError);
+  const toolCallEmitted = toolRequests.some((request) => request.kind === 'tool-second-round'
+    || request.localCalculatorSucceeded);
+  const localCalculatorExecuted = toolRequests.some((request) => request.localCalculatorSucceeded);
+  const final355 = !resumeInterruptionOnly && toolTurn.run.status === 'completed'
+    && hasSemanticInteger(responseText(toolTurn), 355);
+  if (!resumeInterruptionOnly) report.tool = {
+    toolDefinitionSent: toolRequests.some((request) => request.toolsSent),
+    toolCallEmitted,
+    localCalculatorExecuted,
+    secondProviderRound: toolRequests.some((request) => request.kind === 'tool-second-round'),
+    finalAnswer355: final355 ? 'PASS' : toolTurn.run.status === 'completed' ? 'FAIL' : 'NOT AVAILABLE',
+    nullContentToolVariantObserved: toolRequests.some((request) => request.nullContentToolVariantObserved),
+    parserAcceptedNullContentVariant: toolRequests.some((request) => request.nullContentToolVariantObserved)
+      ? (toolTurn.run.status === 'completed' || toolCallEmitted ? 'PASS' : 'FAIL') : 'NOT OBSERVED',
+    classification: classifyToolRun({
+      requestFailed: Boolean(failedToolRequest || toolTurn.run.status !== 'completed'),
+      failureClass: failedToolRequest?.failureClass,
+      toolDefinitionSent: toolRequests.some((request) => request.toolsSent),
+      toolCallEmitted,
+      localToolExecuted: localCalculatorExecuted,
+      secondRound: toolRequests.some((request) => request.kind === 'tool-second-round'),
+      finalAnswer: final355,
+    }),
+    ...(failedToolRequest ? { safeError: summarizeRequest(failedToolRequest) } : {}),
+  };
+
+  const fatalClasses = new Set(['AUTH_FAILURE', 'MODEL_UNAVAILABLE', 'PROTOCOL_INCOMPATIBLE',
+    'FREE_QUOTA_EXHAUSTED', 'RATE_LIMITED', 'PAID_ONLY_OR_NOT_FREE']);
+  const fatalToolFailure = toolRequests.some((request) => fatalClasses.has(request.failureClass));
+  if ((resumeInterruptionOnly || !fatalToolFailure) && globalBudget.canReserve(2) && perProviderBudget.canReserve(2)) {
+    report.interruption = await runInterruption(context, interruptionGraceMs);
+  } else if (!fatalToolFailure) {
+    report.interruption = { status: 'NOT RUN', reason: 'BUDGET' };
+  } else {
+    report.interruption = { status: 'NOT RUN', reason: 'PROVIDER_FAILURE' };
+  }
+  report.inferenceCalls = globalBudget.providerRequests;
+  report.inferenceRequestsThisInvocation = context.requests.length;
+  report.retries = globalBudget.retryRequests;
+  report.errors = [
+    ...toolRequests.filter((request) => request.fetchError || request.streamError || request.providerError || request.safeError)
+      .map(summarizeRequest),
+    ...(report.interruption.requestErrors ?? []),
+  ];
+  report.result = resumeInterruptionOnly
+    ? (report.interruption.status === 'PASS' ? 'INTERRUPTION_SEGMENT_COMPLETED' : 'INTERRUPTION_SEGMENT_INCOMPLETE')
+    : (report.tool.classification === 'TOOL_PASS' && report.interruption.status === 'PASS'
+      ? 'PROVIDER_COMPATIBLE' : 'PROVIDER_COMPATIBLE_WITH_LIMITATIONS');
+  return report;
 }
 
 export function assertSafeReport(report, env = process.env) {
