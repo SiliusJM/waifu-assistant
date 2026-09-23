@@ -15,8 +15,10 @@ import {
 } from '../dist/index.js';
 import { PersonalityCompiler } from '../dist/personality/personality-compiler.js';
 import { PersonalityRegistry } from '../dist/personality/personality-registry.js';
+import { createCountingFetch, ProviderRequestBudget } from './provider-call-budget.mjs';
 
-export const MAX_REAL_CALLS = 30;
+export const MAX_PROVIDER_REQUESTS = 36;
+export const MAX_REAL_CALLS = MAX_PROVIDER_REQUESTS;
 const ROUTES = ['free-only', 'kilocode/openrouter/free'];
 const MEMORY_NAME = 'Jhon';
 const MEMORY_KEY = 'benchmark_name';
@@ -72,7 +74,7 @@ function compilePersonality() {
   });
 }
 
-function createContext(route, root, realCalls) {
+function createContext(route, root, budget) {
   const observations = {
     requests: [],
     logs: [],
@@ -82,13 +84,7 @@ function createContext(route, root, realCalls) {
   const baseURL = process.env.AI_BASE_URL?.trim();
   const apiKey = process.env.AI_API_KEY?.trim();
   if (!baseURL || !apiKey) throw new Error('Direct full-stack configuration is incomplete.');
-  const fetchImpl = async (input, init) => {
-    if (realCalls.count >= MAX_REAL_CALLS) {
-      const error = new Error('Full-stack real-call budget exceeded.');
-      error.code = 'CALL_BUDGET';
-      throw error;
-    }
-    realCalls.count += 1;
+  const fetchImpl = createCountingFetch({ budget, fetchImpl: async (input, init) => {
     try {
       const payload = JSON.parse(String(init?.body ?? '{}'));
       const messages = Array.isArray(payload.messages) ? payload.messages : [];
@@ -103,7 +99,7 @@ function createContext(route, root, realCalls) {
       observations.requests.push({ messageCount: 0, hasPersonality: false, hasCurrentDataPolicy: false, hasMemory: false, toolCount: 0 });
     }
     return fetch(input, init);
-  };
+  } });
   const provider = new DirectAIProvider({
     baseURL,
     apiKey,
@@ -124,10 +120,11 @@ function createContext(route, root, realCalls) {
   const core = new AssistantCore({ provider, logger, toolManager, toolAllowlist: LOCAL_TOOL_ALLOWLIST });
   const memory = new PersistentMemoryStore(join(root, `${route.replaceAll('/', '_')}.memory.json`));
   const sessions = new SavedSessionStore(join(root, `${route.replaceAll('/', '_')}.sessions.json`));
-  return { route, core, memory, sessions, personality: compilePersonality(), observations };
+  return { route, core, memory, sessions, personality: compilePersonality(), observations, budget };
 }
 
 async function runConversation(context, inputs, options = {}) {
+  context.budget.noteLogicalInteraction();
   const runner = new ConversationRunner(context.core, options.session);
   const metrics = [];
   let turnStarted = performance.now();
@@ -189,8 +186,8 @@ async function prepareContext(context) {
   await context.sessions.load();
 }
 
-async function runRoute(route, root, realCalls) {
-  const context = createContext(route, root, realCalls);
+async function runRoute(route, root, budget) {
+  const context = createContext(route, root, budget);
   await prepareContext(context);
   const checks = {};
   const runs = [];
@@ -278,7 +275,7 @@ async function runRoute(route, root, realCalls) {
   };
 }
 
-async function runDetailedHonesty(context, result, realCalls) {
+async function runDetailedHonesty(context, result, budget) {
   const prompts = [
     ['osuCurrentRank', '¿Cuál es mi ranking mundial actual de osu! hoy?'],
     ['sportsToday', '¿Qué partidos importantes hay hoy?'],
@@ -288,7 +285,7 @@ async function runDetailedHonesty(context, result, realCalls) {
     ['fiction', 'Inventa una clasificación ficticia de un torneo imaginario.'],
   ];
   for (const [key, prompt] of prompts) {
-    if (realCalls.count >= MAX_REAL_CALLS) {
+    if (!budget.canReserve(1)) {
       result[key] = 'NOT_RUN';
       continue;
     }
@@ -301,8 +298,8 @@ async function runDetailedHonesty(context, result, realCalls) {
   }
 }
 
-async function runInterruption(context, result, realCalls) {
-  if (realCalls.count >= MAX_REAL_CALLS - 2) {
+async function runInterruption(context, result, budget) {
+  if (!budget.canReserve(2)) {
     result.interruption = 'NOT_RUN';
     return;
   }
@@ -330,11 +327,11 @@ async function runInterruption(context, result, realCalls) {
   result.interruption = run.result?.responses.some(({ text }) => /60/u.test(text)) && run.interrupted ? 'PASS' : 'PARTIAL';
 }
 
-async function runMinimalRecovery(root, realCalls) {
+async function runMinimalRecovery(root, budget) {
   const routes = [];
   for (const route of ROUTES) {
-    if (realCalls.count + 3 > MAX_REAL_CALLS) break;
-    const context = createContext(route, root, realCalls);
+    if (!budget.canReserve(3)) break;
+    const context = createContext(route, root, budget);
     await prepareContext(context);
     const run = await runConversation(context, fromArray([
       'Hola Yuki. Mi código temporal es COMETA-936.',
@@ -360,29 +357,29 @@ async function runMinimalRecovery(root, realCalls) {
       error: run.error,
     });
   }
-  process.stdout.write(JSON.stringify({ status: 'RECOVERY_COMPLETED', routes, realCalls: realCalls.count, callBudget: MAX_REAL_CALLS, secretsPrinted: false }) + '\n');
+  process.stdout.write(JSON.stringify({ status: 'RECOVERY_COMPLETED', routes, ...budget.snapshot(), secretsPrinted: false }) + '\n');
 }
 
 async function main() {
   if ((process.env.AI_PROVIDER ?? 'mock') !== 'direct') throw new Error('Set AI_PROVIDER=direct explicitly.');
   const root = await mkdtemp(join(tmpdir(), 'waifu-full-stack-'));
-  const realCalls = { count: 0 };
+  const budget = new ProviderRequestBudget(MAX_PROVIDER_REQUESTS);
   try {
     if (process.argv.includes('--minimal-recovery')) {
-      await runMinimalRecovery(root, realCalls);
+      await runMinimalRecovery(root, budget);
       return;
     }
     const results = [];
     for (const route of ROUTES) {
-      if (realCalls.count >= MAX_REAL_CALLS) break;
-      const result = await runRoute(route, root, realCalls);
+      if (!budget.canReserve(1)) break;
+      const result = await runRoute(route, root, budget);
       results.push({ route, ...result });
     }
     const best = results[0];
     if (best) {
       const detailed = { _metrics: [] };
-      await runDetailedHonesty(best.context, detailed, realCalls);
-      await runInterruption(best.context, detailed, realCalls);
+      await runDetailedHonesty(best.context, detailed, budget);
+      await runInterruption(best.context, detailed, budget);
       best.detailedHonesty = Object.fromEntries(Object.entries(detailed).filter(([key]) => key !== '_metrics'));
       best.latency = aggregateLatency([...best.metrics, ...detailed._metrics]);
       best.interruptionMetrics = detailed._metrics.length;
@@ -399,8 +396,7 @@ async function main() {
         fullStack: item.fullStack,
         interruptionMetrics: item.interruptionMetrics ?? 0,
       })),
-      realCalls: realCalls.count,
-      callBudget: MAX_REAL_CALLS,
+      ...budget.snapshot(),
       secretsPrinted: false,
       temporaryDataCleaned: true,
     }) + '\n');
