@@ -62,6 +62,8 @@ export const ASSISTANT_ERROR_CODES = [
   'SESSION_CORRUPT_ERROR',
   'SESSION_LIMIT_ERROR',
   'SESSION_IO_ERROR',
+  'EXPORT_CONFIGURATION_ERROR',
+  'EXPORT_IO_ERROR',
 ] as const;
 
 export type AssistantErrorCode = (typeof ASSISTANT_ERROR_CODES)[number];

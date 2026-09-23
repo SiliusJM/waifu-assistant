@@ -27,6 +27,7 @@ import {
   CONVERSATION_MEMORY_COMMAND,
   CONVERSATION_REMEMBER_COMMAND,
   CONVERSATION_DELETE_SESSION_COMMAND,
+  CONVERSATION_EXPORT_COMMAND,
   CONVERSATION_LOAD_SESSION_COMMAND,
   CONVERSATION_SAVE_SESSION_COMMAND,
   CONVERSATION_SESSIONS_COMMAND,
@@ -35,6 +36,7 @@ import {
 } from './core/conversation-runner.js';
 import { PersistentMemoryStore, resolveMemoryPath } from './memory/memory-store.js';
 import { resolveSavedSessionPath, SavedSessionStore } from './core/saved-session-store.js';
+import { MarkdownConversationExporter } from './core/markdown-conversation-exporter.js';
 
 export async function main(
   argv: readonly string[] = process.argv.slice(2),
@@ -80,6 +82,7 @@ export async function main(
   const terminal = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
   try {
     const runner = new ConversationRunner(core);
+    const conversationExporter = new MarkdownConversationExporter();
     await runner.run(terminal, {
       signal: controller.signal,
       interruptible: true,
@@ -119,6 +122,26 @@ export async function main(
           process.stdout.write((history.length === 0
             ? 'No hay mensajes en la sesión actual.'
             : history.map(({ role, content }) => `${role === 'user' ? 'Tú' : 'Yuki'}: ${content}`).join('\n')) + '\n');
+          return;
+        }
+        if (command === CONVERSATION_EXPORT_COMMAND || command.startsWith(`${CONVERSATION_EXPORT_COMMAND} `)) {
+          const requestedName = command === CONVERSATION_EXPORT_COMMAND
+            ? undefined
+            : command.slice(CONVERSATION_EXPORT_COMMAND.length).trim();
+          try {
+            const result = await conversationExporter.exportConversation(runner.session.getMessages(), requestedName || undefined);
+            process.stdout.write(result.status === 'empty'
+              ? 'No hay mensajes para exportar.\n'
+              : `Conversación exportada: ${result.filePath}\n`);
+          } catch (error) {
+            const exportFailure = error instanceof AssistantError
+              && (error.code === 'EXPORT_CONFIGURATION_ERROR' || error.code === 'EXPORT_IO_ERROR')
+              ? error
+              : new AssistantError('No se pudo exportar la conversación.', {
+                code: 'EXPORT_IO_ERROR', retryable: false, cause: error,
+              });
+            process.stdout.write(`No se pudo exportar la conversación: ${exportFailure.message}\n`);
+          }
           return;
         }
         if (command === CONVERSATION_CLEAR_COMMAND) {
