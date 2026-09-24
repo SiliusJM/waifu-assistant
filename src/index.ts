@@ -3,6 +3,7 @@ export { createContext, type Context } from './core/context.js';
 export { createMessage, type Message, type MessageRole } from './core/message.js';
 export { toAssistantResponse, type Response } from './core/response.js';
 export { Session } from './core/session.js';
+export { CONVERSATION_TITLE_MAX_LENGTH, DEFAULT_CONVERSATION_TITLE, normalizeConversationTitle } from './core/conversation-title.js';
 export {
   CONVERSATION_EXIT_COMMAND,
   CONVERSATION_HELP_COMMAND,
@@ -19,6 +20,9 @@ export {
   CONVERSATION_SESSIONS_COMMAND,
   CONVERSATION_LOAD_SESSION_COMMAND,
   CONVERSATION_DELETE_SESSION_COMMAND,
+  CONVERSATION_EXPORT_COMMAND,
+  CONVERSATION_RENAME_COMMAND,
+  CONVERSATION_SESSION_INFO_COMMAND,
   ConversationRunner,
   type ConversationRunOptions,
   type ConversationRunResult,
@@ -39,6 +43,7 @@ export {
   type SavedSessionMessage,
   type SavedSessionRole,
   type SavedSessionSnapshot,
+  type SavedSessionSummary,
 } from './core/saved-session-store.js';
 export {
   LOCAL_TIME_COMMAND,

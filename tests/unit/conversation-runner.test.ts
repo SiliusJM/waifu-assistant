@@ -4,7 +4,12 @@ import type { AIProvider } from '../../src/ai/ai-provider.js';
 import type { AIRequest, AIResponse, AIStreamEvent, ProviderCallOptions } from '../../src/ai/ai-types.js';
 import { MockAIProvider } from '../../src/ai/mock-ai-provider.js';
 import { AssistantCore } from '../../src/core/assistant-core.js';
-import { ConversationRunner, LOCAL_COMMAND_HELP } from '../../src/core/conversation-runner.js';
+import {
+  CONVERSATION_RENAME_COMMAND,
+  CONVERSATION_SESSION_INFO_COMMAND,
+  ConversationRunner,
+  LOCAL_COMMAND_HELP,
+} from '../../src/core/conversation-runner.js';
 import { Session } from '../../src/core/session.js';
 import { DEFAULT_PERSONALITY_PROFILE } from '../../src/personality/default-profile.js';
 import { PersonalityCompiler } from '../../src/personality/personality-compiler.js';
@@ -397,6 +402,45 @@ test('/export is routed locally, appears in help, and does not become a conversa
     { role: 'user', content: 'message B' },
     { role: 'assistant', content: 'reply' },
   ]);
+});
+
+test('/rename and /session-info are local metadata commands and preserve conversation contents', async () => {
+  let providerCalls = 0;
+  const provider = new MockAIProvider({
+    responder: () => {
+      providerCalls += 1;
+      return { text: 'reply', provider: 'mock', model: 'mock-model', finishReason: 'stop' };
+    },
+  });
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const commands: string[] = [];
+  const result = await runner.run(inputs(['/rename  Proyecto IA 🌸  ', '/session-info', 'message A', '/exit']), {
+    onCommand: async (command) => {
+      commands.push(command);
+      if (command.startsWith(CONVERSATION_RENAME_COMMAND)) {
+        runner.session.setTitle(command.slice(CONVERSATION_RENAME_COMMAND.length).trim());
+      }
+      if (command === CONVERSATION_SESSION_INFO_COMMAND) {
+        assert.equal(runner.session.title, 'Proyecto IA 🌸');
+        assert.equal(runner.session.getMessages().length, 0);
+        assert.equal(runner.session.savedName, undefined);
+      }
+    },
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(providerCalls, 1);
+  assert.deepEqual(commands, ['/rename  Proyecto IA 🌸', '/session-info']);
+  assert.equal(runner.session.title, 'Proyecto IA 🌸');
+  assert.equal(runner.session.savedName, undefined);
+  assert.deepEqual(result.session.getMessages().map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'message A' },
+    { role: 'assistant', content: 'reply' },
+  ]);
+  assert.match(LOCAL_COMMAND_HELP, /\/rename <nombre>/u);
+  assert.match(LOCAL_COMMAND_HELP, /\/session-info/u);
+  assert.throws(() => runner.session.setTitle('   '), (error: unknown) => error instanceof Error && 'code' in error && error.code === 'SESSION_CONFIGURATION_ERROR');
+  assert.throws(() => runner.session.setTitle('🌸'.repeat(101)), (error: unknown) => error instanceof Error && 'code' in error && error.code === 'SESSION_CONFIGURATION_ERROR');
 });
 
 test('unknown slash commands stay local and do not reach the provider or Session', async () => {

@@ -21,6 +21,8 @@ export const CONVERSATION_SESSIONS_COMMAND = '/sessions';
 export const CONVERSATION_LOAD_SESSION_COMMAND = '/load-session';
 export const CONVERSATION_DELETE_SESSION_COMMAND = '/delete-session';
 export const CONVERSATION_EXPORT_COMMAND = '/export';
+export const CONVERSATION_RENAME_COMMAND = '/rename';
+export const CONVERSATION_SESSION_INFO_COMMAND = '/session-info';
 export const LOCAL_COMMAND_HELP = [
   'Comandos disponibles:',
   '  /help              Muestra esta ayuda',
@@ -39,6 +41,8 @@ export const LOCAL_COMMAND_HELP = [
   '  /load-session <name>  Carga una sesion guardada',
   '  /delete-session <name>  Elimina una sesion guardada',
   '  /export [nombre]   Exporta la conversacion actual a Markdown',
+  '  /rename <nombre>  Asigna un titulo a la conversacion actual',
+  '  /session-info     Muestra metadata de la conversacion actual',
 ].join('\n');
 
 export type ConversationRunStatus = 'completed' | 'cancelled';
@@ -213,7 +217,10 @@ export class ConversationRunner {
       || input === CONVERSATION_DELETE_SESSION_COMMAND
       || input.startsWith(`${CONVERSATION_DELETE_SESSION_COMMAND} `)
       || input === CONVERSATION_EXPORT_COMMAND
-      || input.startsWith(`${CONVERSATION_EXPORT_COMMAND} `);
+      || input.startsWith(`${CONVERSATION_EXPORT_COMMAND} `)
+      || input === CONVERSATION_RENAME_COMMAND
+      || input.startsWith(`${CONVERSATION_RENAME_COMMAND} `)
+      || input === CONVERSATION_SESSION_INFO_COMMAND;
 
     const executeLocalCommand = async (input: string, activeAtArrival: boolean): Promise<void> => {
       if (!options.onCommand) {

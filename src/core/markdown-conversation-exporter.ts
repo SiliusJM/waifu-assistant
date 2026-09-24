@@ -64,13 +64,13 @@ function defaultName(date: Date): string {
   return `yuki-conversation-${iso.slice(0, 10)}-${iso.slice(11, 19).replaceAll(':', '')}`;
 }
 
-function formatMarkdown(messages: readonly Message[], exportedAt: string): string {
+function formatMarkdown(messages: readonly Message[], exportedAt: string, title?: string): string {
   const sections = messages.map(({ role, content }) => {
     const label = role === 'user' ? 'Usuario' : 'Yuki';
     return `## ${label}\n\n${content.replace(/\r\n?/gu, '\n')}`;
   });
   return [
-    '# Conversación con Yuki',
+    `# ${title || 'Conversación con Yuki'}`,
     `- Exportada: ${exportedAt}`,
     `- Mensajes: ${messages.length}`,
     '',
@@ -92,7 +92,7 @@ export class MarkdownConversationExporter {
     private readonly clock: () => Date = () => new Date(),
   ) {}
 
-  async exportConversation(messages: readonly Message[], requestedName?: string): Promise<ConversationExportResult> {
+  async exportConversation(messages: readonly Message[], requestedName?: string, title?: string): Promise<ConversationExportResult> {
     const visibleMessages = messages.filter(({ role, content }) =>
       (role === 'user' || role === 'assistant') && typeof content === 'string' && content.length > 0);
     if (visibleMessages.length === 0) return { status: 'empty' };
@@ -103,7 +103,7 @@ export class MarkdownConversationExporter {
     }
     const baseName = requestedName === undefined ? defaultName(now) : sanitizeCustomName(requestedName);
     const exportedAt = now.toISOString();
-    const document = formatMarkdown(visibleMessages, exportedAt);
+    const document = formatMarkdown(visibleMessages, exportedAt, title?.trim() || undefined);
     let temporaryPath: string | undefined;
     let linkedPath: string | undefined;
 

@@ -78,6 +78,18 @@ test('exports a visible local.calculate final answer without raw tool data', asy
   });
 });
 
+test('uses a non-empty conversation title in Markdown without exposing Session IDs', async () => {
+  await withExportDirectory(async (directory) => {
+    const exporter = new MarkdownConversationExporter(directory, undefined, () => new Date(fixedDate));
+    const result = await exporter.exportConversation(messages(['user', 'Hola'], ['assistant', 'Qué tal']), undefined, 'Yuki 🌸');
+    assert.equal(result.status, 'exported');
+    if (result.status !== 'exported') return;
+    const content = await readFile(result.filePath, 'utf8');
+    assert.match(content, /^# Yuki 🌸\n/u);
+    assert.equal(content.includes('export-test'), false);
+  });
+});
+
 test('does not export partial interrupted assistant output that Session never persisted', async () => {
   await withExportDirectory(async (directory) => {
     let signalStarted!: () => void;

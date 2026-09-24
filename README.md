@@ -86,12 +86,22 @@ Yuki permite guardar y recuperar conversaciones de forma explícita con:
 /sessions
 /load-session <name>
 /delete-session <name>
+/rename <nombre>
+/session-info
 ```
 
 Las sesiones se guardan por defecto en `~/.waifu-assistant/sessions.json` y
 pueden redirigirse mediante `YUKI_SESSIONS_PATH`. Esta persistencia es
 independiente de `PersistentMemory`, no guarda automáticamente al salir y
 `/clear` solo limpia la `Session` actual; no elimina sesiones guardadas.
+
+La conversación actual puede organizarse con `/rename Proyecto Waifu Assistant`
+y consultarse con `/session-info`. `/sessions` muestra, de más reciente a más
+antigua, título, cantidad de mensajes e instante de actualización, sin revelar
+el contenido. Renombrar no guarda automáticamente el contenido;
+`/save-session <name>` sigue siendo
+explícito y conserva el título. Los títulos son metadata, no sustituyen los IDs
+seguros usados por `/load-session` y `/delete-session`.
 
 Las respuestas interactivas pueden mostrarse progresivamente mediante streaming; la respuesta completa se guarda como un único mensaje de `Session`.
 
@@ -100,7 +110,8 @@ Las respuestas interactivas pueden mostrarse progresivamente mediante streaming;
 La CLI reconoce `/help`, `/time`, `/calc <expression>`, `/status`, `/history`,
 `/clear`, `/remember <key> <value>`, `/memory`, `/forget <key>`,
 `/save-session <name>`, `/sessions`, `/load-session <name>`,
-`/delete-session <name>` y `/exit`. Estos comandos no requieren una llamada al
+`/delete-session <name>`, `/rename <nombre>`, `/session-info`, `/export [nombre]`
+y `/exit`. Estos comandos no requieren una llamada al
 LLM. La memoria explícita se guarda localmente y puede redirigirse mediante
 `YUKI_MEMORY_PATH`; no se mezcla con las sesiones guardadas.
 
