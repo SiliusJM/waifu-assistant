@@ -21,6 +21,8 @@ import { isExplicitLocalStatusQuery } from '../tools/local-status-query-intent.j
 import { isSavedSessionRelatedInput } from '../tools/saved-session-query-intent.js';
 import { conversationToneInstruction } from '../personality/conversation-tone-preferences.js';
 import type { ConversationTone } from '../personality/conversation-tone-store.js';
+import { responseFormatInstruction } from '../personality/response-format-preferences.js';
+import type { ResponseFormat } from '../personality/response-format-store.js';
 
 const MAX_TOOL_ARGUMENTS_JSON_LENGTH = 4096;
 
@@ -33,6 +35,8 @@ export interface AssistantCoreOptions {
   readonly localActionNow?: () => Date;
   /** Reads a closed local style preference; it never mutates the personality snapshot. */
   readonly conversationTone?: () => ConversationTone;
+  /** Reads an independent closed response-structure preference. */
+  readonly responseFormat?: () => ResponseFormat;
 }
 
 export interface RespondOptions {
@@ -57,6 +61,7 @@ export class AssistantCore {
   private readonly toolAllowlist: readonly string[];
   private readonly localActionNow: () => Date;
   private readonly conversationTone: () => ConversationTone;
+  private readonly responseFormat: () => ResponseFormat;
 
   constructor(options: AssistantCoreOptions) {
     this.provider = options.provider;
@@ -65,6 +70,7 @@ export class AssistantCore {
     this.toolAllowlist = options.toolAllowlist ?? [];
     this.localActionNow = options.localActionNow ?? (() => new Date());
     this.conversationTone = options.conversationTone ?? (() => 'default');
+    this.responseFormat = options.responseFormat ?? (() => 'default');
   }
 
   createSession(): Session {
@@ -232,6 +238,10 @@ export class AssistantCore {
     })) ?? [];
     const toneInstruction = conversationToneInstruction(this.conversationTone());
     const toneMessages = toneInstruction === undefined ? [] : [{ role: 'system' as const, content: toneInstruction }];
+    const responseFormat = responseFormatInstruction(this.responseFormat());
+    const responseFormatMessages = responseFormat === undefined
+      ? []
+      : [{ role: 'system' as const, content: responseFormat }];
     const relevantMemories = !isLocalMetadataQuery
       ? selectRelevantExplicitMemories(latestUserInput ?? '', options.memory)
       : [];
@@ -260,7 +270,7 @@ export class AssistantCore {
     const tools = this.getToolDefinitions();
     return {
       sessionId: context.sessionId,
-      messages: [...personalityMessages, ...toneMessages, ...memoryMessages, ...currentDataPolicyMessage, ...this.localActionContextMessage(), ...context.messages.map(({ role, content: messageContent }) => ({
+      messages: [...personalityMessages, ...toneMessages, ...responseFormatMessages, ...memoryMessages, ...currentDataPolicyMessage, ...this.localActionContextMessage(), ...context.messages.map(({ role, content: messageContent }) => ({
         role,
         content: messageContent,
       }))],

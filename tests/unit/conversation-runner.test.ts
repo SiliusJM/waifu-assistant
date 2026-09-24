@@ -7,6 +7,7 @@ import { AssistantCore } from '../../src/core/assistant-core.js';
 import {
   CONVERSATION_RENAME_COMMAND,
   CONVERSATION_SESSION_INFO_COMMAND,
+  CONVERSATION_FORMAT_COMMAND,
   CONVERSATION_TONE_COMMAND,
   ConversationRunner,
   LOCAL_COMMAND_HELP,
@@ -377,6 +378,38 @@ test('explicit natural tone preference is handled locally and never enters Sessi
   assert.equal(providerCalls, 2);
   assert.deepEqual(localInputs, ['Respóndeme más breve.']);
   assert.deepEqual(commands, [CONVERSATION_TONE_COMMAND]);
+  assert.deepEqual(result.session.getMessages().map(({ content }) => content), ['mensaje A', 'reply', 'mensaje B', 'reply']);
+  assert.deepEqual(requests[1]?.messages.filter(({ role }) => role === 'user').map(({ content }) => content), ['mensaje A', 'mensaje B']);
+});
+
+test('explicit natural response format is handled locally and never enters Session', async () => {
+  let providerCalls = 0;
+  const requests: AIRequest[] = [];
+  const provider = new MockAIProvider({
+    responder: (request) => {
+      providerCalls += 1;
+      requests.push(request);
+      return { text: 'reply', provider: 'mock', model: 'mock-model', finishReason: 'stop' };
+    },
+  });
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const localInputs: string[] = [];
+  const commands: string[] = [];
+  const result = await runner.run(inputs([
+    'mensaje A', 'Prefiero que respondas en listas.', 'mensaje B', CONVERSATION_FORMAT_COMMAND, '/exit',
+  ]), {
+    onResponseFormatPreference: async (input) => {
+      if (input !== 'Prefiero que respondas en listas.') return false;
+      localInputs.push(input);
+      return true;
+    },
+    onCommand: async (command) => { commands.push(command); },
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(providerCalls, 2);
+  assert.deepEqual(localInputs, ['Prefiero que respondas en listas.']);
+  assert.deepEqual(commands, [CONVERSATION_FORMAT_COMMAND]);
   assert.deepEqual(result.session.getMessages().map(({ content }) => content), ['mensaje A', 'reply', 'mensaje B', 'reply']);
   assert.deepEqual(requests[1]?.messages.filter(({ role }) => role === 'user').map(({ content }) => content), ['mensaje A', 'mensaje B']);
 });
