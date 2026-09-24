@@ -246,6 +246,27 @@ export class PersistentMemoryStore {
     }
   }
 
+  /** Deletes an existing entry only if its persisted value still matches the confirmed snapshot. */
+  async forget(key: string, expectedValue: string): Promise<'deleted' | 'missing' | 'conflict'> {
+    validateMemoryKey(key);
+    validateMemoryValue(expectedValue);
+    // Refresh at confirmation time so a stale prompt cannot remove a newer value.
+    await this.load();
+    const current = this.entries.get(key);
+    if (current === undefined) return 'missing';
+    if (current !== expectedValue) return 'conflict';
+
+    const previous = new Map(this.entries);
+    this.entries.delete(key);
+    try {
+      await this.persist();
+      return 'deleted';
+    } catch (error) {
+      this.entries = previous;
+      throw error;
+    }
+  }
+
   private async ensureLoaded(): Promise<void> {
     if (!this.loaded) await this.load();
   }

@@ -28,7 +28,7 @@ export const CAPABILITY_CATALOG: readonly CapabilityCatalogEntry[] = [
       '/memory                    Consulta las memorias guardadas',
       '/forget <clave>            Elimina una memoria por clave',
     ],
-    naturalHelp: 'La memoria es explícita: usa /remember <clave> <valor> para guardar, /memory para consultar memorias y /forget <clave> para eliminar una clave. No incluiré contenido de memoria al explicar estas funciones.',
+    naturalHelp: 'La memoria es explícita: usa /remember <clave> <valor> para guardar, /memory para consultar y /forget <clave> para eliminar. También puedo olvidar una sola memoria si me lo pides y confirmas. No incluiré contenido de memoria al explicar estas funciones.',
   },
   {
     id: 'sessions',
