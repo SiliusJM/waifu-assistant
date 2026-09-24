@@ -186,6 +186,10 @@ guardan en `~/.waifu-assistant/exports`. La exportación es explícita, no modif
 la Session ni incluye memoria persistente, datos internos de herramientas o
 metadatos del proveedor.
 
+`/help` también resume las capacidades actuales. Preguntas claras como «¿Qué puedes hacer?»
+o «¿Cómo creo un recordatorio?» se responden desde un catálogo local: explican el uso,
+pero no ejecutan acciones ni consultan el contenido de notas, recordatorios, memoria o sesiones.
+
 ## MVP local con LLM real
 
 Sin `AI_PROVIDER` ni `AI_PROVIDER_PROFILE`, el CLI usa `MockAIProvider` y no realiza llamadas externas.

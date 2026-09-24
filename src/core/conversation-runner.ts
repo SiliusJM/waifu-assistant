@@ -4,6 +4,7 @@ import type { Session } from './session.js';
 import type { PersonalitySnapshot } from '../personality/personality-types.js';
 import { AssistantError } from '../shared/errors.js';
 import type { MemorySnapshot } from '../memory/memory-types.js';
+import { formatCapabilityHelp, resolveNaturalCapabilityHelp } from './capability-catalog.js';
 
 export const CONVERSATION_EXIT_COMMAND = '/exit';
 export const CONVERSATION_CANCEL_COMMAND = '/cancel';
@@ -32,38 +33,7 @@ export const CONVERSATION_NOTE_ADD_COMMAND = '/note-add';
 export const CONVERSATION_NOTES_COMMAND = '/notes';
 export const CONVERSATION_NOTE_SHOW_COMMAND = '/note-show';
 export const CONVERSATION_NOTE_DELETE_COMMAND = '/note-delete';
-export const LOCAL_COMMAND_HELP = [
-  'Comandos disponibles:',
-  '  /help              Muestra esta ayuda',
-  '  /cancel            Interrumpe la respuesta activa',
-  '  /time              Muestra la hora local',
-  '  /remind <YYYY-MM-DD HH:mm> <texto>  Crea un recordatorio local',
-  '  /remind HH:mm <texto>  Programa la siguiente ocurrencia de hoy/mañana',
-  '  /reminders         Lista recordatorios pendientes',
-  '  /reminders --all  Incluye recordatorios completados',
-  '  /reminder-complete <id>  Marca un recordatorio como completado',
-  '  /reminder-delete <id>  Elimina un recordatorio',
-  '  /note-add <texto>   Guarda una nota local explícita',
-  '  /notes             Lista notas guardadas',
-  '  /note-show <id>    Muestra una nota completa',
-  '  /note-delete <id>  Elimina una nota',
-  '  /calc <expresion>  Calcula una expresion aritmetica',
-  '  /exit              Cierra la conversacion',
-  '  /status            Muestra el estado de la sesion',
-  '  /history           Muestra el historial conversacional',
-  '  /clear             Limpia la sesion actual',
-  '  /remember <key> <value>  Guarda una memoria explicita',
-  '  /memory            Lista las memorias guardadas',
-  '  /forget <key>      Elimina una memoria',
-  '  /save-session <name>  Guarda la sesion actual',
-  '  /sessions           Lista las sesiones guardadas',
-  '  /session-search <id> <texto>  Busca texto en una sesión guardada',
-  '  /load-session <name>  Carga una sesion guardada',
-  '  /delete-session <name>  Elimina una sesion guardada',
-  '  /export [nombre]   Exporta la conversacion actual a Markdown',
-  '  /rename <nombre>  Asigna un titulo a la conversacion actual',
-  '  /session-info     Muestra metadata de la conversacion actual',
-].join('\n');
+export const LOCAL_COMMAND_HELP = formatCapabilityHelp();
 
 export type ConversationRunStatus = 'completed' | 'cancelled';
 
@@ -276,6 +246,24 @@ export class ConversationRunner {
     };
 
     const processNaturalInput = async (input: string): Promise<void> => {
+      const capabilityHelp = resolveNaturalCapabilityHelp(input);
+      if (capabilityHelp !== undefined) {
+        options.clarification?.clear();
+        this.session.addMessage('user', input);
+        const assistantMessage = this.session.addMessage('assistant', capabilityHelp);
+        const response: Response = {
+          sessionId: this.session.id,
+          messageId: assistantMessage.id,
+          text: capabilityHelp,
+          provider: 'local-capability-help',
+          model: 'local',
+          finishReason: 'stop',
+        };
+        responses.push(response);
+        await options.onDelta?.(capabilityHelp);
+        await options.onResponse?.(response);
+        return;
+      }
       const localText = await options.clarification?.handle(input, {
         signal: options.signal,
         sessionId: this.session.id,
