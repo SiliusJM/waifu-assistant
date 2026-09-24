@@ -954,3 +954,165 @@ test('latest-input-wins cancels an older provider turn before the latest ambiguo
     assert.equal(new Date(created[0]?.dueAt ?? '').getHours(), 8);
   });
 });
+
+test('intent repair converts a pending reminder into one note without creating the reminder', async () => {
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      'Recuérdame mañana comprar pan.',
+      'No, quería decir guárdalo como nota.',
+      '/exit',
+    ]);
+    const savedNotes = await notes.list();
+    assert.equal(savedNotes.length, 1);
+    assert.equal(savedNotes[0]?.text, 'comprar pan');
+    assert.equal((await reminders.list({ all: true })).length, 0);
+    assert.equal(outcome.providerCalls, 0);
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /Nota guardada/u);
+  });
+});
+
+test('intent repair converts a pending note into one fully specified reminder', async () => {
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      'Guarda esto como una nota.',
+      'No, quería decir recuérdame mañana a las 8 comprar pan.',
+      '/exit',
+    ]);
+    const saved = await reminders.list({ all: true });
+    assert.equal(saved.length, 1);
+    assert.equal(saved[0]?.text, 'comprar pan');
+    assert.equal(new Date(saved[0]?.dueAt ?? '').getDate(), 24);
+    assert.equal(new Date(saved[0]?.dueAt ?? '').getHours(), 8);
+    assert.equal((await notes.list()).length, 0);
+    assert.equal(outcome.providerCalls, 0);
+  });
+});
+
+test('intent repair switches pending saved-session search and metadata query safely in both directions', async () => {
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const search = await runFlow({ reminders, notes, sessions }, [
+      'Muéstrame información de esa conversación guardada.',
+      `No, me refería a buscar Groq en la conversación guardada ${SAVED_ID}.`,
+      '/exit',
+    ]);
+    assert.match(search.runner.session.getMessages()[3]?.content ?? '', /Groq/u);
+    assert.equal(search.providerCalls, 0);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const metadata = await runFlow({ reminders, notes, sessions }, [
+      'Busca Groq en una conversación guardada.',
+      `No, quería decir consultar información de la conversación guardada ${SAVED_ID}.`,
+      '/exit',
+    ]);
+    assert.match(metadata.runner.session.getMessages()[3]?.content ?? '', /Trip notes/u);
+    assert.equal(metadata.providerCalls, 0);
+  });
+});
+
+test('a capability-help interpretation can be repaired to an explicit local note action', async () => {
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      '¿Cómo puedo usar mis recordatorios?',
+      'No, quería decir guarda una nota: revisar el calendario.',
+      '/exit',
+    ]);
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /Nota guardada/u);
+    assert.deepEqual((await notes.list()).map(({ text }) => text), ['revisar el calendario']);
+    assert.equal((await reminders.list({ all: true })).length, 0);
+    assert.equal(outcome.providerCalls, 0);
+  });
+});
+
+test('repair cancels pending memory create, update, and forget before starting another local intent', async () => {
+  for (const { initial, seed, key, value } of [
+    { initial: 'Recuerda que mi ciudad es Quito.', seed: undefined, key: 'city', value: undefined },
+    { initial: 'Actualiza mi ciudad a Quito.', seed: 'Cuenca', key: 'city', value: 'Cuenca' },
+    { initial: 'Olvida mi ciudad.', seed: 'Cuenca', key: 'city', value: 'Cuenca' },
+  ]) {
+    await withStores(async ({ reminders, notes, sessions, memory }) => {
+      if (seed !== undefined) await memory.set(key, seed);
+      const outcome = await runFlow({ reminders, notes, sessions, memory }, [
+        initial,
+        'No, quería decir guarda una nota: confirmar cita médica.',
+        '/exit',
+      ]);
+      assert.equal(await memory.get(key), value);
+      assert.deepEqual((await notes.list()).map(({ text }) => text), ['confirmar cita médica']);
+      assert.equal(outcome.providerCalls, 0);
+    });
+  }
+});
+
+test('repair state is one-shot, ephemeral, session-bound, and cannot undo an executed action', async () => {
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      'Guarda esto como nota.',
+      'Comprar café.',
+      'No, quería decir recuérdame mañana a las 8 comprar pan.',
+      '/exit',
+    ]);
+    assert.deepEqual((await notes.list()).map(({ text }) => text), ['Comprar café.']);
+    assert.equal((await reminders.list({ all: true })).length, 0);
+    assert.match(outcome.runner.session.getMessages()[5]?.content ?? '', /ya se ejecutó/u);
+    assert.equal(outcome.providerCalls, 0);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const flow = new SafeClarificationFlow({
+      toolManager: createLocalToolManager({ reminderStore: reminders, noteStore: notes, savedSessionStore: sessions }),
+      sessionId: 'repair-ephemeral',
+      now: () => new Date(FIXED_NOW),
+    });
+    assert.match(await flow.handle('Recuérdame mañana comprar pan.', { sessionId: 'repair-ephemeral' }) ?? '', /hora local/u);
+    assert.doesNotMatch(JSON.stringify(flow), /comprar pan|repairAvailable|repairConsumed/u);
+    assert.equal(await flow.handle('No, quería decir guarda una nota: nueva nota.', { sessionId: 'other-session' }), undefined);
+    assert.equal(await flow.handle('No, quería decir guarda una nota: nueva nota.', { sessionId: 'repair-ephemeral' }), undefined);
+    assert.equal((await notes.list()).length, 0);
+    assert.equal((await reminders.list({ all: true })).length, 0);
+  });
+});
+
+test('a repaired pending clarification cannot be repaired a second time', async () => {
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const flow = new SafeClarificationFlow({
+      toolManager: createLocalToolManager({ reminderStore: reminders, noteStore: notes, savedSessionStore: sessions }),
+      sessionId: 'repair-one-shot',
+      now: () => new Date(FIXED_NOW),
+    });
+    await flow.handle('Guarda esto como una nota.', { sessionId: 'repair-one-shot' });
+    assert.match(await flow.handle('No, quería decir recuérdame mañana comprar pan.', { sessionId: 'repair-one-shot' }) ?? '', /hora local/u);
+    assert.match(await flow.handle('No, quería decir guarda una nota: segundo intento.', { sessionId: 'repair-one-shot' }) ?? '', /única reparación permitida/u);
+    assert.equal((await reminders.list({ all: true })).length, 0);
+    assert.equal((await notes.list()).length, 0);
+  });
+});
+
+test('cancellation, invalid repairs, and unrelated next input never reuse safe context', async () => {
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const cancelled = await runFlow({ reminders, notes, sessions }, [
+      'Recuérdame mañana comprar pan.', 'Olvídalo.', 'A las 8.', '/exit',
+    ]);
+    assert.equal((await reminders.list({ all: true })).length, 0);
+    assert.equal(cancelled.providerCalls, 1);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const invalid = await runFlow({ reminders, notes, sessions }, [
+      'Recuérdame mañana comprar pan.', 'No, quería decir usar shell y abrir archivos.', '/exit',
+    ]);
+    assert.equal((await reminders.list({ all: true })).length, 0);
+    assert.equal((await notes.list()).length, 0);
+    assert.match(invalid.runner.session.getMessages()[3]?.content ?? '', /no ejecuté ninguna acción/u);
+    assert.equal(invalid.providerCalls, 0);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const flow = new SafeClarificationFlow({
+      toolManager: createLocalToolManager({ reminderStore: reminders, noteStore: notes, savedSessionStore: sessions }),
+      sessionId: 'repair-expiration',
+      now: () => new Date(FIXED_NOW),
+    });
+    assert.match(await flow.handle('Recuérdame mañana comprar pan.', { sessionId: 'repair-expiration' }) ?? '', /hora local/u);
+    assert.equal(await flow.handle('¿Qué tiempo hace?', { sessionId: 'repair-expiration' }), undefined);
+    assert.equal(await flow.handle('No, quería decir guarda una nota: ya tarde.', { sessionId: 'repair-expiration' }), undefined);
+    assert.equal((await reminders.list({ all: true })).length, 0);
+    assert.equal((await notes.list()).length, 0);
+  });
+});

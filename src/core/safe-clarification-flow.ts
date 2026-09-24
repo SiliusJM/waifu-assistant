@@ -14,6 +14,7 @@ import { NOTE_MAX_TEXT_LENGTH } from '../notes/note-store.js';
 import { validateMemoryValue } from '../memory/memory-store.js';
 import type { PersistentMemoryStore } from '../memory/memory-store.js';
 import { isSafeExplicitMemoryEntry } from '../memory/memory-recall.js';
+import { resolveNaturalCapabilityHelp } from './capability-catalog.js';
 
 const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,64}$/u;
 const HOUR_FOLLOW_UP = /^\s*(?:(?:a\s+)?las?\s+)?(\d{1,2})(?::(\d{2}))?\s*[.!?]*\s*$/iu;
@@ -57,6 +58,10 @@ export type PendingClarification =
     readonly key: string;
     readonly expectedValue: string;
   };
+
+interface RepairCorrection {
+  readonly instruction: string;
+}
 
 export interface ClarificationInputContext {
   readonly sessionId: string;
@@ -132,7 +137,8 @@ function detectNote(input: string): PendingClarification | undefined {
 }
 
 function detectSavedSessionInfo(input: string): PendingClarification | undefined {
-  if (!/^(?:mu[eé]strame|ens[eé]ñame)\s+(?:esa|esta)\s+(?:conversaci[oó]n|sesi[oó]n)(?:\s+guardada)?\s*[.!?]*$/iu.test(input.trim())) return undefined;
+  if (!/^(?:mu[eé]strame|ens[eé]ñame)\s+(?:(?:la\s+)?informaci[oó]n\s+de\s+)?(?:esa|esta|la)\s+(?:conversaci[oó]n|sesi[oó]n)(?:\s+guardada)?\s*[.!?]*$/iu.test(input.trim())
+    && !/^(?:mu[eé]strame|ens[eé]ñame)\s+(?:la\s+)?informaci[oó]n\s+de\s+(?:esa|esta|la)\s+(?:conversaci[oó]n|sesi[oó]n)(?:\s+guardada)?\s*[.!?]*$/iu.test(input.trim())) return undefined;
   return { kind: 'saved-session-info-id', missingField: 'sessionId', originalIntent: { kind: 'saved-session.info' } };
 }
 
@@ -156,6 +162,58 @@ function parseExplicitMemoryCreate(input: string): { readonly text: string } | u
 function parseExplicitMemoryForget(input: string): { readonly keyLabel: string } | undefined {
   const match = input.trim().match(/^\s*(?:por favor\s+)?(?:(?:olvida|olvidar|deja\s+de\s+recordar)\s+(?:(?:mi|el|la)\s+)?|(?:borra|elimina)\s+de\s+tu\s+memoria\s+(?:(?:mi|el|la)\s+)?)(.+?)\s*[.!?]*\s*$/iu);
   return match?.[1] ? { keyLabel: match[1].trim() } : undefined;
+}
+
+function parseRepairCorrection(input: string): RepairCorrection | undefined {
+  const match = input.trim().match(/^\s*(?:no\s*,?\s*(?:quer[ií]a\s+decir|me\s+refer[ií]a\s+a(?:\s+eso)?|quise\s+decir|en\s+realidad\s+quer[ií]a|en\s+realidad)|mejor|corrige\s+eso)\s*[:,]?\s*(.*?)\s*[.!?]*\s*$/iu);
+  return match ? { instruction: match[1]?.trim() ?? '' } : undefined;
+}
+
+function parseRepairNote(input: string, previous: PendingClarification | undefined): string | undefined {
+  const explicit = input.match(/^\s*(?:guarda(?:r)?\s+(?:una\s+)?nota|anota|apunta)\s*[:,-]\s*(.+?)\s*[.!?]*\s*$/iu);
+  if (explicit?.[1]) return stripEndingPunctuation(explicit[1]);
+  if (!/^\s*(?:guarda(?:r)?\s+(?:(?:lo|eso|esto)\s+)?|gu[aá]rdalo\s+|anota\s+(?:(?:lo|eso|esto)\s+)?|apunta\s+(?:(?:lo|eso|esto)\s+)?)(?:como\s+)?(?:una\s+)?nota\s*$/iu.test(input)) return undefined;
+  return previous?.kind === 'reminder-hour' ? previous.originalIntent.text : undefined;
+}
+
+function parseRepairReminder(input: string, now: Date):
+  | { readonly kind: 'missing-hour'; readonly pending: Extract<PendingClarification, { kind: 'reminder-hour' }> }
+  | { readonly kind: 'ready'; readonly pending: Extract<PendingClarification, { kind: 'reminder-hour' }>; readonly time: string }
+  | undefined {
+  const match = input.trim().match(/^\s*(?:recu[eé]rdame|recordarme)\s+ma[nñ]ana\s+(?:(?:a\s+las?\s+)?(\d{1,2})(?::(\d{2}))?\s+)?(.+?)\s*[.!?]*\s*$/iu);
+  const text = match?.[3] ? stripEndingPunctuation(match[3]) : '';
+  const date = localDate(now);
+  if (!match || !text || !date) return undefined;
+  const pending: Extract<PendingClarification, { kind: 'reminder-hour' }> = {
+    kind: 'reminder-hour', missingField: 'hour',
+    originalIntent: { kind: 'reminder.create', text }, safeContext: { localDate: date },
+  };
+  if (match[1] === undefined) return { kind: 'missing-hour', pending };
+  const hour = Number(match[1]);
+  const minute = Number(match[2] ?? '0');
+  if (hour > 23 || minute > 59) return undefined;
+  return { kind: 'ready', pending, time: `${hour}:${String(minute).padStart(2, '0')}` };
+}
+
+function parseRepairSavedSearch(
+  input: string,
+  previous: PendingClarification | undefined,
+): { readonly query: string; readonly sessionId: string } | undefined {
+  const explicit = input.trim().match(/^\s*(?:busca|buscar|encuentra)\s+["'“]?(.+?)["'”]?\s+en\s+(?:la\s+)?(?:conversaci[oó]n|sesi[oó]n)(?:\s+guardada)?\s+([A-Za-z0-9_-]{1,64})\s*[.!?]*\s*$/iu);
+  if (explicit?.[1] && explicit[2]) {
+    const query = stripEndingPunctuation(explicit[1]);
+    const sessionId = validSessionId(explicit[2]);
+    if (query && Array.from(query).length <= 120 && !/[\r\n\0]/u.test(query) && sessionId) return { query, sessionId };
+  }
+  const referential = input.trim().match(/^\s*(?:busca|buscar|encuentra)\s+(?:dentro\s+de|en)\s+(?:esa|la)\s+(?:conversaci[oó]n|sesi[oó]n)(?:\s+guardada)?\s+([A-Za-z0-9_-]{1,64})\s*[.!?]*\s*$/iu);
+  const previousQuery = previous?.kind === 'saved-session-search-id' ? previous.originalIntent.query : undefined;
+  const sessionId = referential?.[1] ? validSessionId(referential[1]) : undefined;
+  return previousQuery && sessionId ? { query: previousQuery, sessionId } : undefined;
+}
+
+function parseRepairSavedInfo(input: string): string | undefined {
+  const match = input.trim().match(/^\s*(?:mu[eé]strame|ens[eé][ñn]ame|consulta(?:r)?)\s+(?:(?:la\s+)?informaci[oó]n\s+de\s+)?(?:la\s+)?(?:conversaci[oó]n|sesi[oó]n)(?:\s+guardada)?\s+([A-Za-z0-9_-]{1,64})\s*[.!?]*\s*$/iu);
+  return match?.[1] ? validSessionId(match[1]) : undefined;
 }
 
 function parseMemoryFact(text: string): MemoryCreateIntent | undefined {
@@ -301,6 +359,9 @@ function failText(result: ToolResult<unknown>, subject: string): string {
 
 export class SafeClarificationFlow {
   #pending: PendingClarification | undefined;
+  #repairAvailable = false;
+  #repairConsumed = false;
+  #lastActionExecuted: string | undefined;
   private readonly toolManager: ToolManager;
   private readonly sessionId: string;
   private readonly now: () => Date;
@@ -317,6 +378,16 @@ export class SafeClarificationFlow {
 
   clear(): void {
     this.#pending = undefined;
+    this.#repairAvailable = false;
+    this.#repairConsumed = false;
+    this.#lastActionExecuted = undefined;
+  }
+
+  observeCapabilityHelp(): void {
+    this.#pending = undefined;
+    this.#lastActionExecuted = undefined;
+    this.#repairAvailable = true;
+    this.#repairConsumed = false;
   }
 
   async handle(input: string, context: ClarificationInputContext): Promise<string | undefined> {
@@ -324,13 +395,38 @@ export class SafeClarificationFlow {
       this.clear();
       return undefined;
     }
+    const correction = parseRepairCorrection(input);
+    if (this.#lastActionExecuted !== undefined) {
+      this.#lastActionExecuted = undefined;
+      if (correction) {
+        this.#pending = undefined;
+        this.#repairAvailable = false;
+        this.#repairConsumed = true;
+        return 'La acción anterior ya se ejecutó. No la revertí automáticamente; usa el comando explícito correspondiente si necesitas corregir los datos.';
+      }
+    }
     const pending = this.#pending;
+    if (correction && (pending !== undefined || this.#repairAvailable)) {
+      if (!this.#repairAvailable || this.#repairConsumed) {
+        this.clear();
+        return 'Ya utilicé la única reparación permitida para esta intención; no ejecuté otra acción.';
+      }
+      this.#repairAvailable = false;
+      this.#repairConsumed = true;
+      this.#pending = undefined;
+      const repaired = await this.executeRepair(correction.instruction, pending, context);
+      return repaired ?? 'No pude reparar la intención de forma inequívoca; cancelé la intención anterior y no ejecuté ninguna acción.';
+    }
+    if (!pending && !this.#repairAvailable) this.#repairConsumed = false;
+    if (!pending && this.#repairAvailable && !correction) this.#repairAvailable = false;
     if (!pending) {
       const memoryForget = this.detectMemoryForget(input);
       if (memoryForget) {
         const detected = await memoryForget;
         if (detected.kind === 'memory-unavailable') return detected.response;
         this.#pending = detected;
+        this.#repairAvailable = true;
+        this.#repairConsumed = false;
         return this.promptFor(detected);
       }
       const memoryCreate = this.detectMemoryCreate(input);
@@ -338,12 +434,16 @@ export class SafeClarificationFlow {
         const detected = await memoryCreate;
         if (detected.kind === 'memory-unavailable') return detected.response;
         this.#pending = detected;
+        this.#repairAvailable = true;
+        this.#repairConsumed = false;
         return this.promptFor(detected);
       }
       const memoryUpdate = await this.detectMemoryUpdate(input);
       if (memoryUpdate) {
         if (memoryUpdate.kind === 'memory-unavailable') return memoryUpdate.response;
         this.#pending = memoryUpdate;
+        this.#repairAvailable = true;
+        this.#repairConsumed = false;
         return this.promptFor(memoryUpdate);
       }
       const detected = detectReminder(input, this.now())
@@ -352,6 +452,8 @@ export class SafeClarificationFlow {
         ?? detectSavedSessionInfo(input);
       if (!detected) return undefined;
       this.#pending = detected;
+      this.#repairAvailable = true;
+      this.#repairConsumed = false;
       return this.promptFor(detected);
     }
 
@@ -402,6 +504,64 @@ export class SafeClarificationFlow {
         return `Tengo guardado ${pending.key} = ${visibleValue}. ¿Quieres que lo olvide? Responde sí o no.`;
       }
     }
+  }
+
+  private async executeRepair(
+    instruction: string,
+    previous: PendingClarification | undefined,
+    context: ClarificationInputContext,
+  ): Promise<string | undefined> {
+    const target = instruction.trim();
+    if (!target) return undefined;
+    const cancellation = cancellationKind(target);
+    if (cancellation) return 'Entendido. Cancelé la intención anterior y no inicié otra acción.';
+
+    const noteText = parseRepairNote(target, previous);
+    if (noteText) return this.resolveNote(noteText, context);
+
+    const reminder = parseRepairReminder(target, this.now());
+    if (reminder?.kind === 'missing-hour') {
+      this.#pending = reminder.pending;
+      return this.promptFor(reminder.pending);
+    }
+    if (reminder?.kind === 'ready') return this.resolveReminder(reminder.pending, reminder.time, context);
+
+    const search = parseRepairSavedSearch(target, previous);
+    if (search) {
+      const searchPending: Extract<PendingClarification, { kind: 'saved-session-search-id' }> = {
+        kind: 'saved-session-search-id', missingField: 'sessionId',
+        originalIntent: { kind: 'saved-session.search', query: search.query },
+      };
+      return this.resolveSavedSearch(searchPending, search.sessionId, context);
+    }
+
+    const infoId = parseRepairSavedInfo(target);
+    if (infoId) {
+      return this.resolveSavedSessionInfo(infoId, context);
+    }
+
+    const memoryForget = this.detectMemoryForget(target);
+    if (memoryForget) {
+      const detected = await memoryForget;
+      if (detected.kind === 'memory-unavailable') return detected.response;
+      this.#pending = detected;
+      return this.promptFor(detected);
+    }
+    const memoryCreate = this.detectMemoryCreate(target);
+    if (memoryCreate) {
+      const detected = await memoryCreate;
+      if (detected.kind === 'memory-unavailable') return detected.response;
+      this.#pending = detected;
+      return this.promptFor(detected);
+    }
+    const memoryUpdate = await this.detectMemoryUpdate(target);
+    if (memoryUpdate) {
+      if (memoryUpdate.kind === 'memory-unavailable') return memoryUpdate.response;
+      this.#pending = memoryUpdate;
+      return this.promptFor(memoryUpdate);
+    }
+
+    return resolveNaturalCapabilityHelp(target);
   }
 
   private detectMemoryForget(input: string): Promise<MemoryDetection> | undefined {
@@ -505,7 +665,7 @@ export class SafeClarificationFlow {
     if (!this.memoryStore) return 'La actualización no está disponible; no cambié nada.';
     const result = await this.memoryStore.update(pending.key, pending.newValue, pending.oldValue);
     switch (result) {
-      case 'updated': return `Memoria actualizada: ${pending.key}.`;
+      case 'updated': this.#lastActionExecuted = 'memory update'; return `Memoria actualizada: ${pending.key}.`;
       case 'unchanged': return `La memoria ${pending.key} ya tenía ese valor; no fue necesario cambiarla.`;
       case 'missing': return `La memoria ${pending.key} ya no existe; no creé otra.`;
       case 'conflict': return `La memoria ${pending.key} cambió desde la solicitud. No la sobrescribí; inicia de nuevo la actualización.`;
@@ -520,9 +680,11 @@ export class SafeClarificationFlow {
     if (!isAffirmative(input)) return 'No recibí una confirmación clara; cancelé la propuesta y no guardé nada.';
     if (!this.memoryStore) return 'La creación de memorias no está disponible; no guardé nada.';
     const result = await this.memoryStore.remember(pending.key, pending.value);
-    return result === 'created'
-      ? `Memoria guardada: ${pending.key}.`
-      : `La memoria ${pending.key} ya existe; no la sobrescribí. Si quieres cambiarla, pídeme explícitamente actualizarla.`;
+    if (result === 'created') {
+      this.#lastActionExecuted = 'memory create';
+      return `Memoria guardada: ${pending.key}.`;
+    }
+    return `La memoria ${pending.key} ya existe; no la sobrescribí. Si quieres cambiarla, pídeme explícitamente actualizarla.`;
   }
 
   private async resolveMemoryForget(
@@ -534,7 +696,7 @@ export class SafeClarificationFlow {
     if (!this.memoryStore) return 'La eliminación no está disponible; no cambié la memoria.';
     const result = await this.memoryStore.forget(pending.key, pending.expectedValue);
     switch (result) {
-      case 'deleted': return `Memoria olvidada: ${pending.key}.`;
+      case 'deleted': this.#lastActionExecuted = 'memory forget'; return `Memoria olvidada: ${pending.key}.`;
       case 'missing': return `La memoria ${pending.key} ya no existe; no eliminé otra entrada.`;
       case 'conflict': return `La memoria ${pending.key} cambió desde la solicitud. No la eliminé; vuelve a pedirlo si todavía quieres olvidarla.`;
     }
@@ -557,6 +719,7 @@ export class SafeClarificationFlow {
       signal: context.signal,
     });
     if (result.status !== 'success') return failText(result, 'No pude crear el recordatorio.');
+    this.#lastActionExecuted = 'reminder creation';
     try { await this.onReminderCreated?.(); } catch { /* The persisted reminder remains created; do not retry it. */ }
     return `Recordatorio creado: ${result.value.id}\nFecha: ${formatReminderDate(result.value.dueAt)}\n${result.value.text}`;
   }
@@ -591,6 +754,7 @@ export class SafeClarificationFlow {
       signal: context.signal,
     });
     if (result.status !== 'success') return failText(result, 'No pude guardar la nota.');
+    this.#lastActionExecuted = 'note creation';
     return `Nota guardada: ${result.value.id}`;
   }
 

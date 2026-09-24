@@ -57,6 +57,7 @@ export interface ConversationRunOptions {
   readonly clarification?: {
     handle: (input: string, context: { readonly signal?: AbortSignal; readonly sessionId: string }) => Promise<string | undefined>;
     clear: () => void;
+    observeCapabilityHelp?: () => void;
   };
   readonly onCommand?: (command: string, context: {
     readonly signal?: AbortSignal;
@@ -249,6 +250,7 @@ export class ConversationRunner {
       const capabilityHelp = resolveNaturalCapabilityHelp(input);
       if (capabilityHelp !== undefined) {
         options.clarification?.clear();
+        options.clarification?.observeCapabilityHelp?.();
         this.session.addMessage('user', input);
         const assistantMessage = this.session.addMessage('assistant', capabilityHelp);
         const response: Response = {
@@ -268,23 +270,23 @@ export class ConversationRunner {
         signal: options.signal,
         sessionId: this.session.id,
       });
-      if (localText === undefined) {
-        startTurn(input);
+      if (localText !== undefined) {
+        this.session.addMessage('user', input);
+        const assistantMessage = this.session.addMessage('assistant', localText);
+        const response: Response = {
+          sessionId: this.session.id,
+          messageId: assistantMessage.id,
+          text: localText,
+          provider: 'local-clarification',
+          model: 'local',
+          finishReason: 'stop',
+        };
+        responses.push(response);
+        await options.onDelta?.(localText);
+        await options.onResponse?.(response);
         return;
       }
-      this.session.addMessage('user', input);
-      const assistantMessage = this.session.addMessage('assistant', localText);
-      const response: Response = {
-        sessionId: this.session.id,
-        messageId: assistantMessage.id,
-        text: localText,
-        provider: 'local-clarification',
-        model: 'local',
-        finishReason: 'stop',
-      };
-      responses.push(response);
-      await options.onDelta?.(localText);
-      await options.onResponse?.(response);
+      startTurn(input);
     };
 
     const completeActive = async (): Promise<void> => {
