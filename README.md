@@ -109,6 +109,7 @@ Las respuestas interactivas pueden mostrarse progresivamente mediante streaming;
 
 La CLI reconoce `/help`, `/time`, `/calc <expression>`, `/remind <YYYY-MM-DD HH:mm> <texto>`,
 `/reminders`, `/reminders --all`, `/reminder-complete <id>`, `/reminder-delete <id>`, `/status`, `/history`, `/clear`,
+`/note-add <texto>`, `/notes`, `/note-show <id>`, `/note-delete <id>`,
 `/remember <key> <value>`, `/memory`, `/forget <key>`,
 `/save-session <name>`, `/sessions`, `/load-session <name>`,
 `/delete-session <name>`, `/rename <nombre>`, `/session-info`, `/export [nombre]`
@@ -128,6 +129,14 @@ avisan una vez en esa ejecución y permanecen pendientes hasta completarlos o
 eliminarlos. No se ejecuta un daemon ni se programan avisos cuando Yuki está
 cerrada. Las notificaciones toast nativas de Windows quedan diferidas; el
 fallback de consola es portable y no ejecuta contenido del recordatorio.
+
+### Notas locales
+
+Las notas se guardan en `~/.waifu-assistant/notes.json` (o en la ruta configurada
+con `YUKI_NOTES_PATH`) y se gestionan explícitamente con `/note-add Comprar
+adaptador HDMI`, `/notes`, `/note-show n-a1b2c3d4` y `/note-delete n-a1b2c3d4`. No usan IA,
+no se agregan automáticamente a Persistent Memory ni a la conversación, y no
+se sincronizan con la nube.
 
 ### Exportar conversaciones
 

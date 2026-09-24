@@ -385,6 +385,41 @@ test('reminder commands stay local, preserve Session, and do not invoke the prov
   ]);
 });
 
+test('note commands stay local and neither enter Session nor invoke the provider', async () => {
+  let providerCalls = 0;
+  const provider = new MockAIProvider({
+    responder: () => {
+      providerCalls += 1;
+      return { text: 'reply', provider: 'mock', model: 'mock-model', finishReason: 'stop' };
+    },
+  });
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const commands: string[] = [];
+  const result = await runner.run(inputs([
+    '/note-add $(Get-Process); rm -rf 🌸',
+    '/notes',
+    '/note-show n-1234abcd',
+    '/note-delete n-1234abcd',
+    'conversación normal',
+    '/exit',
+  ]), {
+    onCommand: async (command) => { commands.push(command); },
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(commands, [
+    '/note-add $(Get-Process); rm -rf 🌸',
+    '/notes',
+    '/note-show n-1234abcd',
+    '/note-delete n-1234abcd',
+  ]);
+  assert.equal(providerCalls, 1);
+  assert.deepEqual(result.session.getMessages().map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'conversación normal' },
+    { role: 'assistant', content: 'reply' },
+  ]);
+});
+
 test('saved-session commands stay local and do not call the provider or contaminate Session', async () => {
   let providerCalls = 0;
   const provider = new MockAIProvider({
@@ -481,6 +516,10 @@ test('/rename and /session-info are local metadata commands and preserve convers
   assert.match(LOCAL_COMMAND_HELP, /\/reminders --all/u);
   assert.match(LOCAL_COMMAND_HELP, /\/reminder-complete <id>/u);
   assert.match(LOCAL_COMMAND_HELP, /\/reminder-delete <id>/u);
+  assert.match(LOCAL_COMMAND_HELP, /\/note-add <texto>/u);
+  assert.match(LOCAL_COMMAND_HELP, /\/notes/u);
+  assert.match(LOCAL_COMMAND_HELP, /\/note-show <id>/u);
+  assert.match(LOCAL_COMMAND_HELP, /\/note-delete <id>/u);
   assert.throws(() => runner.session.setTitle('   '), (error: unknown) => error instanceof Error && 'code' in error && error.code === 'SESSION_CONFIGURATION_ERROR');
   assert.throws(() => runner.session.setTitle('🌸'.repeat(101)), (error: unknown) => error instanceof Error && 'code' in error && error.code === 'SESSION_CONFIGURATION_ERROR');
 });
