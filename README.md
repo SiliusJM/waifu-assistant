@@ -137,6 +137,11 @@ fallback de consola es portable y no ejecuta contenido del recordatorio.
 
 ### Notas locales
 
+Las aclaraciones naturales seguras solicitan un solo dato faltante. Su estado es
+efímero, queda asociado a la sesión interactiva y se descarta tras una respuesta
+inválida, cancelación, cambio de tema, `/clear`, carga de otra sesión o salida.
+No inicia una acción con datos ambiguos ni repite la pregunta.
+
 Las notas se guardan en `~/.waifu-assistant/notes.json` (o en la ruta configurada
 con `YUKI_NOTES_PATH`) y se gestionan explícitamente con `/note-add Comprar
 adaptador HDMI`, `/notes`, `/note-show n-a1b2c3d4` y `/note-delete n-a1b2c3d4`. No usan IA,

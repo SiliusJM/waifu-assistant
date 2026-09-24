@@ -1,6 +1,7 @@
 import type { SavedSessionRole, SavedSessionStore } from '../core/saved-session-store.js';
 import type { Tool, ToolExecutionContext, ToolResult } from './tool-types.js';
 import { isExplicitSavedSessionContentSearch } from './saved-session-query-intent.js';
+import { isAuthorizedClarification } from './clarification-tool-authorization.js';
 
 export const LOCAL_SAVED_SESSION_SEARCH_TOOL_ID = 'local.saved_session_search';
 export const SAVED_SESSION_SEARCH_MAX_QUERY_LENGTH = 120;
@@ -79,6 +80,7 @@ export function searchSavedSessionMessages(
 function authorized(argumentsValue: SavedSessionSearchArguments, context: ToolExecutionContext): boolean {
   if (!/^[A-Za-z0-9_-]{1,64}$/u.test(argumentsValue.sessionId)
     || !isValidSavedSessionSearchQuery(argumentsValue.query)) return false;
+  if (isAuthorizedClarification(context, LOCAL_SAVED_SESSION_SEARCH_TOOL_ID, 'saved-session-search-id')) return true;
   if (context.authorization?.source === 'explicit-cli-command') {
     const command = `/session-search ${argumentsValue.sessionId} ${argumentsValue.query}`;
     return context.metadata.source === 'explicit-cli-command'

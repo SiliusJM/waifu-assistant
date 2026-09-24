@@ -83,6 +83,11 @@ export interface ConversationRunOptions {
   /** Enables live input replacement while a response is streaming. */
   readonly interruptible?: boolean;
   readonly memory?: () => MemorySnapshot | Promise<MemorySnapshot>;
+  /** One in-memory local clarification handler; it is never serialized by the runner. */
+  readonly clarification?: {
+    handle: (input: string, context: { readonly signal?: AbortSignal; readonly sessionId: string }) => Promise<string | undefined>;
+    clear: () => void;
+  };
   readonly onCommand?: (command: string, context: {
     readonly signal?: AbortSignal;
     readonly sessionId: string;
@@ -261,12 +266,37 @@ export class ConversationRunner {
       || input.startsWith(`${CONVERSATION_NOTE_DELETE_COMMAND} `);
 
     const executeLocalCommand = async (input: string, activeAtArrival: boolean): Promise<void> => {
+      options.clarification?.clear();
       if (!options.onCommand) {
         throw new AssistantError('The local command is unavailable.', {
           code: 'TOOL_UNAVAILABLE_ERROR', retryable: false,
         });
       }
       await options.onCommand(input, commandContext(activeAtArrival));
+    };
+
+    const processNaturalInput = async (input: string): Promise<void> => {
+      const localText = await options.clarification?.handle(input, {
+        signal: options.signal,
+        sessionId: this.session.id,
+      });
+      if (localText === undefined) {
+        startTurn(input);
+        return;
+      }
+      this.session.addMessage('user', input);
+      const assistantMessage = this.session.addMessage('assistant', localText);
+      const response: Response = {
+        sessionId: this.session.id,
+        messageId: assistantMessage.id,
+        text: localText,
+        provider: 'local-clarification',
+        model: 'local',
+        finishReason: 'stop',
+      };
+      responses.push(response);
+      await options.onDelta?.(localText);
+      await options.onResponse?.(response);
     };
 
     const completeActive = async (): Promise<void> => {
@@ -296,7 +326,7 @@ export class ConversationRunner {
             if (pendingNormalInput) {
               const nextInput = pendingNormalInput;
               pendingNormalInput = undefined;
-              startTurn(nextInput);
+              await processNaturalInput(nextInput);
             } else if (sourceFinished) {
               return { status: 'completed', session: this.session, responses: [...responses] };
             }
@@ -318,7 +348,7 @@ export class ConversationRunner {
             if (pendingNormalInput) {
               const nextInput = pendingNormalInput;
               pendingNormalInput = undefined;
-              startTurn(nextInput);
+              await processNaturalInput(nextInput);
             } else if (sourceFinished) {
               return { status: 'completed', session: this.session, responses: [...responses] };
             }
@@ -345,6 +375,7 @@ export class ConversationRunner {
             requestCancel(active);
             await completeActive();
             await options.onInterruption?.();
+            options.clarification?.clear();
             return { status: 'completed', session: this.session, responses: [...responses] };
           }
           if (input === CONVERSATION_CANCEL_COMMAND) {
@@ -371,7 +402,7 @@ export class ConversationRunner {
         if (pendingNormalInput) {
           const nextInput = pendingNormalInput;
           pendingNormalInput = undefined;
-          startTurn(nextInput);
+          await processNaturalInput(nextInput);
           continue;
         }
         if (sourceFinished) return { status: 'completed', session: this.session, responses: [...responses] };
@@ -390,6 +421,7 @@ export class ConversationRunner {
         if (!input) continue;
         if (input === exitCommand) {
           sourceFinished = true;
+          options.clarification?.clear();
           return { status: 'completed', session: this.session, responses: [...responses] };
         }
         if (isLocalCommand(input)) {
@@ -400,7 +432,7 @@ export class ConversationRunner {
           await executeLocalCommand(input, false);
           continue;
         }
-        startTurn(input);
+        await processNaturalInput(input);
       }
     } finally {
       if (active) {
@@ -408,6 +440,7 @@ export class ConversationRunner {
         await active.promise.catch(() => undefined);
       }
       options.signal?.removeEventListener('abort', onRunAbort);
+      options.clarification?.clear();
       if (!sourceFinished) await iterator.return?.();
     }
   }
