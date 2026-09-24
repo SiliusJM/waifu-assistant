@@ -263,6 +263,229 @@ test('explicit memory update asks first and a clear yes writes exactly once', as
   });
 });
 
+test('explicit new memory intent asks confirmation and yes creates exactly one entry without calling the provider', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('name', 'Jhon');
+    let rememberCalls = 0;
+    const remember = memory.remember.bind(memory);
+    memory.remember = async (...args) => { rememberCalls += 1; return remember(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions, memory }, [
+      'Recuerda que mi juego favorito es Genshin Impact.', 'sí', '/exit',
+    ]);
+
+    assert.equal(outcome.providerCalls, 0);
+    assert.equal(rememberCalls, 1);
+    assert.equal(await memory.get('favorite_game'), 'Genshin Impact');
+    assert.equal(await memory.get('name'), 'Jhon');
+    const visible = outcome.runner.session.getMessages().map(({ content }) => content);
+    assert.match(visible[1] ?? '', /favorite_game = "Genshin Impact"/u);
+    assert.match(visible[3] ?? '', /Memoria guardada: favorite_game/u);
+    assert.doesNotMatch(visible[1] ?? '', /Jhon|city/u);
+  });
+});
+
+test('explicit creation supports bounded Spanish intents and rejects casual statements', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    const flow = new SafeClarificationFlow({
+      toolManager: createLocalToolManager({ reminderStore: reminders, noteStore: notes, savedSessionStore: sessions }),
+      sessionId: 'bounded-create-intents',
+      memoryStore: memory,
+    });
+    assert.equal(await flow.handle('Mi ciudad es Guayaquil.', { sessionId: 'bounded-create-intents' }), undefined);
+    for (const [request, expected] of [
+      ['Guarda en tu memoria que mi ciudad es Guayaquil.', 'city'],
+      ['Quiero que recuerdes que mi nombre es Jhon.', 'name'],
+      ['Memoriza que mi juego favorito es Genshin Impact.', 'favorite_game'],
+    ] as const) {
+      assert.match(await flow.handle(request, { sessionId: 'bounded-create-intents' }) ?? '', new RegExp(`${expected} =`));
+      assert.match(await flow.handle('yes', { sessionId: 'bounded-create-intents' }) ?? '', new RegExp(`Memoria guardada: ${expected}`));
+    }
+    assert.deepEqual(await memory.list(), [
+      { key: 'city', value: 'Guayaquil' },
+      { key: 'favorite_game', value: 'Genshin Impact' },
+      { key: 'name', value: 'Jhon' },
+    ]);
+  });
+});
+
+test('explicit create rejection, ambiguity, and topic change do not write or leave a reusable confirmation', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    const rejected = await runFlow({ reminders, notes, sessions, memory }, [
+      'Recuerda que mi ciudad es Quito.', 'No, gracias.', 'yes', '/exit',
+    ]);
+    assert.equal(await memory.count(), 0);
+    assert.equal(rejected.providerCalls, 1);
+    assert.match(rejected.runner.session.getMessages()[3]?.content ?? '', /No guardé city/u);
+  });
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    const ambiguous = await runFlow({ reminders, notes, sessions, memory }, [
+      'Recuerda que mi ciudad es Quito.', 'quizá', '/exit',
+    ]);
+    assert.equal(await memory.count(), 0);
+    assert.equal(ambiguous.providerCalls, 0);
+    assert.match(ambiguous.runner.session.getMessages()[3]?.content ?? '', /confirmación clara/u);
+  });
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    const flow = new SafeClarificationFlow({
+      toolManager: createLocalToolManager({ reminderStore: reminders, noteStore: notes, savedSessionStore: sessions }),
+      sessionId: 'create-topic-change',
+      memoryStore: memory,
+    });
+    assert.match(await flow.handle('Recuerda que mi ciudad es Quito.', { sessionId: 'create-topic-change' }) ?? '', /¿Quieres que guarde/u);
+    assert.equal(await flow.handle('Cambiemos de tema. Cuéntame un chiste.', { sessionId: 'create-topic-change' }), undefined);
+    assert.equal(await flow.handle('Sí', { sessionId: 'create-topic-change' }), undefined);
+    assert.equal(await memory.count(), 0);
+  });
+});
+
+test('existing keys route to the existing update confirmation and never use create to overwrite', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('city', 'Cuenca');
+    let rememberCalls = 0;
+    let updateCalls = 0;
+    const remember = memory.remember.bind(memory);
+    const update = memory.update.bind(memory);
+    memory.remember = async (...args) => { rememberCalls += 1; return remember(...args); };
+    memory.update = async (...args) => { updateCalls += 1; return update(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions, memory }, [
+      'Recuerda que mi ciudad es Guayaquil.', 'yes', '/exit',
+    ]);
+    assert.equal(await memory.get('city'), 'Guayaquil');
+    assert.equal(rememberCalls, 0);
+    assert.equal(updateCalls, 1);
+    assert.equal(outcome.providerCalls, 0);
+    assert.match(outcome.runner.session.getMessages()[1]?.content ?? '', /Cuenca/u);
+    assert.match(outcome.runner.session.getMessages()[1]?.content ?? '', /¿Quieres cambiarlo/u);
+  });
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    const conflict = new PersistentMemoryStore(memory.filePath);
+    const toolOptions = { reminderStore: reminders, noteStore: notes, savedSessionStore: sessions };
+    const flow = new SafeClarificationFlow({ toolManager: createLocalToolManager(toolOptions), sessionId: 'create-conflict', memoryStore: memory });
+    assert.match(await flow.handle('Recuerda que mi juego favorito es Genshin Impact.', { sessionId: 'create-conflict' }) ?? '', /favorite_game/u);
+    await conflict.remember('favorite_game', 'Stardew Valley');
+    const response = await flow.handle('yes', { sessionId: 'create-conflict' });
+    assert.match(response ?? '', /ya existe; no la sobrescribí/u);
+    assert.equal(await memory.get('favorite_game'), 'Stardew Valley');
+  });
+});
+
+test('multi-memory and sensitive create requests are rejected without exposing values', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    const multi = await runFlow({ reminders, notes, sessions, memory }, [
+      'Recuerda mi ciudad, mi juego y mi correo.', '/exit',
+    ]);
+    assert.equal(await memory.count(), 0);
+    assert.equal(multi.providerCalls, 0);
+    assert.match(multi.runner.session.getMessages()[1]?.content ?? '', /una memoria por vez/u);
+  });
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    const multi = await runFlow({ reminders, notes, sessions, memory }, [
+      'Recuerda que mi ciudad es Quito. Mi juego favorito es Genshin Impact.', '/exit',
+    ]);
+    assert.equal(await memory.count(), 0);
+    assert.equal(multi.providerCalls, 0);
+    assert.match(multi.runner.session.getMessages()[1]?.content ?? '', /una memoria por vez/u);
+  });
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    const sensitiveKey = await runFlow({ reminders, notes, sessions, memory }, [
+      'Recuerda que mi contraseña es never-print-this-placeholder.', '/exit',
+    ]);
+    assert.equal(await memory.count(), 0);
+    assert.equal(sensitiveKey.providerCalls, 0);
+    assert.doesNotMatch(sensitiveKey.runner.session.getMessages()[1]?.content ?? '', /never-print-this-placeholder/u);
+  });
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    const sensitiveValue = await runFlow({ reminders, notes, sessions, memory }, [
+      'Recuerda que mi ciudad es password is never-print-this-placeholder.', '/exit',
+    ]);
+    assert.equal(await memory.count(), 0);
+    assert.equal(sensitiveValue.providerCalls, 0);
+    assert.doesNotMatch(sensitiveValue.runner.session.getMessages()[1]?.content ?? '', /never-print-this-placeholder/u);
+  });
+});
+
+test('duplicate confirmation cannot create twice and pending create state is not serialized', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    let rememberCalls = 0;
+    const remember = memory.remember.bind(memory);
+    memory.remember = async (...args) => { rememberCalls += 1; return remember(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions, memory }, [
+      'Recuerda que mi ciudad es Guayaquil.', 'yes', 'yes', '/exit',
+    ]);
+    assert.equal(rememberCalls, 1);
+    assert.equal(await memory.count(), 1);
+    assert.equal(outcome.providerCalls, 1);
+  });
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    const flow = new SafeClarificationFlow({
+      toolManager: createLocalToolManager({ reminderStore: reminders, noteStore: notes, savedSessionStore: sessions }),
+      sessionId: 'pending-create',
+      memoryStore: memory,
+    });
+    await flow.handle('Recuerda que mi ciudad es Guayaquil.', { sessionId: 'pending-create' });
+    assert.doesNotMatch(JSON.stringify(flow), /memory-create|Guayaquil|city/u);
+    assert.equal(await memory.count(), 0);
+  });
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    const toolOptions = { reminderStore: reminders, noteStore: notes, savedSessionStore: sessions };
+    const runner = new ConversationRunner(new AssistantCore({ provider: new MockAIProvider({ responseText: 'unused' }) }));
+    const flow = new SafeClarificationFlow({
+      toolManager: createLocalToolManager(toolOptions),
+      sessionId: runner.session.id,
+      memoryStore: memory,
+    });
+    await runner.run(inputs(['Recuerda que mi ciudad es Guayaquil.']), {
+      clarification: flow,
+      onDelta: async () => {
+        await sessions.save('visible-confirmation-only', runner.session.getMessages().map(({ role, content }) => ({ role, content })));
+      },
+    });
+    const saved = await sessions.get('visible-confirmation-only');
+    assert.deepEqual(saved?.messages.map(({ role }) => role), ['user', 'assistant']);
+    assert.match(saved?.messages[1]?.content ?? '', /¿Quieres que guarde city/u);
+    assert.doesNotMatch(JSON.stringify(saved?.messages), /memory-create|"value"/u);
+    assert.equal(await memory.count(), 0);
+  });
+});
+
+test('create pending state clears on /clear, /load-session, exit, invalid follow-up, and session change', async () => {
+  for (const command of ['/clear', '/load-session demo', '/exit']) {
+    await withStores(async ({ reminders, notes, sessions, memory }) => {
+      const outcome = await runFlow({ reminders, notes, sessions, memory }, [
+        'Recuerda que mi ciudad es Quito.', command, 'yes', '/exit',
+      ]);
+      assert.equal(await memory.count(), 0, command);
+      assert.equal(outcome.providerCalls, command === '/exit' ? 0 : 1, command);
+    });
+  }
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    const flow = new SafeClarificationFlow({
+      toolManager: createLocalToolManager({ reminderStore: reminders, noteStore: notes, savedSessionStore: sessions }),
+      sessionId: 'create-session-one',
+      memoryStore: memory,
+    });
+    assert.match(await flow.handle('Recuerda que mi ciudad es Quito.', { sessionId: 'create-session-one' }) ?? '', /¿Quieres que guarde/u);
+    assert.equal(await flow.handle('yes', { sessionId: 'create-session-two' }), undefined);
+    assert.equal(await flow.handle('yes', { sessionId: 'create-session-one' }), undefined);
+    assert.equal(await memory.count(), 0);
+  });
+});
+
+test('a newly created memory is available to explicit contextual recall on the following turn', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await runFlow({ reminders, notes, sessions, memory }, [
+      'Recuerda que mi ciudad es Guayaquil.', 'yes', '/exit',
+    ]);
+    const requests: string[] = [];
+    const core = new AssistantCore({ provider: new MockAIProvider({ responder: (request) => {
+      requests.push(request.messages.map(({ content }) => content).join('\n'));
+      return { text: 'Vives en Guayaquil.', provider: 'mock', model: 'scripted', finishReason: 'stop' };
+    } }) });
+    await core.respond(core.createSession(), '¿En qué ciudad vivo?', { memory: await memory.snapshot() });
+    assert.match(requests[0] ?? '', /Guayaquil/u);
+  });
+});
+
 test('memory update reject and ambiguous confirmation never write', async () => {
   await withStores(async ({ reminders, notes, sessions, memory }) => {
     await memory.set('favorite_game', 'Stardew Valley');

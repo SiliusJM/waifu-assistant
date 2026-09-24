@@ -187,6 +187,27 @@ export class PersistentMemoryStore {
     }
   }
 
+  /** Creates a new entry without replacing an existing value. */
+  async remember(key: string, value: string): Promise<'created' | 'exists'> {
+    validateMemoryKey(key);
+    validateMemoryValue(value);
+    // Re-read the persisted document at confirmation time to avoid acting on a stale snapshot.
+    await this.load();
+    if (this.entries.has(key)) return 'exists';
+    if (this.entries.size >= MEMORY_MAX_ENTRIES) {
+      throw memoryError('The memory entry limit has been reached.', 'MEMORY_LIMIT_ERROR');
+    }
+    const previous = new Map(this.entries);
+    this.entries.set(key, value);
+    try {
+      await this.persist();
+      return 'created';
+    } catch (error) {
+      this.entries = previous;
+      throw error;
+    }
+  }
+
   /** Updates an existing entry only when its current value still matches the caller's snapshot. */
   async update(key: string, value: string, expectedOldValue: string): Promise<'updated' | 'unchanged' | 'missing' | 'conflict'> {
     validateMemoryKey(key);

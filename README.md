@@ -119,6 +119,10 @@ sesiones exportadas/guardadas.
 Una solicitud natural explícita para corregir una memoria existente muestra la
 clave y los valores actual/nuevo y requiere un “sí” claro antes de escribir;
 sin confirmación, ante conflicto o para una clave nueva no modifica la memoria.
+Una solicitud explícita como `Recuerda que mi ciudad es Guayaquil` puede proponer
+una sola memoria nueva; Yuki muestra únicamente la clave y el valor y espera un
+“sí” claro. Las frases casuales no se guardan, los datos sensibles se rechazan y
+una clave existente sigue el flujo de confirmación de actualización.
 
 `/session-search <id> <texto>` busca texto literal, sin distinguir mayúsculas,
 en los mensajes visibles de una sola conversación guardada. Muestra como máximo
