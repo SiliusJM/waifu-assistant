@@ -13,6 +13,7 @@ import type { ProviderMessage, ProviderToolDefinition, ToolCallRequest } from '.
 import type { ToolManager } from '../tools/tool-manager.js';
 import { LLM_TOOL_CALL_AUTHORIZATION_SOURCE } from '../tools/tool-types.js';
 import type { ToolResult } from '../tools/tool-types.js';
+import type { ToolErrorCode } from '../tools/errors.js';
 import type { MemorySnapshot } from '../memory/memory-types.js';
 import { CURRENT_DATA_HONESTY_POLICY } from './current-data-policy.js';
 
@@ -23,6 +24,8 @@ export interface AssistantCoreOptions {
   readonly logger?: Logger;
   readonly toolManager?: ToolManager;
   readonly toolAllowlist?: readonly string[];
+  /** Controlled local clock supplied to reminder-capable tool prompts. */
+  readonly localActionNow?: () => Date;
 }
 
 export interface RespondOptions {
@@ -45,12 +48,14 @@ export class AssistantCore {
   private readonly logger: Logger;
   private readonly toolManager?: ToolManager;
   private readonly toolAllowlist: readonly string[];
+  private readonly localActionNow: () => Date;
 
   constructor(options: AssistantCoreOptions) {
     this.provider = options.provider;
     this.logger = options.logger ?? createLogger();
     this.toolManager = options.toolManager;
     this.toolAllowlist = options.toolAllowlist ?? [];
+    this.localActionNow = options.localActionNow ?? (() => new Date());
   }
 
   createSession(): Session {
@@ -231,13 +236,24 @@ export class AssistantCore {
     const tools = this.getToolDefinitions();
     return {
       sessionId: context.sessionId,
-      messages: [...personalityMessages, ...memoryMessages, ...currentDataPolicyMessage, ...context.messages.map(({ role, content: messageContent }) => ({
+      messages: [...personalityMessages, ...memoryMessages, ...currentDataPolicyMessage, ...this.localActionContextMessage(), ...context.messages.map(({ role, content: messageContent }) => ({
         role,
         content: messageContent,
       }))],
       model: options.model,
       ...(tools.length > 0 ? { tools } : {}),
     };
+  }
+
+  private localActionContextMessage(): readonly ProviderMessage[] {
+    if (!this.toolAllowlist.includes('local.reminder_create')) return [];
+    const now = this.localActionNow();
+    if (Number.isNaN(now.getTime())) return [];
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return [{
+      role: 'system',
+      content: `Controlled host local time for explicit local reminder requests: ${now.toISOString()} (${timeZone}). Use local.reminder_create only for a clear imperative and provide a concrete future ISO-8601 dueAt with a timezone offset. Ask a clarification question instead when date or time is ambiguous.`,
+    }];
   }
 
   private getToolDefinitions(): readonly ProviderToolDefinition[] {
@@ -352,6 +368,7 @@ export class AssistantCore {
       });
     }
     const toolMessages: ProviderMessage[] = [];
+    let mutatingToolAttempted = false;
     for (const toolCall of toolCalls) {
       if (signal?.aborted) {
         throw new AssistantError('The tool call was cancelled.', { code: 'CANCELLATION_ERROR', retryable: false });
@@ -359,6 +376,15 @@ export class AssistantCore {
       const toolId = this.toolAllowlist.find((id) => this.providerToolName(id) === toolCall.name);
       if (!toolId || !this.toolManager) {
         toolMessages.push(this.toolFailureMessage(toolCall, 'TOOL_NOT_FOUND_ERROR', 'The requested tool is not allowed.'));
+        continue;
+      }
+      const tool = this.toolManager.getTool(toolId);
+      if (!tool) {
+        toolMessages.push(this.toolFailureMessage(toolCall, 'TOOL_NOT_FOUND_ERROR', 'The requested tool is not available.'));
+        continue;
+      }
+      if (tool.risk !== 'safe' && mutatingToolAttempted) {
+        toolMessages.push(this.toolFailureMessage(toolCall, 'TOOL_ARGUMENTS_ERROR', 'Only one state-changing local action is allowed per response.'));
         continue;
       }
       let argumentsValue: unknown;
@@ -372,10 +398,16 @@ export class AssistantCore {
         toolMessages.push(this.toolFailureMessage(toolCall, 'TOOL_ARGUMENTS_ERROR', 'The tool arguments are invalid JSON.'));
         continue;
       }
+      if (tool.risk !== 'safe') mutatingToolAttempted = true;
       const result = await this.toolManager.execute(toolId, argumentsValue, {
         signal,
         sessionId: request.sessionId,
-        metadata: { source: LLM_TOOL_CALL_AUTHORIZATION_SOURCE, toolId, toolCallId: toolCall.id },
+        metadata: {
+          source: LLM_TOOL_CALL_AUTHORIZATION_SOURCE,
+          toolId,
+          toolCallId: toolCall.id,
+          userInput: request.messages.filter(({ role }) => role === 'user').at(-1)?.content ?? '',
+        },
         authorization: { source: LLM_TOOL_CALL_AUTHORIZATION_SOURCE },
       });
       if (signal?.aborted) {
@@ -399,7 +431,7 @@ export class AssistantCore {
 
   private toolFailureMessage(
     toolCall: ToolCallRequest,
-    code: 'TOOL_NOT_FOUND_ERROR' | 'TOOL_ARGUMENTS_ERROR',
+    code: ToolErrorCode,
     message: string,
   ): ProviderMessage {
     return {

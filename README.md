@@ -138,6 +138,16 @@ adaptador HDMI`, `/notes`, `/note-show n-a1b2c3d4` y `/note-delete n-a1b2c3d4`. 
 no se agregan automáticamente a Persistent Memory ni a la conversación, y no
 se sincronizan con la nube.
 
+Yuki también puede crear una nota o un recordatorio mediante una instrucción
+natural explícita, por ejemplo: `Recuérdame mañana a las 7 pagar la luz` o
+`Guarda una nota: comprar adaptador HDMI`. Estas acciones pasan por las herramientas
+locales permitidas; requieren una fecha y hora concretas para recordatorios y
+pedirán aclaración cuando falten. No sustituyen los comandos `/remind` y
+`/note-add`, no ejecutan acciones de borrar/editar/listar automáticamente y no
+se guardan como mensajes de la Session. Las instrucciones naturales requieren
+un proveedor/modelo compatible con tool calling; los comandos explícitos siguen
+siendo el fallback local cuando esa capacidad no esté disponible.
+
 ### Exportar conversaciones
 
 En el modo interactivo, `/export` guarda la conversación actual como Markdown;

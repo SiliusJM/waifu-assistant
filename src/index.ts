@@ -36,7 +36,13 @@ export {
   type ConversationRunResult,
   type ConversationRunStatus,
 } from './core/conversation-runner.js';
-export { LOCAL_TOOL_ALLOWLIST } from './tools/local-tool-manager.js';
+export {
+  LOCAL_TOOL_ALLOWLIST,
+  LOCAL_NATURAL_ACTION_TOOL_ALLOWLIST,
+  getLocalToolAllowlist,
+} from './tools/local-tool-manager.js';
+export { LOCAL_REMINDER_CREATE_TOOL_ID, createLocalReminderCreateTool } from './tools/local-reminder-create-tool.js';
+export { LOCAL_NOTE_CREATE_TOOL_ID, createLocalNoteCreateTool } from './tools/local-note-create-tool.js';
 export {
   REMINDER_SCHEMA_VERSION,
   REMINDER_MAX_ENTRIES,

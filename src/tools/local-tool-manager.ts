@@ -4,19 +4,51 @@ import type { ToolResult } from './tool-types.js';
 import { LLM_TOOL_CALL_AUTHORIZATION_SOURCE } from './tool-types.js';
 import { createCalculatorTool, LOCAL_CALCULATOR_TOOL_ID, type CalculatorValue } from './calculator-tool.js';
 import { LOCAL_TIME_TOOL_ID, createLocalTimeTool, type LocalTimeValue, type TimeSource } from './time-tool.js';
+import { createLocalReminderCreateTool, LOCAL_REMINDER_CREATE_TOOL_ID } from './local-reminder-create-tool.js';
+import { createLocalNoteCreateTool, LOCAL_NOTE_CREATE_TOOL_ID } from './local-note-create-tool.js';
+import type { ReminderStore } from '../reminders/reminder-store.js';
+import type { NoteStore } from '../notes/note-store.js';
 
 export const LOCAL_TIME_COMMAND = '/time';
 export const LOCAL_TOOL_ALLOWLIST = [LOCAL_TIME_TOOL_ID, LOCAL_CALCULATOR_TOOL_ID] as const;
+export const LOCAL_NATURAL_ACTION_TOOL_ALLOWLIST = [LOCAL_REMINDER_CREATE_TOOL_ID, LOCAL_NOTE_CREATE_TOOL_ID] as const;
+
+export interface LocalToolManagerOptions {
+  readonly now?: TimeSource;
+  readonly reminderStore?: ReminderStore;
+  readonly noteStore?: NoteStore;
+}
 
 export interface LocalCommandOptions {
   readonly signal?: AbortSignal;
   readonly sessionId?: string;
 }
 
-export function createLocalToolManager(now?: TimeSource): ToolManager {
+function isExplicitNaturalAction(input: unknown, toolId: string): boolean {
+  if (typeof input !== 'string') return false;
+  const normalized = input.trim().toLocaleLowerCase();
+  if (!normalized || normalized.includes('?') || /^si\b/u.test(normalized)
+    || /^(podr[ií]as|puedes|c[oó]mo|qu[eé])\b/u.test(normalized)) return false;
+  return toolId === LOCAL_REMINDER_CREATE_TOOL_ID
+    ? /^(recu[eé]rdame|recordarme)\b/u.test(normalized)
+    : /^(guarda\s+una\s+nota|anota|apunta)\b/u.test(normalized);
+}
+
+export function getLocalToolAllowlist(options: LocalToolManagerOptions = {}): readonly string[] {
+  return [
+    ...LOCAL_TOOL_ALLOWLIST,
+    ...(options.reminderStore ? [LOCAL_REMINDER_CREATE_TOOL_ID] : []),
+    ...(options.noteStore ? [LOCAL_NOTE_CREATE_TOOL_ID] : []),
+  ];
+}
+
+export function createLocalToolManager(nowOrOptions?: TimeSource | LocalToolManagerOptions): ToolManager {
+  const options = typeof nowOrOptions === 'function' ? { now: nowOrOptions } : nowOrOptions ?? {};
   const registry = new ToolRegistry();
-  registry.register(createLocalTimeTool(now));
+  registry.register(createLocalTimeTool(options.now));
   registry.register(createCalculatorTool());
+  if (options.reminderStore) registry.register(createLocalReminderCreateTool(options.reminderStore));
+  if (options.noteStore) registry.register(createLocalNoteCreateTool(options.noteStore));
   return new ToolManager({
     registry,
     authorizer: {
@@ -30,9 +62,12 @@ export function createLocalToolManager(now?: TimeSource): ToolManager {
         const llmCommand = context.authorization?.source === LLM_TOOL_CALL_AUTHORIZATION_SOURCE
           && context.metadata.source === LLM_TOOL_CALL_AUTHORIZATION_SOURCE
           && context.metadata.toolId === tool.id;
+        const naturalAction = tool.id === LOCAL_REMINDER_CREATE_TOOL_ID || tool.id === LOCAL_NOTE_CREATE_TOOL_ID;
         return {
-          allowed: explicitCommand || llmCommand,
-        reason: 'The tool requires an explicit local command.',
+          allowed: explicitCommand || (llmCommand && (!naturalAction || isExplicitNaturalAction(context.metadata.userInput, tool.id))),
+          reason: naturalAction
+            ? 'The tool requires an explicit natural-language action request.'
+            : 'The tool requires an explicit local command.',
         authorization: context.authorization,
         };
       },
