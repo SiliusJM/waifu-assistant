@@ -1,11 +1,26 @@
 import { randomUUID } from 'node:crypto';
 import { createMessage, type Message, type MessageRole } from './message.js';
 import { AssistantError } from '../shared/errors.js';
+import { normalizeConversationTitle } from './conversation-title.js';
 
 export class Session {
   private readonly messages: Message[] = [];
+  private currentTitle: string | undefined;
+  private currentSavedName: string | undefined;
 
   constructor(public readonly id: string = randomUUID()) {}
+
+  get title(): string | undefined { return this.currentTitle; }
+
+  get savedName(): string | undefined { return this.currentSavedName; }
+
+  setTitle(title: string | undefined): void {
+    this.currentTitle = title === undefined ? undefined : normalizeConversationTitle(title);
+  }
+
+  markSaved(name: string | undefined): void {
+    this.currentSavedName = name;
+  }
 
   addMessage(role: MessageRole, content: string): Message {
     const message = createMessage(role, content);

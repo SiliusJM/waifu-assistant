@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { AssistantError } from '../shared/errors.js';
+import { DEFAULT_CONVERSATION_TITLE, normalizeConversationTitle } from './conversation-title.js';
 
 export const SAVED_SESSION_SCHEMA_VERSION = 1 as const;
 export const SAVED_SESSION_MAX_ENTRIES = 50 as const;
@@ -19,7 +20,15 @@ export interface SavedSessionMessage {
 
 export interface SavedSessionSnapshot {
   readonly savedAt: string;
+  readonly title?: string;
   readonly messages: readonly SavedSessionMessage[];
+}
+
+export interface SavedSessionSummary {
+  readonly name: string;
+  readonly title: string;
+  readonly messageCount: number;
+  readonly savedAt: string;
 }
 
 export interface SavedSessionFileSystem {
@@ -40,6 +49,7 @@ const defaultFileSystem: SavedSessionFileSystem = {
 
 interface PersistedSavedSession {
   readonly savedAt: unknown;
+  readonly title?: unknown;
   readonly messages: unknown;
 }
 
@@ -97,11 +107,16 @@ function validateSnapshot(value: unknown): SavedSessionSnapshot {
   if (!isRecord(value)
     || typeof value.savedAt !== 'string'
     || Number.isNaN(Date.parse(value.savedAt))
-    || Object.keys(value).some((key) => key !== 'savedAt' && key !== 'messages')) {
+    || Object.keys(value).some((key) => key !== 'savedAt' && key !== 'messages' && key !== 'title')) {
     throw sessionError('The saved session metadata is invalid.', 'SESSION_CORRUPT_ERROR');
+  }
+  let title: string | undefined;
+  if (typeof value.title === 'string') {
+    try { title = normalizeConversationTitle(value.title); } catch { title = undefined; }
   }
   return {
     savedAt: value.savedAt,
+    ...(title === undefined ? {} : { title }),
     messages: Object.freeze(validateMessages(value.messages)),
   };
 }
@@ -172,6 +187,19 @@ export class SavedSessionStore {
     return Object.freeze([...this.sessions.keys()].sort((left, right) => left.localeCompare(right)));
   }
 
+  async listSummaries(): Promise<readonly SavedSessionSummary[]> {
+    await this.ensureLoaded();
+    return Object.freeze([...this.sessions.entries()]
+      .map(([name, snapshot]) => Object.freeze({
+        name,
+        title: snapshot.title ?? DEFAULT_CONVERSATION_TITLE,
+        messageCount: snapshot.messages.length,
+        savedAt: snapshot.savedAt,
+      }))
+      .sort((left, right) => Date.parse(right.savedAt) - Date.parse(left.savedAt)
+        || (left.name < right.name ? -1 : left.name > right.name ? 1 : 0)));
+  }
+
   async count(): Promise<number> {
     await this.ensureLoaded();
     return this.sessions.size;
@@ -181,23 +209,51 @@ export class SavedSessionStore {
     validateSavedSessionName(name);
     await this.ensureLoaded();
     const snapshot = this.sessions.get(name);
-    return snapshot ? Object.freeze({ savedAt: snapshot.savedAt, messages: Object.freeze([...snapshot.messages]) }) : undefined;
+    return snapshot ? Object.freeze({
+      savedAt: snapshot.savedAt,
+      ...(snapshot.title === undefined ? {} : { title: snapshot.title }),
+      messages: Object.freeze([...snapshot.messages]),
+    }) : undefined;
   }
 
-  async save(name: string, messages: readonly Readonly<{ readonly role: string; readonly content: string }>[]): Promise<void> {
+  async save(
+    name: string,
+    messages: readonly Readonly<{ readonly role: string; readonly content: string }>[],
+    title?: string,
+  ): Promise<void> {
     validateSavedSessionName(name);
+    const normalizedTitle = title === undefined ? undefined : normalizeConversationTitle(title);
     await this.ensureLoaded();
     const normalized = this.normalizeMessages(messages);
     if (!this.sessions.has(name) && this.sessions.size >= SAVED_SESSION_MAX_ENTRIES) {
       throw sessionError('The saved session limit has been reached.', 'SESSION_LIMIT_ERROR');
     }
     const previous = new Map(this.sessions);
+    const titleToPersist = normalizedTitle ?? this.sessions.get(name)?.title;
     this.sessions.set(name, {
       savedAt: new Date().toISOString(),
+      ...(titleToPersist === undefined ? {} : { title: titleToPersist }),
       messages: Object.freeze(normalized),
     });
     try {
       await this.persist();
+    } catch (error) {
+      this.sessions = previous;
+      throw error;
+    }
+  }
+
+  async renameTitle(name: string, title: string): Promise<boolean> {
+    validateSavedSessionName(name);
+    const normalizedTitle = normalizeConversationTitle(title);
+    await this.ensureLoaded();
+    const existing = this.sessions.get(name);
+    if (!existing) return false;
+    const previous = new Map(this.sessions);
+    this.sessions.set(name, { ...existing, title: normalizedTitle, savedAt: new Date().toISOString() });
+    try {
+      await this.persist();
+      return true;
     } catch (error) {
       this.sessions = previous;
       throw error;

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, readdir, rm, mkdir, writeFile, rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { AssistantError } from '../../src/shared/errors.js';
 import {
@@ -13,6 +13,8 @@ import {
   resolveSavedSessionPath,
   type SavedSessionFileSystem,
 } from '../../src/core/saved-session-store.js';
+import { DEFAULT_CONVERSATION_TITLE } from '../../src/core/conversation-title.js';
+import { Session } from '../../src/core/session.js';
 
 const conversation = (suffix: string) => [
   { role: 'user' as const, content: `user ${suffix}` },
@@ -50,6 +52,121 @@ test('saved sessions support save, get, alphabetical list, overwrite, reload and
     assert.equal(await reloaded.delete('zeta'), true);
     assert.equal(await reloaded.delete('missing'), false);
     assert.deepEqual(await reloaded.list(), ['alpha']);
+  });
+});
+
+test('titles persist independently from safe IDs and renaming never changes stored messages', async () => {
+  await withStore(async (store, filePath) => {
+    const original = conversation('original');
+    await store.save('project_one', original, '  Proyecto IA 🌸  ');
+    await store.save('project_two', conversation('second'), 'Proyecto IA 🌸');
+    const beforeRename = await store.get('project_one');
+
+    assert.equal(await store.renameTitle('project_one', ' Universidad 2026 '), true);
+    const renamed = await store.get('project_one');
+    assert.equal(renamed?.title, 'Universidad 2026');
+    assert.deepEqual(renamed?.messages, original);
+    assert.ok(renamed?.savedAt);
+    assert.notEqual(renamed?.savedAt, beforeRename?.savedAt);
+
+    const summaries = await store.listSummaries();
+    assert.deepEqual(summaries.map(({ name, title, messageCount }) => ({ name, title, messageCount })), [
+      { name: 'project_one', title: 'Universidad 2026', messageCount: 2 },
+      { name: 'project_two', title: 'Proyecto IA 🌸', messageCount: 2 },
+    ]);
+    assert.equal(Object.hasOwn(summaries[0] ?? {}, 'messages'), false);
+    assert.deepEqual(await store.list(), ['project_one', 'project_two']);
+
+    const reloaded = new SavedSessionStore(filePath);
+    assert.equal((await reloaded.get('project_one'))?.title, 'Universidad 2026');
+    assert.deepEqual((await reloaded.get('project_one'))?.messages, original);
+  });
+});
+
+test('legacy and malformed title metadata load safely with the untitled fallback', async () => {
+  await withStore(async (store, filePath) => {
+    await mkdir(dirname(filePath), { recursive: true });
+    const savedAt = '2026-09-20T10:00:00.000Z';
+    const document = {
+      version: 1,
+      sessions: {
+        legacy: { savedAt, messages: conversation('legacy') },
+        malformed: { savedAt, title: { path: '../not-a-path' }, messages: conversation('malformed') },
+        emptyTitle: { savedAt, title: '   ', messages: conversation('empty') },
+      },
+    };
+    await writeFile(filePath, JSON.stringify(document), 'utf8');
+    const reloaded = new SavedSessionStore(filePath);
+    const legacy = await reloaded.get('legacy');
+    assert.equal(legacy?.title, undefined);
+    assert.deepEqual(legacy?.messages, conversation('legacy'));
+    const summaries = await reloaded.listSummaries();
+    assert.deepEqual(summaries.map(({ name, title }) => [name, title]), [
+      ['emptyTitle', DEFAULT_CONVERSATION_TITLE],
+      ['legacy', DEFAULT_CONVERSATION_TITLE],
+      ['malformed', DEFAULT_CONVERSATION_TITLE],
+    ]);
+    assert.deepEqual(summaries.map(({ savedAt: timestamp }) => timestamp), [savedAt, savedAt, savedAt]);
+  });
+});
+
+test('session summaries are newest-first, deterministic on timestamp ties, and omit message contents', async () => {
+  await withStore(async (store, filePath) => {
+    await mkdir(dirname(filePath), { recursive: true });
+    await writeFile(filePath, JSON.stringify({
+      version: 1,
+      sessions: {
+        older: { savedAt: '2026-09-19T00:00:00.000Z', title: 'Old', messages: conversation('SECRET-OLDER') },
+        newer_b: { savedAt: '2026-09-21T00:00:00.000Z', title: 'New B', messages: conversation('SECRET-NEW-B') },
+        newer_a: { savedAt: '2026-09-21T00:00:00.000Z', title: 'New A', messages: conversation('SECRET-NEW-A') },
+      },
+    }), 'utf8');
+    const reloaded = new SavedSessionStore(filePath);
+    const summaries = await reloaded.listSummaries();
+    assert.deepEqual(summaries.map(({ name }) => name), ['newer_a', 'newer_b', 'older']);
+    assert.equal(JSON.stringify(summaries).includes('SECRET-'), false);
+    assert.deepEqual(Object.keys(summaries[0] ?? {}).sort(), ['messageCount', 'name', 'savedAt', 'title']);
+  });
+});
+
+test('saved conversation titles enforce Unicode-aware length and non-empty validation', async () => {
+  await withStore(async (store) => {
+    await assertCode(store.save('blank_title', conversation('x'), '  '), 'SESSION_CONFIGURATION_ERROR');
+    await assertCode(store.save('long_title', conversation('x'), '🌸'.repeat(101)), 'SESSION_CONFIGURATION_ERROR');
+    await store.save('unicode_title', conversation('ok'), ` ${'🌸'.repeat(100)} `);
+    assert.equal((await store.get('unicode_title'))?.title, '🌸'.repeat(100));
+  });
+});
+
+test('rename metadata is not saved automatically; explicit save and load preserve the title', async () => {
+  await withStore(async (store) => {
+    const current = new Session('current-session-id');
+    current.addMessage('user', 'Keep this message');
+    current.addMessage('assistant', 'Visible response');
+    current.setTitle('Proyecto Yuki');
+
+    assert.equal(await store.count(), 0);
+    assert.equal(current.savedName, undefined);
+
+    await store.save('project_yuki', current.getMessages(), current.title);
+    current.markSaved('project_yuki');
+    const savedBeforeRename = await store.get('project_yuki');
+    assert.equal(savedBeforeRename?.title, 'Proyecto Yuki');
+    assert.deepEqual(savedBeforeRename?.messages, current.getMessages().map(({ role, content }) => ({ role, content })));
+
+    await store.renameTitle('project_yuki', 'Proyecto Yuki 🌸');
+    current.setTitle('Proyecto Yuki 🌸');
+    const savedAfterRename = await store.get('project_yuki');
+    assert.equal(savedAfterRename?.title, current.title);
+    assert.deepEqual(savedAfterRename?.messages, savedBeforeRename?.messages);
+
+    const restored = new Session('restored-current-session-id');
+    restored.restoreMessages(savedAfterRename?.messages ?? []);
+    restored.setTitle(savedAfterRename?.title);
+    restored.markSaved('project_yuki');
+    assert.equal(restored.title, 'Proyecto Yuki 🌸');
+    assert.equal(restored.savedName, 'project_yuki');
+    assert.deepEqual(restored.getMessages().map(({ role, content }) => ({ role, content })), savedBeforeRename?.messages);
   });
 });
 

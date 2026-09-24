@@ -28,6 +28,8 @@ import {
   CONVERSATION_REMEMBER_COMMAND,
   CONVERSATION_DELETE_SESSION_COMMAND,
   CONVERSATION_EXPORT_COMMAND,
+  CONVERSATION_RENAME_COMMAND,
+  CONVERSATION_SESSION_INFO_COMMAND,
   CONVERSATION_LOAD_SESSION_COMMAND,
   CONVERSATION_SAVE_SESSION_COMMAND,
   CONVERSATION_SESSIONS_COMMAND,
@@ -129,7 +131,9 @@ export async function main(
             ? undefined
             : command.slice(CONVERSATION_EXPORT_COMMAND.length).trim();
           try {
-            const result = await conversationExporter.exportConversation(runner.session.getMessages(), requestedName || undefined);
+            const result = await conversationExporter.exportConversation(
+              runner.session.getMessages(), requestedName || undefined, runner.session.title,
+            );
             process.stdout.write(result.status === 'empty'
               ? 'No hay mensajes para exportar.\n'
               : `Conversación exportada: ${result.filePath}\n`);
@@ -196,10 +200,68 @@ export async function main(
           return;
         }
         if (command === CONVERSATION_SESSIONS_COMMAND) {
-          const names = await savedSessionStore.list();
-          process.stdout.write((names.length === 0
-            ? 'No hay sesiones guardadas.'
-            : ['Sesiones guardadas:', ...names].join('\n')) + '\n');
+          try {
+            const sessions = await savedSessionStore.listSummaries();
+            process.stdout.write((sessions.length === 0
+              ? 'No hay sesiones guardadas.'
+              : [
+                'Sesiones guardadas:',
+                ...sessions.flatMap((saved, index) => [
+                  `${index + 1}. ${saved.title}`,
+                  `   ID: ${saved.name} · ${saved.messageCount} mensajes · actualizado: ${saved.savedAt}`,
+                ]),
+              ].join('\n')) + '\n');
+          } catch (error) {
+            const sessionError = error instanceof AssistantError ? error : new AssistantError(
+              'No se pudieron consultar las sesiones guardadas.',
+              { code: 'SESSION_IO_ERROR', retryable: false, cause: error },
+            );
+            process.stdout.write(`No se pudieron consultar las sesiones guardadas: ${sessionError.message}\n`);
+          }
+          return;
+        }
+        if (command === CONVERSATION_SESSION_INFO_COMMAND) {
+          try {
+            const saved = runner.session.savedName
+              ? await savedSessionStore.get(runner.session.savedName)
+              : undefined;
+            if (runner.session.savedName && !saved) runner.session.markSaved(undefined);
+            process.stdout.write([
+              `Título: ${runner.session.title ?? 'Sin título'}`,
+              `Mensajes: ${runner.session.getMessages().length}`,
+              `Guardada: ${saved ? 'SÍ' : 'NO'}`,
+              `Session ID: ${runner.session.id}`,
+              ...(saved && runner.session.savedName ? [`ID guardado: ${runner.session.savedName}`, `Actualizada: ${saved.savedAt}`] : []),
+            ].join('\n') + '\n');
+          } catch (error) {
+            const sessionError = error instanceof AssistantError ? error : new AssistantError(
+              'No se pudo consultar la conversación actual.',
+              { code: 'SESSION_IO_ERROR', retryable: false, cause: error },
+            );
+            process.stdout.write(`No se pudo consultar la conversación actual: ${sessionError.message}\n`);
+          }
+          return;
+        }
+        if (command === CONVERSATION_RENAME_COMMAND || command.startsWith(`${CONVERSATION_RENAME_COMMAND} `)) {
+          const title = command.slice(CONVERSATION_RENAME_COMMAND.length).trim();
+          if (!title) {
+            process.stdout.write('Uso: /rename <nombre>\n');
+            return;
+          }
+          try {
+            if (runner.session.savedName) {
+              const renamedSaved = await savedSessionStore.renameTitle(runner.session.savedName, title);
+              if (!renamedSaved) runner.session.markSaved(undefined);
+            }
+            runner.session.setTitle(title);
+            process.stdout.write(`Conversación renombrada: ${runner.session.title}\n`);
+          } catch (error) {
+            const titleError = error instanceof AssistantError ? error : new AssistantError(
+              'No se pudo renombrar la conversación.',
+              { code: 'SESSION_CONFIGURATION_ERROR', retryable: false, cause: error },
+            );
+            process.stdout.write(`No se pudo renombrar la conversación: ${titleError.message}\n`);
+          }
           return;
         }
         if (command === CONVERSATION_SAVE_SESSION_COMMAND || command.startsWith(`${CONVERSATION_SAVE_SESSION_COMMAND} `)) {
@@ -209,7 +271,10 @@ export async function main(
             return;
           }
           try {
-            await savedSessionStore.save(name, runner.session.getMessages());
+            await savedSessionStore.save(name, runner.session.getMessages(), runner.session.title);
+            runner.session.markSaved(name);
+            const saved = await savedSessionStore.get(name);
+            runner.session.setTitle(saved?.title);
             process.stdout.write(`Sesión guardada: ${name}\n`);
           } catch (error) {
             const sessionError = error instanceof AssistantError ? error : new AssistantError(
@@ -233,6 +298,8 @@ export async function main(
               return;
             }
             runner.session.restoreMessages(snapshot.messages);
+            runner.session.setTitle(snapshot.title);
+            runner.session.markSaved(name);
             process.stdout.write(`Sesión cargada: ${name}\n`);
           } catch (error) {
             const sessionError = error instanceof AssistantError ? error : new AssistantError(
@@ -251,6 +318,7 @@ export async function main(
           }
           try {
             const removed = await savedSessionStore.delete(name);
+            if (removed && runner.session.savedName === name) runner.session.markSaved(undefined);
             process.stdout.write((removed ? `Sesión eliminada: ${name}` : `No existe la sesión: ${name}`) + '\n');
           } catch (error) {
             const sessionError = error instanceof AssistantError ? error : new AssistantError(
