@@ -12,8 +12,11 @@ import { createLocalNotesListTool, LOCAL_NOTES_LIST_TOOL_ID } from './local-note
 import { createLocalNoteShowTool, LOCAL_NOTE_SHOW_TOOL_ID } from './local-note-show-tool.js';
 import { createLocalStatusSummaryTool, LOCAL_STATUS_SUMMARY_TOOL_ID, type LocalStatusProviderSummary } from './local-status-summary-tool.js';
 import { isExplicitLocalStatusQuery } from './local-status-query-intent.js';
+import { createLocalSavedSessionsQueryTool, LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID } from './local-saved-session-query-tool.js';
+import { parseSavedSessionQueryIntent } from './saved-session-query-intent.js';
 import type { ReminderStore } from '../reminders/reminder-store.js';
 import type { NoteStore } from '../notes/note-store.js';
+import type { SavedSessionStore } from '../core/saved-session-store.js';
 
 export const LOCAL_TIME_COMMAND = '/time';
 export const LOCAL_TOOL_ALLOWLIST = [LOCAL_TIME_TOOL_ID, LOCAL_CALCULATOR_TOOL_ID] as const;
@@ -23,6 +26,7 @@ export const LOCAL_NATURAL_QUERY_TOOL_ALLOWLIST = [
   LOCAL_REMINDER_NEXT_TOOL_ID,
   LOCAL_NOTES_LIST_TOOL_ID,
   LOCAL_NOTE_SHOW_TOOL_ID,
+  LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID,
 ] as const;
 
 export interface LocalToolManagerOptions {
@@ -34,6 +38,7 @@ export interface LocalToolManagerOptions {
     readonly noteStore: NoteStore;
     readonly reminderStore: ReminderStore;
   };
+  readonly savedSessionStore?: SavedSessionStore;
 }
 
 export interface LocalCommandOptions {
@@ -59,6 +64,7 @@ export function getLocalToolAllowlist(options: LocalToolManagerOptions = {}): re
     ...(options.reminderStore ? [LOCAL_REMINDERS_LIST_TOOL_ID, LOCAL_REMINDER_NEXT_TOOL_ID] : []),
     ...(options.noteStore ? [LOCAL_NOTES_LIST_TOOL_ID, LOCAL_NOTE_SHOW_TOOL_ID] : []),
     ...(options.statusSummary ? [LOCAL_STATUS_SUMMARY_TOOL_ID] : []),
+    ...(options.savedSessionStore ? [LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID] : []),
   ];
 }
 
@@ -78,6 +84,7 @@ export function createLocalToolManager(nowOrOptions?: TimeSource | LocalToolMana
     registry.register(createLocalNoteShowTool(options.noteStore));
   }
   if (options.statusSummary) registry.register(createLocalStatusSummaryTool(options.statusSummary));
+  if (options.savedSessionStore) registry.register(createLocalSavedSessionsQueryTool({ store: options.savedSessionStore }));
   return new ToolManager({
     registry,
     authorizer: {
@@ -98,14 +105,24 @@ export function createLocalToolManager(nowOrOptions?: TimeSource | LocalToolMana
           && context.metadata.toolId === tool.id
           && isExplicitLocalStatusQuery(context.metadata.userInput);
         const isStatusSummary = tool.id === LOCAL_STATUS_SUMMARY_TOOL_ID;
+        const naturalSavedSessionQuery = tool.id === LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID
+          && context.authorization?.source === LLM_TOOL_CALL_AUTHORIZATION_SOURCE
+          && context.metadata.source === LLM_TOOL_CALL_AUTHORIZATION_SOURCE
+          && context.metadata.toolId === tool.id
+          && parseSavedSessionQueryIntent(context.metadata.userInput) !== undefined;
+        const isSavedSessionQuery = tool.id === LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID;
         return {
           allowed: explicitCommand || naturalStatusQuery
+            || naturalSavedSessionQuery
             || (llmCommand && !isStatusSummary
+              && !isSavedSessionQuery
               && (!naturalAction || isExplicitNaturalAction(context.metadata.userInput, tool.id))),
           reason: naturalAction
             ? 'The tool requires an explicit natural-language action request.'
             : tool.id === LOCAL_STATUS_SUMMARY_TOOL_ID
               ? 'This read-only status tool cannot change provider settings and is available only for status questions.'
+              : isSavedSessionQuery
+                ? 'Saved-session queries are read-only and available only for explicit metadata questions.'
               : 'The tool requires an explicit local command.',
         authorization: context.authorization,
         };
