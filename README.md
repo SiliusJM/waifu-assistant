@@ -108,15 +108,11 @@ Las respuestas interactivas pueden mostrarse progresivamente mediante streaming;
 
 ## Comandos locales
 
-La CLI reconoce `/help`, `/time`, `/calc <expression>`, `/remind <YYYY-MM-DD HH:mm> <texto>`,
-`/reminders`, `/reminders --all`, `/reminder-complete <id>`, `/reminder-delete <id>`, `/status`, `/history`, `/clear`,
-`/note-add <texto>`, `/notes`, `/note-show <id>`, `/note-delete <id>`,
-`/remember <key> <value>`, `/memory`, `/forget <key>`,
-`/save-session <name>`, `/sessions`, `/load-session <name>`,
-`/delete-session <name>`, `/rename <nombre>`, `/session-info`, `/export [nombre]`
-y `/exit`. Estos comandos no requieren una llamada al
-LLM. La memoria explícita se guarda localmente y puede redirigirse mediante
-`YUKI_MEMORY_PATH`; no se mezcla con las sesiones guardadas.
+`/help` es la fuente actualizada de comandos y capacidades locales; las preguntas
+naturales claras sobre cómo usarlas consultan el mismo catálogo. Las acciones
+explícitas locales no requieren una llamada al LLM. La memoria explícita se guarda
+localmente y puede redirigirse mediante `YUKI_MEMORY_PATH`; no se mezcla con las
+sesiones guardadas.
 
 `/session-search <id> <texto>` busca texto literal, sin distinguir mayúsculas,
 en los mensajes visibles de una sola conversación guardada. Muestra como máximo
