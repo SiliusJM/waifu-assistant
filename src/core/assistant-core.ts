@@ -369,6 +369,7 @@ export class AssistantCore {
     }
     const toolMessages: ProviderMessage[] = [];
     let mutatingToolAttempted = false;
+    const executedToolCalls = new Set<string>();
     for (const toolCall of toolCalls) {
       if (signal?.aborted) {
         throw new AssistantError('The tool call was cancelled.', { code: 'CANCELLATION_ERROR', retryable: false });
@@ -381,6 +382,11 @@ export class AssistantCore {
       const tool = this.toolManager.getTool(toolId);
       if (!tool) {
         toolMessages.push(this.toolFailureMessage(toolCall, 'TOOL_NOT_FOUND_ERROR', 'The requested tool is not available.'));
+        continue;
+      }
+      const duplicateKey = `${toolId}:${toolCall.argumentsJson}`;
+      if (executedToolCalls.has(duplicateKey)) {
+        toolMessages.push(this.toolFailureMessage(toolCall, 'TOOL_ARGUMENTS_ERROR', 'The same local tool request was already handled in this response.'));
         continue;
       }
       if (tool.risk !== 'safe' && mutatingToolAttempted) {
@@ -399,6 +405,7 @@ export class AssistantCore {
         continue;
       }
       if (tool.risk !== 'safe') mutatingToolAttempted = true;
+      executedToolCalls.add(duplicateKey);
       const result = await this.toolManager.execute(toolId, argumentsValue, {
         signal,
         sessionId: request.sessionId,

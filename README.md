@@ -148,6 +148,13 @@ se guardan como mensajes de la Session. Las instrucciones naturales requieren
 un proveedor/modelo compatible con tool calling; los comandos explícitos siguen
 siendo el fallback local cuando esa capacidad no esté disponible.
 
+También puede consultar datos locales con lenguaje natural: `¿Qué recordatorios tengo?`,
+`¿Cuál es mi próximo recordatorio?`, `¿Qué notas tengo guardadas?` o `Muéstrame la nota n-a1b2c3d4`.
+Estas consultas son de solo lectura: los recordatorios devuelven únicamente metadata,
+el listado de notas usa previews acotadas y `note_show` muestra solo la nota solicitada.
+Pedir explícitamente todos los recordatorios permite incluir los completados; una consulta
+normal muestra solo los pendientes. Las consultas no modifican stores ni contaminan la Session.
+
 ### Exportar conversaciones
 
 En el modo interactivo, `/export` guarda la conversación actual como Markdown;
