@@ -27,6 +27,10 @@ export {
   CONVERSATION_REMINDERS_COMMAND,
   CONVERSATION_REMINDER_DELETE_COMMAND,
   CONVERSATION_REMINDER_COMPLETE_COMMAND,
+  CONVERSATION_NOTE_ADD_COMMAND,
+  CONVERSATION_NOTES_COMMAND,
+  CONVERSATION_NOTE_SHOW_COMMAND,
+  CONVERSATION_NOTE_DELETE_COMMAND,
   ConversationRunner,
   type ConversationRunOptions,
   type ConversationRunResult,
@@ -51,6 +55,20 @@ export {
 } from './reminders/reminder-store.js';
 export { ConsoleReminderNotifier, type ReminderNotifier, type ReminderConsoleWriter } from './reminders/reminder-notifier.js';
 export { ReminderScheduler, type ReminderSchedulerOptions, type ReminderTimerScheduler } from './reminders/reminder-scheduler.js';
+export {
+  NOTE_SCHEMA_VERSION,
+  NOTE_MAX_ENTRIES,
+  NOTE_MAX_TEXT_LENGTH,
+  NOTE_PREVIEW_LENGTH,
+  NoteStore,
+  resolveNotesPath,
+  formatNoteDate,
+  formatNoteList,
+  formatNotePreview,
+  type Note,
+  type NoteFileSystem,
+  type NoteStoreOptions,
+} from './notes/note-store.js';
 export * from './memory/index.js';
 export {
   SAVED_SESSION_MAX_CONTENT_LENGTH,

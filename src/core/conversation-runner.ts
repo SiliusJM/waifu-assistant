@@ -27,6 +27,10 @@ export const CONVERSATION_REMIND_COMMAND = '/remind';
 export const CONVERSATION_REMINDERS_COMMAND = '/reminders';
 export const CONVERSATION_REMINDER_DELETE_COMMAND = '/reminder-delete';
 export const CONVERSATION_REMINDER_COMPLETE_COMMAND = '/reminder-complete';
+export const CONVERSATION_NOTE_ADD_COMMAND = '/note-add';
+export const CONVERSATION_NOTES_COMMAND = '/notes';
+export const CONVERSATION_NOTE_SHOW_COMMAND = '/note-show';
+export const CONVERSATION_NOTE_DELETE_COMMAND = '/note-delete';
 export const LOCAL_COMMAND_HELP = [
   'Comandos disponibles:',
   '  /help              Muestra esta ayuda',
@@ -38,6 +42,10 @@ export const LOCAL_COMMAND_HELP = [
   '  /reminders --all  Incluye recordatorios completados',
   '  /reminder-complete <id>  Marca un recordatorio como completado',
   '  /reminder-delete <id>  Elimina un recordatorio',
+  '  /note-add <texto>   Guarda una nota local explícita',
+  '  /notes             Lista notas guardadas',
+  '  /note-show <id>    Muestra una nota completa',
+  '  /note-delete <id>  Elimina una nota',
   '  /calc <expresion>  Calcula una expresion aritmetica',
   '  /exit              Cierra la conversacion',
   '  /status            Muestra el estado de la sesion',
@@ -238,7 +246,15 @@ export class ConversationRunner {
       || input === CONVERSATION_REMINDER_DELETE_COMMAND
       || input.startsWith(`${CONVERSATION_REMINDER_DELETE_COMMAND} `)
       || input === CONVERSATION_REMINDER_COMPLETE_COMMAND
-      || input.startsWith(`${CONVERSATION_REMINDER_COMPLETE_COMMAND} `);
+      || input.startsWith(`${CONVERSATION_REMINDER_COMPLETE_COMMAND} `)
+      || input === CONVERSATION_NOTE_ADD_COMMAND
+      || input.startsWith(`${CONVERSATION_NOTE_ADD_COMMAND} `)
+      || input === CONVERSATION_NOTES_COMMAND
+      || input.startsWith(`${CONVERSATION_NOTES_COMMAND} `)
+      || input === CONVERSATION_NOTE_SHOW_COMMAND
+      || input.startsWith(`${CONVERSATION_NOTE_SHOW_COMMAND} `)
+      || input === CONVERSATION_NOTE_DELETE_COMMAND
+      || input.startsWith(`${CONVERSATION_NOTE_DELETE_COMMAND} `);
 
     const executeLocalCommand = async (input: string, activeAtArrival: boolean): Promise<void> => {
       if (!options.onCommand) {

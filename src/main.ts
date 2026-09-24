@@ -38,6 +38,10 @@ import {
   CONVERSATION_REMINDERS_COMMAND,
   CONVERSATION_REMINDER_DELETE_COMMAND,
   CONVERSATION_REMINDER_COMPLETE_COMMAND,
+  CONVERSATION_NOTE_ADD_COMMAND,
+  CONVERSATION_NOTES_COMMAND,
+  CONVERSATION_NOTE_SHOW_COMMAND,
+  CONVERSATION_NOTE_DELETE_COMMAND,
   LOCAL_COMMAND_HELP,
 } from './core/conversation-runner.js';
 import { PersistentMemoryStore, resolveMemoryPath } from './memory/memory-store.js';
@@ -52,6 +56,7 @@ import {
 } from './reminders/reminder-store.js';
 import { ConsoleReminderNotifier } from './reminders/reminder-notifier.js';
 import { ReminderScheduler } from './reminders/reminder-scheduler.js';
+import { formatNoteDate, formatNoteList, NoteStore, resolveNotesPath } from './notes/note-store.js';
 
 export async function main(
   argv: readonly string[] = process.argv.slice(2),
@@ -93,6 +98,8 @@ export async function main(
     return;
   }
 
+  const noteStore = new NoteStore(resolveNotesPath(env));
+  await noteStore.load();
   const controller = new AbortController();
   const onInterrupt = (): void => controller.abort();
   process.once('SIGINT', onInterrupt);
@@ -204,6 +211,82 @@ export async function main(
               { code: 'REMINDER_IO_ERROR', retryable: false, cause: error },
             );
             process.stdout.write(`No se pudo eliminar el recordatorio: ${reminderError.message}\n`);
+          }
+          return;
+        }
+        if (command === CONVERSATION_NOTE_ADD_COMMAND || command.startsWith(`${CONVERSATION_NOTE_ADD_COMMAND} `)) {
+          const text = command.slice(CONVERSATION_NOTE_ADD_COMMAND.length).trim();
+          try {
+            if (!text) {
+              process.stdout.write('Uso: /note-add <texto>\n');
+              return;
+            }
+            const note = await noteStore.add(text);
+            process.stdout.write(`Nota creada: ${note.id}\n`);
+          } catch (error) {
+            const noteError = error instanceof AssistantError ? error : new AssistantError(
+              'No se pudo guardar la nota.',
+              { code: 'NOTE_IO_ERROR', retryable: false, cause: error },
+            );
+            process.stdout.write(`No se pudo guardar la nota: ${noteError.message}\n`);
+          }
+          return;
+        }
+        if (command === CONVERSATION_NOTES_COMMAND || command.startsWith(`${CONVERSATION_NOTES_COMMAND} `)) {
+          try {
+            if (command !== CONVERSATION_NOTES_COMMAND) {
+              process.stdout.write('Uso: /notes\n');
+              return;
+            }
+            process.stdout.write(formatNoteList(await noteStore.list()) + '\n');
+          } catch (error) {
+            const noteError = error instanceof AssistantError ? error : new AssistantError(
+              'No se pudieron consultar las notas.',
+              { code: 'NOTE_IO_ERROR', retryable: false, cause: error },
+            );
+            process.stdout.write(`No se pudieron consultar las notas: ${noteError.message}\n`);
+          }
+          return;
+        }
+        if (command === CONVERSATION_NOTE_SHOW_COMMAND || command.startsWith(`${CONVERSATION_NOTE_SHOW_COMMAND} `)) {
+          const id = command.slice(CONVERSATION_NOTE_SHOW_COMMAND.length).trim();
+          try {
+            if (!id || /\s/u.test(id)) {
+              process.stdout.write('Uso: /note-show <id>\n');
+              return;
+            }
+            const note = await noteStore.show(id);
+            process.stdout.write([
+              `Nota: ${note.id}`,
+              `Creada: ${formatNoteDate(note.createdAt)}`,
+              `Actualizada: ${formatNoteDate(note.updatedAt)}`,
+              note.text,
+            ].join('\n') + '\n');
+          } catch (error) {
+            const noteError = error instanceof AssistantError ? error : new AssistantError(
+              'No se pudo mostrar la nota.',
+              { code: 'NOTE_IO_ERROR', retryable: false, cause: error },
+            );
+            process.stdout.write(`No se pudo mostrar la nota: ${noteError.message}\n`);
+          }
+          return;
+        }
+        if (command === CONVERSATION_NOTE_DELETE_COMMAND || command.startsWith(`${CONVERSATION_NOTE_DELETE_COMMAND} `)) {
+          const id = command.slice(CONVERSATION_NOTE_DELETE_COMMAND.length).trim();
+          try {
+            if (!id || /\s/u.test(id)) {
+              process.stdout.write('Uso: /note-delete <id>\n');
+              return;
+            }
+            process.stdout.write((await noteStore.delete(id)
+              ? `Nota eliminada: ${id}`
+              : `No existe la nota: ${id}`) + '\n');
+          } catch (error) {
+            const noteError = error instanceof AssistantError ? error : new AssistantError(
+              'No se pudo eliminar la nota.',
+              { code: 'NOTE_IO_ERROR', retryable: false, cause: error },
+            );
+            process.stdout.write(`No se pudo eliminar la nota: ${noteError.message}\n`);
           }
           return;
         }
