@@ -51,6 +51,18 @@ export {
   type LocalStatusSummaryOptions,
   type LocalStatusSummaryValue,
 } from './tools/local-status-summary-tool.js';
+export {
+  LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID,
+  createLocalSavedSessionsQueryTool,
+  type LocalSavedSessionsQueryOptions,
+  type SavedSessionQueryArguments,
+  type SavedSessionQueryValue,
+} from './tools/local-saved-session-query-tool.js';
+export {
+  isSavedSessionRelatedInput,
+  parseSavedSessionQueryIntent,
+  type SavedSessionQueryIntent,
+} from './tools/saved-session-query-intent.js';
 export { LOCAL_REMINDER_CREATE_TOOL_ID, createLocalReminderCreateTool } from './tools/local-reminder-create-tool.js';
 export { LOCAL_NOTE_CREATE_TOOL_ID, createLocalNoteCreateTool } from './tools/local-note-create-tool.js';
 export {

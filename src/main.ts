@@ -98,6 +98,7 @@ export async function main(
       reminderStore,
       noteStore,
     },
+    savedSessionStore,
   };
   const localToolManager = createLocalToolManager(localToolOptions);
   const core = new AssistantCore({

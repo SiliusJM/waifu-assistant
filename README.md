@@ -162,6 +162,12 @@ conteos/fecha del próximo recordatorio. Nunca revela credenciales ni entrega al
 de notas, recordatorios o Persistent Memory. La consulta no cambia el provider ni la configuración;
 `/status` sigue disponible como comando explícito.
 
+También puede consultar metadata de conversaciones guardadas: listarlas, contarlas,
+identificar la más reciente o pedir la metadata de un ID concreto. Estas consultas no muestran
+mensajes ni cargan ni modifican la sesión activa; abrir, borrar o renombrar sigue requiriendo
+los comandos explícitos de sesiones. El lenguaje natural requiere un provider compatible con
+tool calling; los comandos slash de sesiones no cambian.
+
 ### Exportar conversaciones
 
 En el modo interactivo, `/export` guarda la conversación actual como Markdown;

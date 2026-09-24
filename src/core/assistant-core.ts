@@ -17,6 +17,7 @@ import type { ToolErrorCode } from '../tools/errors.js';
 import type { MemorySnapshot } from '../memory/memory-types.js';
 import { CURRENT_DATA_HONESTY_POLICY } from './current-data-policy.js';
 import { isExplicitLocalStatusQuery } from '../tools/local-status-query-intent.js';
+import { isSavedSessionRelatedInput } from '../tools/saved-session-query-intent.js';
 
 const MAX_TOOL_ARGUMENTS_JSON_LENGTH = 4096;
 
@@ -215,12 +216,14 @@ export class AssistantCore {
 
   private buildRequest(session: Session, options: RespondOptions): AIRequest {
     const context = createContext(session);
-    const isStatusQuery = isExplicitLocalStatusQuery(session.getMessages().at(-1)?.content);
+    const latestUserInput = session.getMessages().at(-1)?.content;
+    const isLocalMetadataQuery = isExplicitLocalStatusQuery(latestUserInput)
+      || isSavedSessionRelatedInput(latestUserInput);
     const personalityMessages = options.personality?.instructions.map(({ text }) => ({
       role: 'system' as const,
       content: text,
     })) ?? [];
-    const memoryMessages = !isStatusQuery && options.memory && options.memory.entries.length > 0
+    const memoryMessages = !isLocalMetadataQuery && options.memory && options.memory.entries.length > 0
       ? [{
         role: 'system' as const,
         content: [
