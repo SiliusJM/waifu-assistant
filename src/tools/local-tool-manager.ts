@@ -14,7 +14,7 @@ import { createLocalStatusSummaryTool, LOCAL_STATUS_SUMMARY_TOOL_ID, type LocalS
 import { isExplicitLocalStatusQuery } from './local-status-query-intent.js';
 import { createLocalSavedSessionsQueryTool, LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID } from './local-saved-session-query-tool.js';
 import { parseSavedSessionQueryIntent } from './saved-session-query-intent.js';
-import { isAuthorizedClarification, isAuthorizedReadOnlyQueryRepair } from './clarification-tool-authorization.js';
+import { isAuthorizedClarification, isAuthorizedReadOnlyQueryRepair, isAuthorizedReadOnlyQueryFollowup } from './clarification-tool-authorization.js';
 import {
   createLocalSavedSessionContentSearchTool,
   formatSavedSessionSearch,
@@ -151,6 +151,20 @@ export function createLocalToolManager(nowOrOptions?: TimeSource | LocalToolMana
             && isAuthorizedReadOnlyQueryRepair(context, LOCAL_SAVED_SESSION_SEARCH_TOOL_ID, 'saved-session-search'))
           || (tool.id === LOCAL_STATUS_SUMMARY_TOOL_ID
             && isAuthorizedReadOnlyQueryRepair(context, LOCAL_STATUS_SUMMARY_TOOL_ID, 'status-summary'));
+        const readOnlyQueryFollowupAllowed = (tool.id === LOCAL_REMINDERS_LIST_TOOL_ID
+          && isAuthorizedReadOnlyQueryFollowup(context, LOCAL_REMINDERS_LIST_TOOL_ID, 'reminders-list'))
+          || (tool.id === LOCAL_REMINDER_NEXT_TOOL_ID
+            && isAuthorizedReadOnlyQueryFollowup(context, LOCAL_REMINDER_NEXT_TOOL_ID, 'reminder-next'))
+          || (tool.id === LOCAL_NOTES_LIST_TOOL_ID
+            && isAuthorizedReadOnlyQueryFollowup(context, LOCAL_NOTES_LIST_TOOL_ID, 'notes-list'))
+          || (tool.id === LOCAL_NOTE_SHOW_TOOL_ID
+            && isAuthorizedReadOnlyQueryFollowup(context, LOCAL_NOTE_SHOW_TOOL_ID, 'note-show'))
+          || (tool.id === LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID
+            && isAuthorizedReadOnlyQueryFollowup(context, LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID, 'saved-sessions-query'))
+          || (tool.id === LOCAL_SAVED_SESSION_SEARCH_TOOL_ID
+            && isAuthorizedReadOnlyQueryFollowup(context, LOCAL_SAVED_SESSION_SEARCH_TOOL_ID, 'saved-session-search'))
+          || (tool.id === LOCAL_STATUS_SUMMARY_TOOL_ID
+            && isAuthorizedReadOnlyQueryFollowup(context, LOCAL_STATUS_SUMMARY_TOOL_ID, 'status-summary'));
         const isSavedSessionQuery = tool.id === LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID;
         return {
           allowed: explicitCommand || naturalStatusQuery
@@ -159,6 +173,7 @@ export function createLocalToolManager(nowOrOptions?: TimeSource | LocalToolMana
             || naturalSavedSessionSearch
             || clarificationAllowed
             || readOnlyQueryRepairAllowed
+            || readOnlyQueryFollowupAllowed
             || (llmCommand && !isStatusSummary
               && !isSavedSessionQuery
               && (!naturalAction || isExplicitNaturalAction(context.metadata.userInput, tool.id))),

@@ -13,7 +13,7 @@ import { SavedSessionStore } from '../../src/core/saved-session-store.js';
 import { NoteStore } from '../../src/notes/note-store.js';
 import { PersistentMemoryStore } from '../../src/memory/memory-store.js';
 import { ReminderStore } from '../../src/reminders/reminder-store.js';
-import { createLocalToolManager, getLocalToolAllowlist } from '../../src/tools/local-tool-manager.js';
+import { createLocalToolManager, getLocalToolAllowlist, type LocalToolManagerOptions } from '../../src/tools/local-tool-manager.js';
 import { LOCAL_NOTES_LIST_TOOL_ID } from '../../src/tools/local-notes-list-tool.js';
 import { LOCAL_REMINDER_CREATE_TOOL_ID } from '../../src/tools/local-reminder-create-tool.js';
 
@@ -76,6 +76,7 @@ async function runFlow(
     readonly now?: () => Date;
     readonly onReminderCreated?: () => void | Promise<void>;
     readonly paceInputs?: boolean;
+    readonly statusSummary?: LocalToolManagerOptions['statusSummary'];
   } = {},
 ) {
   let providerCalls = 0;
@@ -84,6 +85,7 @@ async function runFlow(
     reminderStore: stores.reminders,
     noteStore: stores.notes,
     savedSessionStore: stores.sessions,
+    ...(options.statusSummary ? { statusSummary: options.statusSummary } : {}),
   };
   const provider = new MockAIProvider({
     responder: () => {
@@ -1333,5 +1335,243 @@ test('read-only repair authorization cannot be forged by metadata alone', async 
     });
     assert.equal(forged.status, 'failure');
     assert.equal((await notes.list()).length, 0);
+  });
+});
+
+test('short reminder follow-ups read completed or next once and consume the context', async () => {
+  await withStores(async ({ reminders, notes, sessions }) => {
+    await reminders.add('pending context item', new Date('2026-09-24T09:00:00.000Z'));
+    const completed = await reminders.add('completed context item', new Date('2026-09-25T09:00:00.000Z'));
+    await reminders.complete(completed.id);
+    const list = reminders.list.bind(reminders);
+    const calls: boolean[] = [];
+    reminders.list = async (options) => { calls.push(options?.all === true); return list(options); };
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      '¿Qué recordatorios tengo?', '¿Y las completadas?', '/exit',
+    ], { paceInputs: true });
+    const messages = outcome.runner.session.getMessages();
+    assert.match(messages[3]?.content ?? '', /completed context item/u);
+    assert.deepEqual(calls, [true]);
+    assert.equal(outcome.providerCalls, 1);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const pending = await reminders.add('next short follow-up', new Date('2026-09-24T09:00:00.000Z'));
+    let listReads = 0;
+    const list = reminders.list.bind(reminders);
+    reminders.list = async (...args) => { listReads += 1; return list(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      '¿Qué recordatorios tengo?', '¿Y el próximo?', '/exit',
+    ], { paceInputs: true });
+    const messages = outcome.runner.session.getMessages();
+    assert.match(messages[3]?.content ?? '', /next short follow-up/u);
+    assert.equal(listReads, 1);
+    assert.equal(outcome.providerCalls, 1);
+    assert.ok(pending.id);
+  });
+});
+
+test('short saved-search follow-up reuses only the safe session ID and replaces the term', async () => {
+  await withStores(async ({ reminders, notes, sessions }) => {
+    await sessions.save(SAVED_ID, [
+      { role: 'user', content: 'We compared Gemini and other routes.' },
+      { role: 'assistant', content: 'Gemini appeared in the saved conversation.' },
+    ], 'Gemini notes');
+    let reads = 0;
+    const get = sessions.get.bind(sessions);
+    sessions.get = async (...args) => { reads += 1; return get(...args); };
+    const sessionBytes = await readFile(sessions.filePath, 'utf8');
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      `Busca Groq en la conversación guardada ${SAVED_ID}.`,
+      'Ahora busca Gemini.', '/exit',
+    ], { paceInputs: true });
+    const reply = outcome.runner.session.getMessages()[3]?.content ?? '';
+    assert.match(reply, /Gemini/u);
+    assert.equal(reads, 1);
+    assert.equal(outcome.providerCalls, 1);
+    assert.equal(await readFile(sessions.filePath, 'utf8'), sessionBytes);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    let reads = 0;
+    const get = sessions.get.bind(sessions);
+    sessions.get = async (...args) => { reads += 1; return get(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      `Busca Groq en la conversación guardada ${SAVED_ID}.`,
+      'Ahora busca Gemini en otra conversación.', '/exit',
+    ], { paceInputs: true });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /ID de conversación/u);
+    assert.equal(reads, 0);
+    assert.equal(outcome.providerCalls, 1);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    let reads = 0;
+    const get = sessions.get.bind(sessions);
+    sessions.get = async (...args) => { reads += 1; return get(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      `Busca Groq en la conversación guardada ${SAVED_ID}.`,
+      'Busca eso en otra conversación.', '/exit',
+    ], { paceInputs: true });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /No asumiré/u);
+    assert.equal(reads, 0);
+  });
+});
+
+test('short notes and saved-session follow-ups use existing read-only tools', async () => {
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const note = await notes.add('the requested follow-up note');
+    let shows = 0;
+    const show = notes.show.bind(notes);
+    notes.show = async (...args) => { shows += 1; return show(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      '¿Qué notas tengo?', `Muéstrame la ${note.id}.`, '/exit',
+    ], { paceInputs: true });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /the requested follow-up note/u);
+    assert.equal(shows, 1);
+    assert.equal(outcome.providerCalls, 1);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    let shows = 0;
+    const show = notes.show.bind(notes);
+    notes.show = async (...args) => { shows += 1; return show(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      '¿Qué notas tengo?', 'Muéstrame esa.', '/exit',
+    ], { paceInputs: true });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /ID de nota/u);
+    assert.equal(shows, 0);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    let counts = 0;
+    const count = sessions.count.bind(sessions);
+    sessions.count = async () => { counts += 1; return count(); };
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      '¿Qué conversaciones guardadas tengo?', '¿Cuántas?', '/exit',
+    ], { paceInputs: true });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /Tienes 1 conversaciones guardadas/u);
+    assert.equal(counts, 1);
+    assert.equal(outcome.providerCalls, 1);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    let reads = 0;
+    const list = sessions.listSummaries.bind(sessions);
+    sessions.listSummaries = async () => { reads += 1; return list(); };
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      '¿Qué conversaciones guardadas tengo?', '¿Y la más reciente?', '/exit',
+    ], { paceInputs: true });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /Trip notes/u);
+    assert.equal(reads, 1);
+    assert.equal(outcome.providerCalls, 1);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    let reads = 0;
+    const list = sessions.listSummaries.bind(sessions);
+    sessions.listSummaries = async () => { reads += 1; return list(); };
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      '¿Qué conversaciones guardadas tengo?', `Muéstrame información de la conversación ${SAVED_ID}.`, '/exit',
+    ], { paceInputs: true });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /Trip notes/u);
+    assert.equal(reads, 1);
+    assert.equal(outcome.providerCalls, 1);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    let reads = 0;
+    const list = sessions.listSummaries.bind(sessions);
+    sessions.listSummaries = async () => { reads += 1; return list(); };
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      '¿Qué conversaciones guardadas tengo?', 'Muéstrame esa conversación.', '/exit',
+    ], { paceInputs: true });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /ID de conversación guardada/u);
+    assert.equal(reads, 0);
+  });
+});
+
+test('status and capability-help follow-ups stay local and do not call the provider', async () => {
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const statusSummary = {
+      provider: { profileId: 'test', provider: 'mock-provider', model: 'local-model', baseHost: 'localhost', credentialConfigured: false },
+      noteStore: notes,
+      reminderStore: reminders,
+    };
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      '¿Cuál es el estado del asistente?', '¿Y el proveedor?', '/exit',
+    ], { paceInputs: true, statusSummary });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /mock-provider/u);
+    assert.equal(outcome.providerCalls, 1);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      '¿Qué capacidades tienes?', '¿Y qué más?', '/exit',
+    ], { paceInputs: true });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /Capacidades y comandos disponibles/u);
+    assert.equal(outcome.providerCalls, 0);
+  });
+});
+
+test('short query context clears on unrelated or slash turns, mutations, and session changes', async () => {
+  await withStores(async ({ reminders, notes, sessions }) => {
+    let reads = 0;
+    const list = reminders.list.bind(reminders);
+    reminders.list = async (...args) => { reads += 1; return list(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      '¿Qué recordatorios tengo?', 'Cuéntame un chiste.', '¿Y las completadas?', '/exit',
+    ], { paceInputs: true });
+    assert.equal(reads, 0);
+    assert.equal(outcome.providerCalls, 3);
+  });
+  for (const command of ['/clear', '/load-session demo']) {
+    await withStores(async ({ reminders, notes, sessions }) => {
+      let reads = 0;
+      const list = reminders.list.bind(reminders);
+      reminders.list = async (...args) => { reads += 1; return list(...args); };
+      const commands: string[] = [];
+      const outcome = await runFlow({ reminders, notes, sessions }, [
+        '¿Qué recordatorios tengo?', command, '¿Y las completadas?', '/exit',
+      ], { paceInputs: true, onCommand: (value) => { commands.push(value); } });
+      assert.deepEqual(commands, [command]);
+      assert.equal(reads, 0);
+      assert.equal(outcome.providerCalls, 2);
+    });
+  }
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const flow = new SafeClarificationFlow({
+      toolManager: createLocalToolManager({ reminderStore: reminders, noteStore: notes, savedSessionStore: sessions }),
+      sessionId: 'followup-session',
+    });
+    let listReads = 0;
+    const list = reminders.list.bind(reminders);
+    reminders.list = async (...args) => { listReads += 1; return list(...args); };
+    assert.equal(await flow.handle('¿Qué recordatorios tengo?', { sessionId: 'followup-session' }), undefined);
+    assert.equal(await flow.handle('Recuérdame mañana comprar pan.', { sessionId: 'followup-session' }), '¿A qué hora local quieres que te lo recuerde mañana?');
+    assert.equal(await flow.handle('¿Y las completadas?', { sessionId: 'followup-session' }), undefined);
+    assert.equal(listReads, 0);
+    assert.equal(await flow.handle('¿Y las completadas?', { sessionId: 'different-session' }), undefined);
+    assert.equal((await reminders.list({ all: true })).length, 0);
+  });
+});
+
+test('repair intent wins over follow-up and follow-up state does not persist or mutate stores or memory', async () => {
+  await withStores(async ({ directory, reminders, notes, sessions, memory }) => {
+    await sessions.save(SAVED_ID, [
+      { role: 'user', content: 'The saved discussion included Gemini.' },
+      { role: 'assistant', content: 'Gemini was compared with other routes.' },
+    ]);
+    const reminderBytes = await readFile(join(directory, 'reminders.json'), 'utf8').catch(() => undefined);
+    const noteBytes = await readFile(join(directory, 'notes.json'), 'utf8').catch(() => undefined);
+    const sessionBytes = await readFile(join(directory, 'sessions.json'), 'utf8');
+    const memoryBytes = await readFile(memory.filePath, 'utf8').catch(() => undefined);
+    let reads = 0;
+    const get = sessions.get.bind(sessions);
+    sessions.get = async (...args) => { reads += 1; return get(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions, memory }, [
+      `Busca Groq en la conversación guardada ${SAVED_ID}.`,
+      `No, quería buscar Gemini en la conversación guardada ${SAVED_ID}.`, '/exit',
+    ], { paceInputs: true });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /Gemini/u);
+    assert.equal(reads, 1);
+    assert.equal(await readFile(join(directory, 'reminders.json'), 'utf8').catch(() => undefined), reminderBytes);
+    assert.equal(await readFile(join(directory, 'notes.json'), 'utf8').catch(() => undefined), noteBytes);
+    assert.equal(await readFile(join(directory, 'sessions.json'), 'utf8'), sessionBytes);
+    assert.equal(await readFile(memory.filePath, 'utf8').catch(() => undefined), memoryBytes);
+    assert.equal(outcome.runner.session.title, undefined);
+    assert.equal(outcome.runner.session.savedName, undefined);
+    assert.doesNotMatch(JSON.stringify(outcome.flow), /localQueryContext|lastSearchTerm|Gemini/u);
   });
 });

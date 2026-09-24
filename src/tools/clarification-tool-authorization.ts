@@ -49,6 +49,7 @@ const allowedReadOnlyQueryRepairKinds: Readonly<Record<ReadOnlyQueryRepairToolId
 
 const issuedMetadata = new WeakMap<object, Readonly<{ toolId: ClarificationToolId; kind: ClarificationKind }>>();
 const issuedReadOnlyQueryMetadata = new WeakMap<object, Readonly<{ toolId: ReadOnlyQueryRepairToolId; kind: ReadOnlyQueryRepairKind }>>();
+const issuedReadOnlyFollowupMetadata = new WeakMap<object, Readonly<{ toolId: ReadOnlyQueryRepairToolId; kind: ReadOnlyQueryRepairKind }>>();
 
 export function createReadOnlyQueryRepairToolOptions(
   toolId: ReadOnlyQueryRepairToolId,
@@ -77,6 +78,37 @@ export function isAuthorizedReadOnlyQueryRepair(
     && issued?.toolId === toolId
     && issued.kind === kind
     && context.metadata.source === 'read-only-query-repair'
+    && context.metadata.toolId === toolId
+    && context.metadata.kind === kind;
+}
+
+export function createReadOnlyQueryFollowupToolOptions(
+  toolId: ReadOnlyQueryRepairToolId,
+  kind: ReadOnlyQueryRepairKind,
+  sessionId: string,
+  userInput: string,
+): ToolExecutionOptions {
+  if (allowedReadOnlyQueryRepairKinds[toolId] !== kind) throw new TypeError('Read-only query follow-up scope is invalid.');
+  const metadata = Object.freeze({ source: 'read-only-query-followup', toolId, kind, userInput });
+  issuedReadOnlyFollowupMetadata.set(metadata, { toolId, kind });
+  return {
+    sessionId,
+    metadata,
+    authorization: { source: 'read-only-query-followup' },
+  };
+}
+
+export function isAuthorizedReadOnlyQueryFollowup(
+  context: ToolExecutionContext,
+  toolId: ReadOnlyQueryRepairToolId,
+  kind: ReadOnlyQueryRepairKind,
+): boolean {
+  const issued = issuedReadOnlyFollowupMetadata.get(context.metadata);
+  return allowedReadOnlyQueryRepairKinds[toolId] === kind
+    && context.authorization?.source === 'read-only-query-followup'
+    && issued?.toolId === toolId
+    && issued.kind === kind
+    && context.metadata.source === 'read-only-query-followup'
     && context.metadata.toolId === toolId
     && context.metadata.kind === kind;
 }

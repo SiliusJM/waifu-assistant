@@ -1,5 +1,6 @@
 import type { ReminderStore } from '../reminders/reminder-store.js';
 import type { Tool, ToolExecutionContext, ToolResult } from './tool-types.js';
+import { isAuthorizedReadOnlyQueryFollowup } from './clarification-tool-authorization.js';
 
 export const LOCAL_REMINDERS_LIST_TOOL_ID = 'local.reminders_list';
 
@@ -46,7 +47,10 @@ export function createLocalRemindersListTool(store: ReminderStore): Tool<LocalRe
     },
     async execute(argumentsValue, context: ToolExecutionContext): Promise<ToolResult<LocalRemindersListValue>> {
       const includeCompleted = argumentsValue.includeCompleted === true;
-      if (includeCompleted && !explicitAllRequest(context.metadata.userInput)) {
+      const explicitCompletedFollowup = isAuthorizedReadOnlyQueryFollowup(context, LOCAL_REMINDERS_LIST_TOOL_ID, 'reminders-list')
+        && typeof context.metadata.userInput === 'string'
+        && /\b(?:completad[oa]s?|historial)\b/iu.test(context.metadata.userInput);
+      if (includeCompleted && !explicitAllRequest(context.metadata.userInput) && !explicitCompletedFollowup) {
         return {
           status: 'failure',
           error: {

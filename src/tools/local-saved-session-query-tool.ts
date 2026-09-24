@@ -1,7 +1,7 @@
 import type { SavedSessionStore, SavedSessionSummary } from '../core/saved-session-store.js';
 import type { Tool, ToolExecutionContext, ToolResult } from './tool-types.js';
 import { parseSavedSessionQueryIntent, type SavedSessionQueryIntent } from './saved-session-query-intent.js';
-import { isAuthorizedReadOnlyQueryRepair } from './clarification-tool-authorization.js';
+import { isAuthorizedReadOnlyQueryRepair, isAuthorizedReadOnlyQueryFollowup } from './clarification-tool-authorization.js';
 
 export const LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID = 'local.saved_sessions_query';
 
@@ -34,7 +34,8 @@ function isReadOnlyRequest(
   argumentsValue: SavedSessionQueryArguments,
   context: ToolExecutionContext,
 ): boolean {
-  if (isAuthorizedReadOnlyQueryRepair(context, LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID, 'saved-sessions-query')) {
+  if (isAuthorizedReadOnlyQueryRepair(context, LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID, 'saved-sessions-query')
+    || isAuthorizedReadOnlyQueryFollowup(context, LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID, 'saved-sessions-query')) {
     if (argumentsValue.operation === 'info') {
       return typeof argumentsValue.sessionId === 'string' && /^[A-Za-z0-9_-]{1,64}$/u.test(argumentsValue.sessionId);
     }
