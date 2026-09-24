@@ -42,6 +42,15 @@ export {
   LOCAL_NATURAL_QUERY_TOOL_ALLOWLIST,
   getLocalToolAllowlist,
 } from './tools/local-tool-manager.js';
+export {
+  LOCAL_STATUS_SUMMARY_TOOL_ID,
+  createLocalStatusSummaryTool,
+  type LocalStatusProviderSummary,
+  type LocalStatusSessionSummary,
+  type LocalStatusSummaryArguments,
+  type LocalStatusSummaryOptions,
+  type LocalStatusSummaryValue,
+} from './tools/local-status-summary-tool.js';
 export { LOCAL_REMINDER_CREATE_TOOL_ID, createLocalReminderCreateTool } from './tools/local-reminder-create-tool.js';
 export { LOCAL_NOTE_CREATE_TOOL_ID, createLocalNoteCreateTool } from './tools/local-note-create-tool.js';
 export {

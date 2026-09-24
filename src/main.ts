@@ -4,7 +4,7 @@ import { AssistantCore } from './core/assistant-core.js';
 import { ConversationRunner } from './core/conversation-runner.js';
 import { createAIProvider } from './config/provider-factory.js';
 import { loadConfig } from './config/config.js';
-import { formatProviderStatus } from './config/provider-config.js';
+import { formatProviderStatus, toSafeProviderConfig } from './config/provider-config.js';
 import { PersonalityCompiler } from './personality/personality-compiler.js';
 import { PersonalityRegistry } from './personality/personality-registry.js';
 import { AssistantError } from './shared/errors.js';
@@ -82,7 +82,23 @@ export async function main(
   await reminderStore.load();
   const noteStore = new NoteStore(resolveNotesPath(env), { now });
   await noteStore.load();
-  const localToolOptions = { now, reminderStore, noteStore };
+  const safeProvider = toSafeProviderConfig(config.ai);
+  const localToolOptions = {
+    now,
+    reminderStore,
+    noteStore,
+    statusSummary: {
+      provider: {
+        profileId: safeProvider.profileId,
+        provider: safeProvider.provider,
+        model: safeProvider.model,
+        baseHost: safeProvider.baseHost,
+        credentialConfigured: safeProvider.credentialConfigured,
+      },
+      reminderStore,
+      noteStore,
+    },
+  };
   const localToolManager = createLocalToolManager(localToolOptions);
   const core = new AssistantCore({
     provider: createAIProvider(config),
