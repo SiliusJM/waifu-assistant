@@ -46,6 +46,11 @@ export type PendingClarification =
     readonly key: string;
     readonly oldValue: string;
     readonly newValue: string;
+  }
+  | {
+    readonly kind: 'memory-create';
+    readonly key: string;
+    readonly value: string;
   };
 
 export interface ClarificationInputContext {
@@ -66,7 +71,13 @@ interface MemoryUpdateIntent {
   readonly newValue: string;
 }
 
-type MemoryUpdateDetection = PendingClarification | { readonly kind: 'memory-update-unavailable'; readonly response: string };
+interface MemoryCreateIntent {
+  readonly keyLabel: string;
+  readonly key: string;
+  readonly value: string;
+}
+
+type MemoryDetection = PendingClarification | { readonly kind: 'memory-unavailable'; readonly response: string };
 
 function normalize(value: string): string {
   return value.toLocaleLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').trim();
@@ -130,6 +141,35 @@ function parseExplicitMemoryUpdate(input: string): MemoryUpdateIntent | undefine
     return { keyLabel: statementThenRequest[2].trim(), newValue: cleanMemoryValue(statementThenRequest[1]) };
   }
   return undefined;
+}
+
+function parseExplicitMemoryCreate(input: string): { readonly text: string } | undefined {
+  const match = input.trim().match(/^\s*(?:por favor\s+)?(?:recuerda(?:me)?(?:\s+que)?|guarda\s+en\s+tu\s+memoria(?:\s+que)?|quiero\s+que\s+recuerdes\s+que|memoriza(?:\s+que)?)\s+(.+?)\s*[.!?]*\s*$/iu);
+  return match?.[1] ? { text: match[1].trim() } : undefined;
+}
+
+function parseMemoryFact(text: string): MemoryCreateIntent | undefined {
+  const match = text.match(/^(?:mi\s+)?(ciudad|city|home[_ ]city|location|juego\s+favorito|videojuego\s+favorito|favorite[_ ]game|game\s+favorite|nombre|name|username)\s+(?:es|=|:)\s*(.+)$/iu);
+  if (!match?.[1] || !match[2]) return undefined;
+  const label = match[1].trim();
+  const value = cleanMemoryValue(match[2]);
+  const normalized = normalizedLabel(label);
+  let key: string;
+  if (/^(?:ciudad|city|home city|location)$/u.test(normalized)) key = 'city';
+  else if (/^(?:juego favorito|videojuego favorito|favorite game|game favorite)$/u.test(normalized)) key = 'favorite_game';
+  else if (/^(?:nombre|name|username)$/u.test(normalized)) key = 'name';
+  else return undefined;
+  return { keyLabel: label, key, value };
+}
+
+function hasMultipleMemoryClaims(text: string): boolean {
+  return /[,;]/u.test(text)
+    || /\b(?:y|e)\s+(?:mi\s+)?(?:ciudad|city|juego(?:\s+favorito)?|videojuego(?:\s+favorito)?|favorite[_ ]game|nombre|name|correo|email)\b/iu.test(text)
+    || /[.!?]\s*(?:mi\s+)?(?:ciudad|city|juego(?:\s+favorito)?|videojuego(?:\s+favorito)?|favorite[_ ]game|nombre|name|correo|email)\s+(?:es|=|:)\s*/iu.test(text);
+}
+
+function hasSensitiveMemoryLabel(text: string): boolean {
+  return /\b(?:password|passwd|secret|token|api[_ -]?key|authorization|credential|cookie|private[_ -]?key|contrase(?:n|ñ)a|clave|correo|email)\b/iu.test(text);
 }
 
 function cleanMemoryValue(value: string): string {
@@ -276,9 +316,16 @@ export class SafeClarificationFlow {
     }
     const pending = this.#pending;
     if (!pending) {
+      const memoryCreate = this.detectMemoryCreate(input);
+      if (memoryCreate) {
+        const detected = await memoryCreate;
+        if (detected.kind === 'memory-unavailable') return detected.response;
+        this.#pending = detected;
+        return this.promptFor(detected);
+      }
       const memoryUpdate = await this.detectMemoryUpdate(input);
       if (memoryUpdate) {
-        if (memoryUpdate.kind === 'memory-update-unavailable') return memoryUpdate.response;
+        if (memoryUpdate.kind === 'memory-unavailable') return memoryUpdate.response;
         this.#pending = memoryUpdate;
         return this.promptFor(memoryUpdate);
       }
@@ -316,6 +363,7 @@ export class SafeClarificationFlow {
         case 'note-content': return await this.resolveNote(input, context);
         case 'saved-session-info-id': return await this.resolveSavedSessionInfo(input, context);
         case 'memory-update': return await this.resolveMemoryUpdate(pending, input);
+        case 'memory-create': return await this.resolveMemoryCreate(pending, input);
       }
     } catch {
       return 'No pude completar la aclaración. No se realizó ninguna acción.';
@@ -329,32 +377,76 @@ export class SafeClarificationFlow {
       case 'note-content': return '¿Qué texto explícito quieres guardar como nota? No asumiré a qué se refiere “eso”.';
       case 'saved-session-info-id': return '¿Qué ID de conversación guardada quieres que consulte?';
       case 'memory-update': return `Tengo guardado ${pending.key} = ${JSON.stringify(pending.oldValue)}. ¿Quieres cambiarlo a ${JSON.stringify(pending.newValue)}? Responde sí o no.`;
+      case 'memory-create': return `¿Quieres que guarde ${pending.key} = ${JSON.stringify(pending.value)}? Responde sí o no.`;
     }
   }
 
-  private async detectMemoryUpdate(input: string): Promise<MemoryUpdateDetection | undefined> {
+  private detectMemoryCreate(input: string): Promise<MemoryDetection> | undefined {
+    const explicit = parseExplicitMemoryCreate(input);
+    if (!explicit) return undefined;
+    return this.resolveMemoryCreateIntent(explicit.text);
+  }
+
+  private async resolveMemoryCreateIntent(text: string): Promise<MemoryDetection> {
+    if (hasMultipleMemoryClaims(text)) {
+      return { kind: 'memory-unavailable', response: 'Solo puedo proponer una memoria por vez; no guardé nada. Pídeme cada dato por separado.' };
+    }
+    const intent = parseMemoryFact(text);
+    if (!intent) {
+      const response = hasSensitiveMemoryLabel(text)
+        ? 'No guardé ese dato sensible en Persistent Memory.'
+        : 'No pude identificar una sola clave y un valor claro; no guardé nada.';
+      return { kind: 'memory-unavailable', response };
+    }
+    if (!intent.value || /[\r\n\0]/u.test(intent.value)) {
+      return { kind: 'memory-unavailable', response: 'El valor propuesto no es válido; no guardé nada.' };
+    }
+    if (!isSafeExplicitMemoryEntry({ key: intent.key, value: intent.value })) {
+      return { kind: 'memory-unavailable', response: 'No guardé ese dato sensible en Persistent Memory.' };
+    }
+    try {
+      validateMemoryValue(intent.value);
+      if (!this.memoryStore) {
+        return { kind: 'memory-unavailable', response: 'La creación de memorias no está disponible; no guardé nada.' };
+      }
+      const entries = await this.memoryStore.list();
+      const existingKey = resolveMemoryKey(intent.keyLabel, entries);
+      if (existingKey) {
+        const existing = entries.find(({ key }) => key === existingKey);
+        if (!existing || !isSafeExplicitMemoryEntry(existing)) {
+          return { kind: 'memory-unavailable', response: 'No puedo actualizar esa memoria mediante confirmación natural.' };
+        }
+        return { kind: 'memory-update', key: existingKey, oldValue: existing.value, newValue: intent.value };
+      }
+      return { kind: 'memory-create', key: intent.key, value: intent.value };
+    } catch {
+      return { kind: 'memory-unavailable', response: 'La propuesta de memoria no es válida; no guardé nada.' };
+    }
+  }
+
+  private async detectMemoryUpdate(input: string): Promise<MemoryDetection | undefined> {
     if (!this.memoryStore) return undefined;
     const intent = parseExplicitMemoryUpdate(input);
     if (!intent) return undefined;
     if (!intent.newValue || /[\r\n\0]/u.test(intent.newValue)
       || !isOneKeyLabel(intent.keyLabel) || !isSingleMemoryValue(intent.newValue)) {
-      return { kind: 'memory-update-unavailable', response: 'No pude identificar una sola memoria y un valor nuevo claro; no cambié nada.' };
+      return { kind: 'memory-unavailable', response: 'No pude identificar una sola memoria y un valor nuevo claro; no cambié nada.' };
     }
     try {
       validateMemoryValue(intent.newValue);
       const entries = await this.memoryStore.list();
       const key = resolveMemoryKey(intent.keyLabel, entries);
       if (!key) {
-        return { kind: 'memory-update-unavailable', response: 'No encontré una única memoria existente para actualizar; no crearé una nueva. Usa /remember <key> <value> para guardar una memoria nueva.' };
+        return { kind: 'memory-unavailable', response: 'No encontré una única memoria existente para actualizar; no crearé una nueva. Usa /remember <key> <value> para guardar una memoria nueva.' };
       }
       const current = entries.find((entry) => entry.key === key);
       if (!current || !isSafeExplicitMemoryEntry(current)
         || !isSafeExplicitMemoryEntry({ key, value: intent.newValue })) {
-        return { kind: 'memory-update-unavailable', response: 'No puedo actualizar esa memoria mediante confirmación natural.' };
+        return { kind: 'memory-unavailable', response: 'No puedo actualizar esa memoria mediante confirmación natural.' };
       }
       return { kind: 'memory-update', key, oldValue: current.value, newValue: intent.newValue };
     } catch {
-      return { kind: 'memory-update-unavailable', response: 'La solicitud de actualización no es válida; no cambié nada.' };
+      return { kind: 'memory-unavailable', response: 'La solicitud de actualización no es válida; no cambié nada.' };
     }
   }
 
@@ -372,6 +464,19 @@ export class SafeClarificationFlow {
       case 'missing': return `La memoria ${pending.key} ya no existe; no creé otra.`;
       case 'conflict': return `La memoria ${pending.key} cambió desde la solicitud. No la sobrescribí; inicia de nuevo la actualización.`;
     }
+  }
+
+  private async resolveMemoryCreate(
+    pending: Extract<PendingClarification, { kind: 'memory-create' }>,
+    input: string,
+  ): Promise<string> {
+    if (isNegative(input)) return `Entendido. No guardé ${pending.key}.`;
+    if (!isAffirmative(input)) return 'No recibí una confirmación clara; cancelé la propuesta y no guardé nada.';
+    if (!this.memoryStore) return 'La creación de memorias no está disponible; no guardé nada.';
+    const result = await this.memoryStore.remember(pending.key, pending.value);
+    return result === 'created'
+      ? `Memoria guardada: ${pending.key}.`
+      : `La memoria ${pending.key} ya existe; no la sobrescribí. Si quieres cambiarla, pídeme explícitamente actualizarla.`;
   }
 
   private async resolveReminder(

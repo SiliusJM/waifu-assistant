@@ -69,6 +69,21 @@ test('optimistic memory update requires an existing unchanged key and persists a
   });
 });
 
+test('remember creates only a missing entry, refreshes persisted state, and preserves atomic cleanup', async () => {
+  await withStore(async (first, filePath, directory) => {
+    const second = new PersistentMemoryStore(filePath);
+    await second.load();
+    assert.equal(await first.remember('city', 'Guayaquil'), 'created');
+    assert.equal(await second.remember('city', 'Quito'), 'exists');
+    assert.equal(await first.get('city'), 'Guayaquil');
+    const persisted = new PersistentMemoryStore(filePath);
+    await persisted.load();
+    assert.equal(await persisted.get('city'), 'Guayaquil');
+    const files = await readdir(directory, { recursive: true });
+    assert.equal(files.some((file) => file.endsWith('.tmp') || file.endsWith('.bak')), false);
+  });
+});
+
 test('optimistic update refreshes persisted state before comparing the expected value', async () => {
   await withStore(async (first, filePath) => {
     await first.set('city', 'Cuenca');
@@ -114,7 +129,10 @@ test('memory enforces the entry limit while permitting overwrite and replacement
   await withStore(async (store) => {
     for (let index = 0; index < MEMORY_MAX_ENTRIES; index += 1) await store.set(`key_${index}`, String(index));
     await store.set('key_0', 'updated');
+    assert.equal(await store.remember('key_0', 'must-not-overwrite'), 'exists');
+    assert.equal(await store.get('key_0'), 'updated');
     await assertCode(store.set('key_100', 'overflow'), 'MEMORY_LIMIT_ERROR');
+    await assertCode(store.remember('key_100', 'overflow'), 'MEMORY_LIMIT_ERROR');
     assert.equal(await store.delete('key_0'), true);
     await store.set('key_100', 'replacement');
     assert.equal(await store.count(), MEMORY_MAX_ENTRIES);
@@ -204,6 +222,8 @@ test('write failures are controlled and do not leave the final file partially wr
     await assertCode(failingUpdate.update('city', 'Guayaquil', 'Cuenca'), 'MEMORY_IO_ERROR');
     assert.equal(await failingUpdate.get('city'), 'Cuenca');
     assert.equal(await new PersistentMemoryStore(filePath).get('city'), 'Cuenca');
+    await assertCode(failingUpdate.remember('new_entry', 'value'), 'MEMORY_IO_ERROR');
+    assert.equal(await failingUpdate.get('new_entry'), undefined);
     assert.equal((await readdir(directory)).some((file) => file.endsWith('.tmp') || file.endsWith('.bak')), false);
   } finally {
     await rm(directory, { recursive: true, force: true });

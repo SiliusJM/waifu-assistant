@@ -28,7 +28,7 @@ for (const group of TERM_GROUPS) {
 }
 
 const SENSITIVE_KEY = /(?:password|passwd|secret|token|api[_-]?key|authorization|credential|cookie|private[_-]?key|contrasena|clave)/iu;
-const SENSITIVE_VALUE = /(?:\b(?:api[_ -]?key|password|passwd|authorization|bearer|access[_ -]?token|refresh[_ -]?token)\s*[:=]|\bbearer\s+\S+|-----BEGIN [^-]*PRIVATE KEY-----|\b(?:sk-[\w-]{16,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b)/iu;
+const SENSITIVE_VALUE = /(?:\b(?:api[_ -]?key|password|passwd|authorization|bearer|access[_ -]?token|refresh[_ -]?token|contrase(?:n|ñ)a|clave|token)\s*(?:[:=]|\b(?:is|es)\b)|\bbearer\s+\S+|-----BEGIN [^-]*PRIVATE KEY-----|\b(?:sk-[\w-]{16,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b)/iu;
 
 function normalize(value: string): string {
   return value.normalize('NFKD').replace(/\p{Diacritic}/gu, '').toLocaleLowerCase('en-US');
