@@ -12,6 +12,7 @@ export const CONVERSATION_HELP_COMMAND = '/help';
 export const CONVERSATION_TIME_COMMAND = '/time';
 export const CONVERSATION_CALC_COMMAND = '/calc';
 export const CONVERSATION_STATUS_COMMAND = '/status';
+export const CONVERSATION_TONE_COMMAND = '/tone';
 export const CONVERSATION_HISTORY_COMMAND = '/history';
 export const CONVERSATION_CLEAR_COMMAND = '/clear';
 export const CONVERSATION_REMEMBER_COMMAND = '/remember';
@@ -64,6 +65,8 @@ export interface ConversationRunOptions {
     readonly sessionId: string;
     readonly active: boolean;
   }) => void | Promise<void>;
+  /** Handles an explicitly mapped local tone preference without adding it to Session. */
+  readonly onTonePreference?: (input: string) => Promise<boolean>;
 }
 
 async function nextWithSignal(
@@ -198,6 +201,8 @@ export class ConversationRunner {
       || input === CONVERSATION_CALC_COMMAND
       || input.startsWith(`${CONVERSATION_CALC_COMMAND} `)
       || input === CONVERSATION_STATUS_COMMAND
+      || input === CONVERSATION_TONE_COMMAND
+      || input.startsWith(`${CONVERSATION_TONE_COMMAND} `)
       || input === CONVERSATION_HISTORY_COMMAND
       || input === CONVERSATION_CLEAR_COMMAND
       || input === CONVERSATION_MEMORY_COMMAND
@@ -247,6 +252,12 @@ export class ConversationRunner {
     };
 
     const processNaturalInput = async (input: string): Promise<void> => {
+      if (options.onTonePreference !== undefined) {
+        if (await options.onTonePreference(input)) {
+          options.clarification?.clear();
+          return;
+        }
+      }
       const capabilityHelp = resolveNaturalCapabilityHelp(input);
       if (capabilityHelp !== undefined) {
         options.clarification?.clear();

@@ -38,6 +38,7 @@ import {
   CONVERSATION_SESSIONS_COMMAND,
   CONVERSATION_SESSION_SEARCH_COMMAND,
   CONVERSATION_STATUS_COMMAND,
+  CONVERSATION_TONE_COMMAND,
   CONVERSATION_REMIND_COMMAND,
   CONVERSATION_REMINDERS_COMMAND,
   CONVERSATION_REMINDER_DELETE_COMMAND,
@@ -61,6 +62,13 @@ import {
 import { ConsoleReminderNotifier } from './reminders/reminder-notifier.js';
 import { ReminderScheduler } from './reminders/reminder-scheduler.js';
 import { formatNoteDate, formatNoteList, NoteStore, resolveNotesPath } from './notes/note-store.js';
+import { ConversationToneStore, resolveConversationTonePath } from './personality/conversation-tone-store.js';
+import {
+  formatToneConfirmation,
+  formatToneStatus,
+  parseNaturalToneRequest,
+  parseToneCommand,
+} from './personality/conversation-tone-preferences.js';
 
 export async function main(
   argv: readonly string[] = process.argv.slice(2),
@@ -86,6 +94,19 @@ export async function main(
   await reminderStore.load();
   const noteStore = new NoteStore(resolveNotesPath(env), { now });
   await noteStore.load();
+  const toneStore = new ConversationToneStore(resolveConversationTonePath(env));
+  await toneStore.load();
+  const handleNaturalTonePreference = async (input: string): Promise<boolean> => {
+    const tone = parseNaturalToneRequest(input);
+    if (tone === undefined) return false;
+    try {
+      await toneStore.set(tone);
+      process.stdout.write(formatToneConfirmation(tone) + '\n');
+    } catch {
+      process.stdout.write('No pude guardar la preferencia de tono local.\n');
+    }
+    return true;
+  };
   const safeProvider = toSafeProviderConfig(config.ai);
   const localToolOptions = {
     now,
@@ -111,11 +132,13 @@ export async function main(
     toolManager: localToolManager,
     toolAllowlist: getLocalToolAllowlist(localToolOptions),
     localActionNow: now,
+    conversationTone: () => toneStore.getCurrent(),
   });
   const personality = new PersonalityCompiler().compile({
     profile: new PersonalityRegistry().defaultProfile,
   });
   if (!interactive) {
+    if (await handleNaturalTonePreference(input)) return;
     const response = await core.respond(core.createSession(), input, {
       personality,
       memory: await memoryStore.snapshot(),
@@ -149,6 +172,7 @@ export async function main(
       memory: () => memoryStore.snapshot(),
       clarification,
       onDelta: (delta): void => { process.stdout.write(delta); },
+      onTonePreference: handleNaturalTonePreference,
       onResponse: (): void => { process.stdout.write('\n'); },
       onInterruption: (): void => { process.stdout.write('\n[Respuesta interrumpida]\n'); },
       onCommand: async (command, context): Promise<void> => {
@@ -335,6 +359,22 @@ export async function main(
             '- local.time',
             '- local.calculate',
           ].join('\n') + '\n');
+          return;
+        }
+        if (command === CONVERSATION_TONE_COMMAND || command.startsWith(`${CONVERSATION_TONE_COMMAND} `)) {
+          const parsed = parseToneCommand(command);
+          if (parsed.kind === 'show') {
+            process.stdout.write(formatToneStatus(toneStore.getCurrent()) + '\n');
+          } else if (parsed.kind === 'set') {
+            try {
+              await toneStore.set(parsed.tone);
+              process.stdout.write(formatToneConfirmation(parsed.tone) + '\n');
+            } catch {
+              process.stdout.write('No pude guardar la preferencia de tono local.\n');
+            }
+          } else {
+            process.stdout.write(`Uso: ${CONVERSATION_TONE_COMMAND} [${['default', 'concise', 'warm', 'technical', 'playful'].join('|')}]\n`);
+          }
           return;
         }
         if (command === CONVERSATION_HISTORY_COMMAND) {

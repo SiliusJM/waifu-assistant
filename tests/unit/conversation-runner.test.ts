@@ -7,6 +7,7 @@ import { AssistantCore } from '../../src/core/assistant-core.js';
 import {
   CONVERSATION_RENAME_COMMAND,
   CONVERSATION_SESSION_INFO_COMMAND,
+  CONVERSATION_TONE_COMMAND,
   ConversationRunner,
   LOCAL_COMMAND_HELP,
 } from '../../src/core/conversation-runner.js';
@@ -346,6 +347,38 @@ test('local commands can coexist without entering Session and exit cleanly', asy
   assert.equal(providerCalls, 2);
   assert.equal(outputs.length, 3);
   assert.deepEqual(result.session.getMessages().map(({ content }) => content), ['message A', 'reply', 'message B', 'reply']);
+});
+
+test('explicit natural tone preference is handled locally and never enters Session', async () => {
+  let providerCalls = 0;
+  const requests: AIRequest[] = [];
+  const provider = new MockAIProvider({
+    responder: (request) => {
+      providerCalls += 1;
+      requests.push(request);
+      return { text: 'reply', provider: 'mock', model: 'mock-model', finishReason: 'stop' };
+    },
+  });
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const localInputs: string[] = [];
+  const commands: string[] = [];
+  const result = await runner.run(inputs([
+    'mensaje A', 'Respóndeme más breve.', 'mensaje B', CONVERSATION_TONE_COMMAND, '/exit',
+  ]), {
+    onTonePreference: async (input) => {
+      if (input !== 'Respóndeme más breve.') return false;
+      localInputs.push(input);
+      return true;
+    },
+    onCommand: async (command) => { commands.push(command); },
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(providerCalls, 2);
+  assert.deepEqual(localInputs, ['Respóndeme más breve.']);
+  assert.deepEqual(commands, [CONVERSATION_TONE_COMMAND]);
+  assert.deepEqual(result.session.getMessages().map(({ content }) => content), ['mensaje A', 'reply', 'mensaje B', 'reply']);
+  assert.deepEqual(requests[1]?.messages.filter(({ role }) => role === 'user').map(({ content }) => content), ['mensaje A', 'mensaje B']);
 });
 
 test('reminder commands stay local, preserve Session, and do not invoke the provider', async () => {

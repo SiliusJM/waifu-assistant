@@ -160,6 +160,15 @@ puede recibir un único seguimiento breve (por ejemplo, cambiar el término busc
 en la misma conversación guardada); ese contexto mínimo se consume enseguida y se
 descarta ante comandos, cambios de tema o sesión.
 
+El estilo de respuesta puede cambiarse localmente con `/tone` o `/tone <nombre>`:
+`default`, `concise`, `warm`, `technical` y `playful`. Solo se persiste el
+identificador elegido en `~/.waifu-assistant/conversation-tone.json` (o en
+`YUKI_TONE_PREFERENCES_PATH`). Peticiones naturales inequívocas como
+`Respóndeme más breve` también pueden cambiarlo; una frase casual no lo modifica.
+El estilo solo influye en la presentación enviada al provider: no reemplaza la
+personalidad ni cambia seguridad, tools o memoria. La instrucción interna no se
+añade a la Session.
+
 Las notas se guardan en `~/.waifu-assistant/notes.json` (o en la ruta configurada
 con `YUKI_NOTES_PATH`) y se gestionan explícitamente con `/note-add Comprar
 adaptador HDMI`, `/notes`, `/note-show n-a1b2c3d4` y `/note-delete n-a1b2c3d4`. No usan IA,

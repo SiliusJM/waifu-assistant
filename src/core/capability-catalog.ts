@@ -17,8 +17,9 @@ export const CAPABILITY_CATALOG: readonly CapabilityCatalogEntry[] = [
       '/history             Muestra el historial actual',
       '/clear               Limpia la sesión actual',
       '/exit                Cierra la conversación',
+      '/tone [nombre]       Consulta o cambia el estilo de respuesta local',
     ],
-    naturalHelp: 'Puedes conversar en varios turnos. Escribe una nueva entrada para interrumpir una respuesta activa, usa /cancel para detenerla o /exit para terminar.',
+    naturalHelp: 'Puedes conversar en varios turnos. Escribe una nueva entrada para interrumpir una respuesta activa, usa /cancel para detenerla o /exit para terminar. Cambia el estilo de respuesta con /tone [nombre].',
   },
   {
     id: 'memory',

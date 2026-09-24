@@ -19,6 +19,8 @@ import { isExplicitMemoryRecallQuestion, selectRelevantExplicitMemories } from '
 import { CURRENT_DATA_HONESTY_POLICY } from './current-data-policy.js';
 import { isExplicitLocalStatusQuery } from '../tools/local-status-query-intent.js';
 import { isSavedSessionRelatedInput } from '../tools/saved-session-query-intent.js';
+import { conversationToneInstruction } from '../personality/conversation-tone-preferences.js';
+import type { ConversationTone } from '../personality/conversation-tone-store.js';
 
 const MAX_TOOL_ARGUMENTS_JSON_LENGTH = 4096;
 
@@ -29,6 +31,8 @@ export interface AssistantCoreOptions {
   readonly toolAllowlist?: readonly string[];
   /** Controlled local clock supplied to reminder-capable tool prompts. */
   readonly localActionNow?: () => Date;
+  /** Reads a closed local style preference; it never mutates the personality snapshot. */
+  readonly conversationTone?: () => ConversationTone;
 }
 
 export interface RespondOptions {
@@ -52,6 +56,7 @@ export class AssistantCore {
   private readonly toolManager?: ToolManager;
   private readonly toolAllowlist: readonly string[];
   private readonly localActionNow: () => Date;
+  private readonly conversationTone: () => ConversationTone;
 
   constructor(options: AssistantCoreOptions) {
     this.provider = options.provider;
@@ -59,6 +64,7 @@ export class AssistantCore {
     this.toolManager = options.toolManager;
     this.toolAllowlist = options.toolAllowlist ?? [];
     this.localActionNow = options.localActionNow ?? (() => new Date());
+    this.conversationTone = options.conversationTone ?? (() => 'default');
   }
 
   createSession(): Session {
@@ -224,6 +230,8 @@ export class AssistantCore {
       role: 'system' as const,
       content: text,
     })) ?? [];
+    const toneInstruction = conversationToneInstruction(this.conversationTone());
+    const toneMessages = toneInstruction === undefined ? [] : [{ role: 'system' as const, content: toneInstruction }];
     const relevantMemories = !isLocalMetadataQuery
       ? selectRelevantExplicitMemories(latestUserInput ?? '', options.memory)
       : [];
@@ -252,7 +260,7 @@ export class AssistantCore {
     const tools = this.getToolDefinitions();
     return {
       sessionId: context.sessionId,
-      messages: [...personalityMessages, ...memoryMessages, ...currentDataPolicyMessage, ...this.localActionContextMessage(), ...context.messages.map(({ role, content: messageContent }) => ({
+      messages: [...personalityMessages, ...toneMessages, ...memoryMessages, ...currentDataPolicyMessage, ...this.localActionContextMessage(), ...context.messages.map(({ role, content: messageContent }) => ({
         role,
         content: messageContent,
       }))],
