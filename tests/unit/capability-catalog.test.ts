@@ -64,6 +64,9 @@ test('data queries and natural actions are not misclassified as capability help'
   assert.equal(resolveNaturalCapabilityHelp('¿Qué notas tengo guardadas?'), undefined);
   assert.equal(resolveNaturalCapabilityHelp('Recuérdame mañana comprar pan'), undefined);
   assert.equal(resolveNaturalCapabilityHelp('Guarda una nota: comprar pan'), undefined);
+  assert.equal(resolveNaturalCapabilityHelp('¿Cómo estuvo tu día?'), undefined);
+  assert.equal(resolveNaturalCapabilityHelp('How are you today?'), undefined);
+  assert.match(resolveNaturalCapabilityHelp('¿Cómo navego por Internet?') ?? '', /no.*habilitada/u);
 });
 
 test('unavailable capabilities are described honestly without promising future support', () => {
