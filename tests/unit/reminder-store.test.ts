@@ -6,6 +6,7 @@ import test from 'node:test';
 import { AssistantError } from '../../src/shared/errors.js';
 import {
   formatDueReminderNotice,
+  formatReminderList,
   parseReminderCommand,
   parseReminderDueAt,
   REMINDER_MAX_ENTRIES,
@@ -81,6 +82,58 @@ test('reminders persist, sort by due time, preserve Unicode, and delete only by 
     assert.equal(await reloaded.delete(sooner.id), true);
     assert.equal(await reloaded.delete(sooner.id), false);
     assert.deepEqual((await reloaded.list()).map(({ id }) => id), [later.id]);
+  });
+});
+
+test('completion is idempotent, records completion time, and keeps history until delete', async () => {
+  await withStore(async (store, filePath) => {
+    const reminder = await store.add('Terminar informe', new Date(2026, 8, 24, 9, 0));
+    const pending = await store.add('Enviar resumen', new Date(2026, 8, 25, 9, 0));
+    assert.equal(await store.complete('r-ffffffff'), 'not-found');
+    assert.equal(await store.complete(reminder.id), 'completed');
+    assert.equal(await store.complete(reminder.id), 'already-completed');
+    assert.deepEqual((await store.list()).map(({ id, status }) => ({ id, status })), [
+      { id: pending.id, status: 'pending' },
+    ]);
+
+    const all = await store.list({ all: true });
+    assert.deepEqual(all.map(({ id, status }) => ({ id, status })), [
+      { id: reminder.id, status: 'completed' },
+      { id: pending.id, status: 'pending' },
+    ]);
+    assert.equal(all[0]?.completedAt, NOW.toISOString());
+    assert.match(formatReminderList(all, NOW), /completado/u);
+    assert.match(formatReminderList(all, NOW), /completado: /u);
+
+    const reloaded = new ReminderStore(filePath);
+    await reloaded.load();
+    assert.equal((await reloaded.list({ all: true }))[0]?.completedAt, NOW.toISOString());
+    assert.equal(await reloaded.delete(reminder.id), true);
+    assert.deepEqual((await reloaded.list({ all: true })).map(({ id }) => id), [pending.id]);
+  });
+});
+
+test('legacy V1 reminder documents load unchanged and migrate to V2 on the next write', async () => {
+  await withStore(async (_store, filePath) => {
+    await mkdir(dirname(filePath), { recursive: true });
+    const legacy = {
+      version: 1,
+      reminders: [{
+        id: 'r-1234abcd',
+        text: 'Legacy reminder',
+        dueAt: '2026-09-25T12:00:00.000Z',
+        createdAt: '2026-09-23T12:00:00.000Z',
+        status: 'pending',
+      }],
+    };
+    await writeFile(filePath, JSON.stringify(legacy), 'utf8');
+    const store = new ReminderStore(filePath, { now: () => new Date(NOW), idFactory: newId });
+    await store.load();
+    assert.deepEqual((await store.list()).map(({ id, status }) => ({ id, status })), [
+      { id: 'r-1234abcd', status: 'pending' },
+    ]);
+    await store.add('New reminder', new Date(2026, 8, 26, 9, 0));
+    assert.equal((JSON.parse(await readFile(filePath, 'utf8')) as { version: number }).version, 2);
   });
 });
 

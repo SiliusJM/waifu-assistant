@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { AssistantError } from '../shared/errors.js';
 
-export const REMINDER_SCHEMA_VERSION = 1 as const;
+export const REMINDER_SCHEMA_VERSION = 2 as const;
 export const REMINDER_MAX_ENTRIES = 100 as const;
 export const REMINDER_MAX_TEXT_LENGTH = 500 as const;
 
@@ -13,7 +13,8 @@ export interface Reminder {
   readonly text: string;
   readonly dueAt: string;
   readonly createdAt: string;
-  readonly status: 'pending';
+  readonly status: 'pending' | 'completed';
+  readonly completedAt?: string;
 }
 
 export interface ReminderFileSystem {
@@ -64,7 +65,10 @@ function isCanonicalTimestamp(value: unknown): value is string {
   return !Number.isNaN(date.getTime()) && date.toISOString() === value;
 }
 
-function validateReminder(value: unknown): Reminder {
+function validateReminder(value: unknown, version: 1 | 2): Reminder {
+  const allowedKeys = version === 1
+    ? ['id', 'text', 'dueAt', 'createdAt', 'status']
+    : ['id', 'text', 'dueAt', 'createdAt', 'status', 'completedAt'];
   if (!isRecord(value)
     || !isValidId(value.id)
     || typeof value.text !== 'string'
@@ -72,8 +76,11 @@ function validateReminder(value: unknown): Reminder {
     || value.text.length > REMINDER_MAX_TEXT_LENGTH
     || !isCanonicalTimestamp(value.dueAt)
     || !isCanonicalTimestamp(value.createdAt)
-    || value.status !== 'pending'
-    || Object.keys(value).some((key) => !['id', 'text', 'dueAt', 'createdAt', 'status'].includes(key))) {
+    || (version === 1 && value.status !== 'pending')
+    || (version === 2 && value.status !== 'pending' && value.status !== 'completed')
+    || (value.status === 'completed' && !isCanonicalTimestamp(value.completedAt))
+    || (value.status === 'pending' && value.completedAt !== undefined)
+    || Object.keys(value).some((key) => !allowedKeys.includes(key))) {
     throw reminderError('The reminders file contains an invalid reminder.', 'REMINDER_CORRUPT_ERROR');
   }
   return {
@@ -81,12 +88,15 @@ function validateReminder(value: unknown): Reminder {
     text: value.text,
     dueAt: value.dueAt,
     createdAt: value.createdAt,
-    status: 'pending',
+    status: value.status as Reminder['status'],
+    ...(value.status === 'completed' && typeof value.completedAt === 'string'
+      ? { completedAt: value.completedAt }
+      : {}),
   };
 }
 
 function validateDocument(value: unknown): Map<string, Reminder> {
-  if (!isRecord(value) || value.version !== REMINDER_SCHEMA_VERSION || !Array.isArray(value.reminders)) {
+  if (!isRecord(value) || (value.version !== 1 && value.version !== REMINDER_SCHEMA_VERSION) || !Array.isArray(value.reminders)) {
     throw reminderError('The reminders file has an unsupported or invalid schema.', 'REMINDER_CORRUPT_ERROR');
   }
   if (value.reminders.length > REMINDER_MAX_ENTRIES) {
@@ -94,7 +104,7 @@ function validateDocument(value: unknown): Map<string, Reminder> {
   }
   const result = new Map<string, Reminder>();
   for (const rawReminder of value.reminders) {
-    const reminder = validateReminder(rawReminder);
+    const reminder = validateReminder(rawReminder, value.version);
     if (result.has(reminder.id)) {
       throw reminderError('The reminders file contains duplicate IDs.', 'REMINDER_CORRUPT_ERROR');
     }
@@ -204,9 +214,12 @@ export class ReminderStore {
     }
   }
 
-  async list(): Promise<readonly Reminder[]> {
+  async list(options: { readonly all?: boolean } = {}): Promise<readonly Reminder[]> {
     await this.ensureLoaded();
-    return Object.freeze([...this.reminders.values()].sort(compareReminders));
+    const reminders = [...this.reminders.values()]
+      .filter(({ status }) => options.all === true || status === 'pending')
+      .sort(compareReminders);
+    return Object.freeze(reminders);
   }
 
   async listDue(now: Date = this.now()): Promise<readonly Reminder[]> {
@@ -225,6 +238,30 @@ export class ReminderStore {
     try {
       await this.persist();
       return true;
+    } catch (error) {
+      this.reminders.set(id, reminder);
+      throw error;
+    }
+  }
+
+  async complete(id: string): Promise<'completed' | 'already-completed' | 'not-found'> {
+    if (!isValidId(id)) {
+      throw reminderError('Reminder ID must use the format r- followed by eight hexadecimal characters.', 'REMINDER_CONFIGURATION_ERROR');
+    }
+    await this.ensureLoaded();
+    const reminder = this.reminders.get(id);
+    if (!reminder) return 'not-found';
+    if (reminder.status === 'completed') return 'already-completed';
+
+    const completed: Reminder = {
+      ...reminder,
+      status: 'completed',
+      completedAt: toIsoTimestamp(this.now()),
+    };
+    this.reminders.set(id, completed);
+    try {
+      await this.persist();
+      return 'completed';
     } catch (error) {
       this.reminders.set(id, reminder);
       throw error;
@@ -366,5 +403,19 @@ export function formatDueReminderNotice(reminders: readonly Reminder[]): string 
   return [
     'Recordatorios pendientes:',
     ...reminders.map(({ id, text, dueAt }) => `[${id}] ${text} · ${formatReminderDate(dueAt)}`),
+  ].join('\n');
+}
+
+export function formatReminderList(reminders: readonly Reminder[], now: Date = new Date()): string {
+  if (reminders.length === 0) return 'No hay recordatorios pendientes.';
+  const nowTimestamp = toIsoTimestamp(now);
+  return [
+    'Recordatorios:',
+    ...reminders.map((reminder) => {
+      const status = reminder.status === 'completed'
+        ? `completado${reminder.completedAt ? ` · completado: ${formatReminderDate(reminder.completedAt)}` : ''}`
+        : reminder.dueAt <= nowTimestamp ? 'vencido' : 'pendiente';
+      return `[${reminder.id}] ${formatReminderDate(reminder.dueAt)} · ${status} · ${reminder.text}`;
+    }),
   ].join('\n');
 }

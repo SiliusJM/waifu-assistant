@@ -37,18 +37,21 @@ import {
   CONVERSATION_REMIND_COMMAND,
   CONVERSATION_REMINDERS_COMMAND,
   CONVERSATION_REMINDER_DELETE_COMMAND,
+  CONVERSATION_REMINDER_COMPLETE_COMMAND,
   LOCAL_COMMAND_HELP,
 } from './core/conversation-runner.js';
 import { PersistentMemoryStore, resolveMemoryPath } from './memory/memory-store.js';
 import { resolveSavedSessionPath, SavedSessionStore } from './core/saved-session-store.js';
 import { MarkdownConversationExporter } from './core/markdown-conversation-exporter.js';
 import {
-  formatDueReminderNotice,
   formatReminderDate,
+  formatReminderList,
   parseReminderCommand,
   ReminderStore,
   resolveReminderPath,
 } from './reminders/reminder-store.js';
+import { ConsoleReminderNotifier } from './reminders/reminder-notifier.js';
+import { ReminderScheduler } from './reminders/reminder-scheduler.js';
 
 export async function main(
   argv: readonly string[] = process.argv.slice(2),
@@ -94,11 +97,13 @@ export async function main(
   const onInterrupt = (): void => controller.abort();
   process.once('SIGINT', onInterrupt);
   const terminal = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+  const reminderScheduler = new ReminderScheduler(reminderStore, new ConsoleReminderNotifier(), {
+    onError: () => { process.stdout.write('No se pudo mostrar una notificación de recordatorio.\n'); },
+  });
   try {
     const runner = new ConversationRunner(core);
     const conversationExporter = new MarkdownConversationExporter();
-    const dueReminderNotice = formatDueReminderNotice(await reminderStore.listDue());
-    if (dueReminderNotice) process.stdout.write(dueReminderNotice + '\n');
+    await reminderScheduler.start();
     await runner.run(terminal, {
       signal: controller.signal,
       interruptible: true,
@@ -122,6 +127,7 @@ export async function main(
           try {
             const parsed = parseReminderCommand(command);
             const reminder = await reminderStore.add(parsed.text, parsed.dueAt);
+            await reminderScheduler.refresh();
             process.stdout.write([
               `Recordatorio creado: ${reminder.id}`,
               `Fecha: ${formatReminderDate(reminder.dueAt)}`,
@@ -136,24 +142,48 @@ export async function main(
           }
           return;
         }
-        if (command === CONVERSATION_REMINDERS_COMMAND) {
+        if (command === CONVERSATION_REMINDERS_COMMAND || command.startsWith(`${CONVERSATION_REMINDERS_COMMAND} `)) {
           try {
-            const reminders = await reminderStore.list();
-            process.stdout.write((reminders.length === 0
-              ? 'No hay recordatorios pendientes.'
-              : [
-                'Recordatorios pendientes:',
-                ...reminders.map(({ id, dueAt, text }) => {
-                  const status = dueAt <= new Date().toISOString() ? 'vencido' : 'pendiente';
-                  return `[${id}] ${formatReminderDate(dueAt)} · ${status} · ${text}`;
-                }),
-              ].join('\n')) + '\n');
+            const all = command === `${CONVERSATION_REMINDERS_COMMAND} --all`;
+            if (command !== CONVERSATION_REMINDERS_COMMAND && !all) {
+              process.stdout.write('Uso: /reminders [--all]\n');
+              return;
+            }
+            const reminders = await reminderStore.list({ all });
+            process.stdout.write((all && reminders.length === 0
+              ? 'No hay recordatorios.'
+              : formatReminderList(reminders)) + '\n');
           } catch (error) {
             const reminderError = error instanceof AssistantError ? error : new AssistantError(
               'No se pudieron consultar los recordatorios.',
               { code: 'REMINDER_IO_ERROR', retryable: false, cause: error },
             );
             process.stdout.write(`No se pudieron consultar los recordatorios: ${reminderError.message}\n`);
+          }
+          return;
+        }
+        if (command === CONVERSATION_REMINDER_COMPLETE_COMMAND
+          || command.startsWith(`${CONVERSATION_REMINDER_COMPLETE_COMMAND} `)) {
+          const id = command.slice(CONVERSATION_REMINDER_COMPLETE_COMMAND.length).trim();
+          try {
+            if (!id || /\s/u.test(id)) {
+              process.stdout.write('Uso: /reminder-complete <id>\n');
+              return;
+            }
+            const result = await reminderStore.complete(id);
+            await reminderScheduler.refresh();
+            const message = result === 'completed'
+              ? `Recordatorio completado: ${id}`
+              : result === 'already-completed'
+                ? `El recordatorio ya estaba completado: ${id}`
+                : `No existe el recordatorio: ${id}`;
+            process.stdout.write(message + '\n');
+          } catch (error) {
+            const reminderError = error instanceof AssistantError ? error : new AssistantError(
+              'No se pudo completar el recordatorio.',
+              { code: 'REMINDER_IO_ERROR', retryable: false, cause: error },
+            );
+            process.stdout.write(`No se pudo completar el recordatorio: ${reminderError.message}\n`);
           }
           return;
         }
@@ -166,6 +196,7 @@ export async function main(
               return;
             }
             const removed = await reminderStore.delete(id);
+            await reminderScheduler.refresh();
             process.stdout.write((removed ? `Recordatorio eliminado: ${id}` : `No existe el recordatorio: ${id}`) + '\n');
           } catch (error) {
             const reminderError = error instanceof AssistantError ? error : new AssistantError(
@@ -425,6 +456,7 @@ export async function main(
       },
     });
   } finally {
+    reminderScheduler.stop();
     terminal.close();
     process.removeListener('SIGINT', onInterrupt);
   }

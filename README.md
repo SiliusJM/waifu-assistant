@@ -108,7 +108,7 @@ Las respuestas interactivas pueden mostrarse progresivamente mediante streaming;
 ## Comandos locales
 
 La CLI reconoce `/help`, `/time`, `/calc <expression>`, `/remind <YYYY-MM-DD HH:mm> <texto>`,
-`/reminders`, `/reminder-delete <id>`, `/status`, `/history`, `/clear`,
+`/reminders`, `/reminders --all`, `/reminder-complete <id>`, `/reminder-delete <id>`, `/status`, `/history`, `/clear`,
 `/remember <key> <value>`, `/memory`, `/forget <key>`,
 `/save-session <name>`, `/sessions`, `/load-session <name>`,
 `/delete-session <name>`, `/rename <nombre>`, `/session-info`, `/export [nombre]`
@@ -116,13 +116,18 @@ y `/exit`. Estos comandos no requieren una llamada al
 LLM. La memoria explícita se guarda localmente y puede redirigirse mediante
 `YUKI_MEMORY_PATH`; no se mezcla con las sesiones guardadas.
 
-Los recordatorios V1 se guardan localmente en `~/.waifu-assistant/reminders.json`
+Los recordatorios se guardan localmente en `~/.waifu-assistant/reminders.json`
 (o en la ruta indicada por `YUKI_REMINDERS_PATH`). Aceptan fecha/hora explícita
 `YYYY-MM-DD HH:mm` en la zona horaria del sistema; también se admite `HH:mm` para
-la siguiente ocurrencia futura. No usan IA para interpretar fechas ni
-notificaciones del sistema. Al iniciar una sesión interactiva se muestran los
-que ya vencieron; siguen pendientes hasta que se eliminen. No se ejecutan en
-segundo plano cuando Yuki está cerrada.
+la siguiente ocurrencia futura. `/reminders` muestra pendientes y
+`/reminders --all` incluye el historial completado. Usa
+`/reminder-complete <id>` para conservar un recordatorio como completado, o
+`/reminder-delete <id>` para eliminarlo. Al vencer, Yuki muestra un aviso en la
+consola mientras la sesión interactiva está abierta; los vencidos al iniciar se
+avisan una vez en esa ejecución y permanecen pendientes hasta completarlos o
+eliminarlos. No se ejecuta un daemon ni se programan avisos cuando Yuki está
+cerrada. Las notificaciones toast nativas de Windows quedan diferidas; el
+fallback de consola es portable y no ejecuta contenido del recordatorio.
 
 ### Exportar conversaciones
 
