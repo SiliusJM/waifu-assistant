@@ -9,6 +9,7 @@ import { formatCapabilityHelp, resolveNaturalCapabilityHelp } from './capability
 export const CONVERSATION_EXIT_COMMAND = '/exit';
 export const CONVERSATION_CANCEL_COMMAND = '/cancel';
 export const CONVERSATION_HELP_COMMAND = '/help';
+export const CONVERSATION_SUMMARY_COMMAND = '/summary';
 export const CONVERSATION_TIME_COMMAND = '/time';
 export const CONVERSATION_CALC_COMMAND = '/calc';
 export const CONVERSATION_STATUS_COMMAND = '/status';
@@ -199,6 +200,7 @@ export class ConversationRunner {
     });
 
     const isLocalCommand = (input: string): boolean => input === CONVERSATION_HELP_COMMAND
+      || input === CONVERSATION_SUMMARY_COMMAND
       || input === CONVERSATION_CANCEL_COMMAND
       || input === CONVERSATION_TIME_COMMAND
       || input === CONVERSATION_CALC_COMMAND

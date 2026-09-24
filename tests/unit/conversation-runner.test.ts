@@ -7,6 +7,7 @@ import { AssistantCore } from '../../src/core/assistant-core.js';
 import {
   CONVERSATION_RENAME_COMMAND,
   CONVERSATION_SESSION_INFO_COMMAND,
+  CONVERSATION_SUMMARY_COMMAND,
   CONVERSATION_FORMAT_COMMAND,
   CONVERSATION_TONE_COMMAND,
   ConversationRunner,
@@ -99,6 +100,47 @@ test('conversation runner reuses one session and preserves multi-turn order', as
     { role: 'assistant', content: 'messages=2' },
     { role: 'user', content: 'two' },
     { role: 'assistant', content: 'messages=4' },
+  ]);
+});
+
+test('/summary is dispatched locally, summarizes only current visible turns, and does not alter later context', async () => {
+  const requests: AIRequest[] = [];
+  const provider = new MockAIProvider({
+    responder: (request) => {
+      requests.push(request);
+      const isSummary = request.messages.some(({ content }) => content.includes('Resume brevemente la conversación visible'));
+      return {
+        text: isSummary ? 'Resumen visible.' : `respuesta-${requests.length}`,
+        provider: 'mock', model: 'scripted', finishReason: 'stop',
+      };
+    },
+  });
+  const core = new AssistantCore({ provider });
+  const runner = new ConversationRunner(core);
+  const visibleOutput: string[] = [];
+  let sessionBeforeSummary: readonly Readonly<{ role: string; content: string }>[] = [];
+
+  const result = await runner.run(inputs(['tema inicial', CONVERSATION_SUMMARY_COMMAND, 'seguimiento', '/exit']), {
+    onCommand: async (command) => {
+      assert.equal(command, CONVERSATION_SUMMARY_COMMAND);
+      sessionBeforeSummary = runner.session.getMessages().map(({ role, content }) => ({ role, content }));
+      visibleOutput.push(await core.summarizeSession(runner.session));
+      assert.deepEqual(runner.session.getMessages().map(({ role, content }) => ({ role, content })), sessionBeforeSummary);
+    },
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(visibleOutput, ['Resumen visible.']);
+  assert.equal(requests.filter(({ messages }) => messages.some(({ content }) => content.includes('Resume brevemente la conversación visible'))).length, 1);
+  const followupRequest = requests.find(({ messages }) => messages.at(-1)?.content === 'seguimiento');
+  assert.ok(followupRequest);
+  assert.equal(followupRequest.messages.some(({ content }) => content === 'Resumen visible.'), false);
+  assert.equal(followupRequest.messages.some(({ content }) => content === CONVERSATION_SUMMARY_COMMAND), false);
+  assert.deepEqual(result.session.getMessages().map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'tema inicial' },
+    { role: 'assistant', content: 'respuesta-1' },
+    { role: 'user', content: 'seguimiento' },
+    { role: 'assistant', content: 'respuesta-3' },
   ]);
 });
 
