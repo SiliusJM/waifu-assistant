@@ -23,12 +23,30 @@ export {
   CONVERSATION_EXPORT_COMMAND,
   CONVERSATION_RENAME_COMMAND,
   CONVERSATION_SESSION_INFO_COMMAND,
+  CONVERSATION_REMIND_COMMAND,
+  CONVERSATION_REMINDERS_COMMAND,
+  CONVERSATION_REMINDER_DELETE_COMMAND,
   ConversationRunner,
   type ConversationRunOptions,
   type ConversationRunResult,
   type ConversationRunStatus,
 } from './core/conversation-runner.js';
 export { LOCAL_TOOL_ALLOWLIST } from './tools/local-tool-manager.js';
+export {
+  REMINDER_SCHEMA_VERSION,
+  REMINDER_MAX_ENTRIES,
+  REMINDER_MAX_TEXT_LENGTH,
+  ReminderStore,
+  resolveReminderPath,
+  parseReminderDueAt,
+  parseReminderCommand,
+  formatReminderDate,
+  formatDueReminderNotice,
+  type Reminder,
+  type ReminderDateInput,
+  type ReminderFileSystem,
+  type ReminderStoreOptions,
+} from './reminders/reminder-store.js';
 export * from './memory/index.js';
 export {
   SAVED_SESSION_MAX_CONTENT_LENGTH,

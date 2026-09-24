@@ -107,13 +107,22 @@ Las respuestas interactivas pueden mostrarse progresivamente mediante streaming;
 
 ## Comandos locales
 
-La CLI reconoce `/help`, `/time`, `/calc <expression>`, `/status`, `/history`,
-`/clear`, `/remember <key> <value>`, `/memory`, `/forget <key>`,
+La CLI reconoce `/help`, `/time`, `/calc <expression>`, `/remind <YYYY-MM-DD HH:mm> <texto>`,
+`/reminders`, `/reminder-delete <id>`, `/status`, `/history`, `/clear`,
+`/remember <key> <value>`, `/memory`, `/forget <key>`,
 `/save-session <name>`, `/sessions`, `/load-session <name>`,
 `/delete-session <name>`, `/rename <nombre>`, `/session-info`, `/export [nombre]`
 y `/exit`. Estos comandos no requieren una llamada al
 LLM. La memoria explícita se guarda localmente y puede redirigirse mediante
 `YUKI_MEMORY_PATH`; no se mezcla con las sesiones guardadas.
+
+Los recordatorios V1 se guardan localmente en `~/.waifu-assistant/reminders.json`
+(o en la ruta indicada por `YUKI_REMINDERS_PATH`). Aceptan fecha/hora explícita
+`YYYY-MM-DD HH:mm` en la zona horaria del sistema; también se admite `HH:mm` para
+la siguiente ocurrencia futura. No usan IA para interpretar fechas ni
+notificaciones del sistema. Al iniciar una sesión interactiva se muestran los
+que ya vencieron; siguen pendientes hasta que se eliminen. No se ejecutan en
+segundo plano cuando Yuki está cerrada.
 
 ### Exportar conversaciones
 
