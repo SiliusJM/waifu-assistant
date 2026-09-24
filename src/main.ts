@@ -13,8 +13,10 @@ import {
   createLocalToolManager,
   executeLocalCalculation,
   executeLocalTime,
+  executeLocalSavedSessionSearch,
   formatCalculation,
   formatLocalTime,
+  formatSavedSessionSearch,
   getLocalToolAllowlist,
 } from './tools/local-tool-manager.js';
 import {
@@ -33,6 +35,7 @@ import {
   CONVERSATION_LOAD_SESSION_COMMAND,
   CONVERSATION_SAVE_SESSION_COMMAND,
   CONVERSATION_SESSIONS_COMMAND,
+  CONVERSATION_SESSION_SEARCH_COMMAND,
   CONVERSATION_STATUS_COMMAND,
   CONVERSATION_REMIND_COMMAND,
   CONVERSATION_REMINDERS_COMMAND,
@@ -424,6 +427,29 @@ export async function main(
             );
             process.stdout.write(`No se pudieron consultar las sesiones guardadas: ${sessionError.message}\n`);
           }
+          return;
+        }
+        if (command === CONVERSATION_SESSION_SEARCH_COMMAND
+          || command.startsWith(`${CONVERSATION_SESSION_SEARCH_COMMAND} `)) {
+          const body = command.slice(CONVERSATION_SESSION_SEARCH_COMMAND.length).trim();
+          const separator = body.search(/\s/u);
+          if (separator < 1) {
+            process.stdout.write('Uso: /session-search <id> <texto>\n');
+            return;
+          }
+          const sessionId = body.slice(0, separator);
+          const query = body.slice(separator).trim();
+          if (!query) {
+            process.stdout.write('Uso: /session-search <id> <texto>\n');
+            return;
+          }
+          const result = await executeLocalSavedSessionSearch(localToolManager, sessionId, query, {
+            signal: context.signal,
+            sessionId: context.sessionId,
+          });
+          process.stdout.write(result.status === 'success'
+            ? formatSavedSessionSearch(result.value) + '\n'
+            : `No se pudo buscar en la conversación: ${result.error.message}\n`);
           return;
         }
         if (command === CONVERSATION_SESSION_INFO_COMMAND) {
