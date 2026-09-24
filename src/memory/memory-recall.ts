@@ -47,7 +47,7 @@ function relevanceScore(inputTerms: ReadonlySet<string>, key: string): number {
   return score;
 }
 
-function isSafeMemory(entry: MemoryEntry): boolean {
+export function isSafeExplicitMemoryEntry(entry: MemoryEntry): boolean {
   return !SENSITIVE_KEY.test(entry.key) && !SENSITIVE_VALUE.test(entry.value);
 }
 
@@ -61,7 +61,7 @@ export function selectRelevantExplicitMemories(
   if (inputTerms.size === 0) return [];
 
   const candidates = snapshot.entries
-    .filter(isSafeMemory)
+    .filter(isSafeExplicitMemoryEntry)
     .map((entry, index) => ({ entry, index, score: relevanceScore(inputTerms, entry.key) }))
     .filter(({ score }) => score > 0)
     .sort((left, right) => right.score - left.score || left.index - right.index);

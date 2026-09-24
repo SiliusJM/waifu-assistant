@@ -137,6 +137,7 @@ export async function main(
       toolManager: localToolManager,
       sessionId: runner.session.id,
       now,
+      memoryStore,
       onReminderCreated: () => reminderScheduler.refresh(),
     });
     const conversationExporter = new MarkdownConversationExporter();

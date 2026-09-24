@@ -52,6 +52,38 @@ test('persistent memory starts empty and supports CRUD, ordering, overwrite and 
   });
 });
 
+test('optimistic memory update requires an existing unchanged key and persists atomically', async () => {
+  await withStore(async (store, filePath, directory) => {
+    await store.set('city', 'Cuenca');
+    assert.equal(await store.update('missing', 'Guayaquil', 'old'), 'missing');
+    assert.equal(await store.update('city', 'Guayaquil', 'stale'), 'conflict');
+    assert.equal(await store.update('city', 'Cuenca', 'Cuenca'), 'unchanged');
+    assert.equal(await store.update('city', 'Guayaquil', 'Cuenca'), 'updated');
+    assert.equal(await store.get('city'), 'Guayaquil');
+
+    const reloaded = new PersistentMemoryStore(filePath);
+    await reloaded.load();
+    assert.equal(await reloaded.get('city'), 'Guayaquil');
+    const files = await readdir(directory, { recursive: true });
+    assert.equal(files.some((file) => file.endsWith('.tmp') || file.endsWith('.bak')), false);
+  });
+});
+
+test('optimistic update refreshes persisted state before comparing the expected value', async () => {
+  await withStore(async (first, filePath) => {
+    await first.set('city', 'Cuenca');
+    const second = new PersistentMemoryStore(filePath);
+    await second.load();
+    await first.set('city', 'Quito');
+
+    assert.equal(await second.update('city', 'Guayaquil', 'Cuenca'), 'conflict');
+    assert.equal(await second.get('city'), 'Quito');
+    const persisted = new PersistentMemoryStore(filePath);
+    await persisted.load();
+    assert.equal(await persisted.get('city'), 'Quito');
+  });
+});
+
 test('memory key validation accepts boundaries and rejects unsafe values', async () => {
   await withStore(async (store) => {
     for (const key of ['a', 'A', 'abc123', 'a_b', 'a-b', 'x'.repeat(64)]) {
@@ -163,6 +195,16 @@ test('write failures are controlled and do not leave the final file partially wr
     await assertCode(store.set('x', 'y'), 'MEMORY_IO_ERROR');
     await assert.rejects(readFile(filePath, 'utf8'));
     assert.equal((await readdir(directory)).some((file) => file.endsWith('.tmp')), false);
+
+    const baseline = new PersistentMemoryStore(filePath);
+    await baseline.load();
+    await baseline.set('city', 'Cuenca');
+    const failingUpdate = new PersistentMemoryStore(filePath, failingFileSystem);
+    await failingUpdate.load();
+    await assertCode(failingUpdate.update('city', 'Guayaquil', 'Cuenca'), 'MEMORY_IO_ERROR');
+    assert.equal(await failingUpdate.get('city'), 'Cuenca');
+    assert.equal(await new PersistentMemoryStore(filePath).get('city'), 'Cuenca');
+    assert.equal((await readdir(directory)).some((file) => file.endsWith('.tmp') || file.endsWith('.bak')), false);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -24,6 +24,7 @@ async function withStores(run: (stores: {
   readonly reminders: ReminderStore;
   readonly notes: NoteStore;
   readonly sessions: SavedSessionStore;
+  readonly memory: PersistentMemoryStore;
 }) => Promise<void>): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), 'waifu-safe-clarification-'));
   const reminders = new ReminderStore(join(directory, 'reminders.json'), { now: () => new Date(FIXED_NOW) });
@@ -43,9 +44,10 @@ async function withStores(run: (stores: {
     },
   }, null, 2)}\n`, 'utf8');
   const sessions = new SavedSessionStore(sessionsPath);
+  const memory = new PersistentMemoryStore(join(directory, 'memory.json'));
   try {
-    await Promise.all([reminders.load(), notes.load(), sessions.load()]);
-    await run({ directory, reminders, notes, sessions });
+    await Promise.all([reminders.load(), notes.load(), sessions.load(), memory.load()]);
+    await run({ directory, reminders, notes, sessions, memory });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -56,7 +58,7 @@ async function* inputs(values: readonly string[]): AsyncIterable<string> {
 }
 
 async function runFlow(
-  stores: { readonly reminders: ReminderStore; readonly notes: NoteStore; readonly sessions: SavedSessionStore },
+  stores: { readonly reminders: ReminderStore; readonly notes: NoteStore; readonly sessions: SavedSessionStore; readonly memory?: PersistentMemoryStore },
   values: readonly string[],
   options: {
     readonly onCommand?: (command: string) => void | Promise<void>;
@@ -86,6 +88,7 @@ async function runFlow(
     toolManager: createLocalToolManager(toolOptions),
     sessionId: runner.session.id,
     now: options.now ?? (() => new Date(FIXED_NOW)),
+    ...(stores.memory ? { memoryStore: stores.memory } : {}),
     onReminderCreated: options.onReminderCreated,
   });
   const result = await runner.run(inputs(values), {
@@ -233,6 +236,201 @@ test('ambiguous saved-session metadata asks for ID and returns only metadata', a
     assert.match(outcome.runner.session.getMessages()[1]?.content ?? '', /¿Qué ID/u);
     assert.match(reply, /Trip notes/u);
     assert.equal(reply.includes('Groq'), false);
+  });
+});
+
+test('explicit memory update asks first and a clear yes writes exactly once', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('city', 'Cuenca');
+    let updateCalls = 0;
+    let valueBeforeConfirmation: string | undefined;
+    const update = memory.update.bind(memory);
+    memory.update = async (...args) => { updateCalls += 1; return update(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions, memory }, [
+      'Ahora vivo en Guayaquil, cambia mi ciudad.', 'Sí', 'Sí', '/exit',
+    ], { onDelta: async (text) => {
+      if (text.includes('¿Quieres cambiarlo')) valueBeforeConfirmation = await memory.get('city');
+    } });
+
+    assert.equal(valueBeforeConfirmation, 'Cuenca');
+    assert.equal(updateCalls, 1);
+    assert.equal(await memory.get('city'), 'Guayaquil');
+    assert.equal(outcome.providerCalls, 1);
+    const visible = outcome.runner.session.getMessages().map(({ content }) => content);
+    assert.match(visible[1] ?? '', /city = "Cuenca"/u);
+    assert.match(visible[1] ?? '', /Guayaquil/u);
+    assert.match(visible[3] ?? '', /Memoria actualizada: city/u);
+  });
+});
+
+test('memory update reject and ambiguous confirmation never write', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('favorite_game', 'Stardew Valley');
+    const rejected = await runFlow({ reminders, notes, sessions, memory }, [
+      'Actualiza favorite_game a Hades.', 'No, gracias.', '/exit',
+    ]);
+    assert.equal(await memory.get('favorite_game'), 'Stardew Valley');
+    assert.match(rejected.runner.session.getMessages()[3]?.content ?? '', /No cambié favorite_game/u);
+    assert.equal(rejected.providerCalls, 0);
+  });
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('favorite_game', 'Stardew Valley');
+    const ambiguous = await runFlow({ reminders, notes, sessions, memory }, [
+      'Actualiza favorite_game a Hades.', 'quizá', '/exit',
+    ]);
+    assert.equal(await memory.get('favorite_game'), 'Stardew Valley');
+    assert.match(ambiguous.runner.session.getMessages()[3]?.content ?? '', /confirmación clara/u);
+    assert.equal(ambiguous.providerCalls, 0);
+  });
+});
+
+test('casual statement, missing key, bulk intent and secret-like memory never update', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('city', 'Cuenca');
+    const casual = await runFlow({ reminders, notes, sessions, memory }, ['Ahora vivo en Guayaquil.', '/exit']);
+    assert.equal(await memory.get('city'), 'Cuenca');
+    assert.equal(casual.providerCalls, 1);
+  });
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    const missing = await runFlow({ reminders, notes, sessions, memory }, ['Cambia mi ciudad a Guayaquil.', '/exit']);
+    assert.equal(await memory.count(), 0);
+    assert.match(missing.runner.session.getMessages()[1]?.content ?? '', /no crearé una nueva/iu);
+    assert.equal(missing.providerCalls, 0);
+  });
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('city', 'Cuenca');
+    const bulk = await runFlow({ reminders, notes, sessions, memory }, ['Actualiza todas mis memorias a Guayaquil.', '/exit']);
+    assert.equal(await memory.get('city'), 'Cuenca');
+    assert.equal(bulk.providerCalls, 0);
+  });
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('city', 'Cuenca');
+    await memory.set('name', 'Jhon');
+    const multi = await runFlow({ reminders, notes, sessions, memory }, [
+      'Actualiza city a Guayaquil y name a Ana.', '/exit',
+    ]);
+    assert.equal(await memory.get('city'), 'Cuenca');
+    assert.equal(await memory.get('name'), 'Jhon');
+    assert.match(multi.runner.session.getMessages()[1]?.content ?? '', /No pude identificar una sola memoria/u);
+    assert.equal(multi.providerCalls, 0);
+  });
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('api_key', 'non-secret-test-placeholder');
+    const sensitive = await runFlow({ reminders, notes, sessions, memory }, ['Actualiza api_key a another-placeholder.', '/exit']);
+    assert.equal(await memory.get('api_key'), 'non-secret-test-placeholder');
+    assert.doesNotMatch(sensitive.runner.session.getMessages()[1]?.content ?? '', /non-secret-test-placeholder|another-placeholder/u);
+    assert.equal(sensitive.providerCalls, 0);
+  });
+});
+
+test('memory update detects optimistic conflicts and clears pending state without exposing it', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('city', 'Cuenca');
+    const toolOptions = { reminderStore: reminders, noteStore: notes, savedSessionStore: sessions };
+    const manager = createLocalToolManager(toolOptions);
+    const flow = new SafeClarificationFlow({ toolManager: manager, sessionId: 'memory-update-session', memoryStore: memory });
+    const prompt = await flow.handle('Actualiza city a Guayaquil.', { sessionId: 'memory-update-session' });
+    assert.match(prompt ?? '', /Cuenca/u);
+    assert.doesNotMatch(JSON.stringify(flow), /oldValue|newValue|Guayaquil|Cuenca/u);
+    await memory.set('city', 'Quito');
+    const conflict = await flow.handle('Sí', { sessionId: 'memory-update-session' });
+    assert.match(conflict ?? '', /cambió desde la solicitud/u);
+    assert.equal(await memory.get('city'), 'Quito');
+    assert.equal(await flow.handle('Sí', { sessionId: 'memory-update-session' }), undefined);
+    assert.equal(await memory.get('city'), 'Quito');
+  });
+});
+
+test('pending update data stays outside Session state and saved-session schema', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('city', 'Cuenca');
+    const toolOptions = { reminderStore: reminders, noteStore: notes, savedSessionStore: sessions };
+    const core = new AssistantCore({ provider: new MockAIProvider({ responseText: 'unused' }) });
+    const runner = new ConversationRunner(core);
+    const flow = new SafeClarificationFlow({
+      toolManager: createLocalToolManager(toolOptions),
+      sessionId: runner.session.id,
+      memoryStore: memory,
+    });
+    let serializedWhilePending = '';
+    await runner.run(inputs(['Actualiza city a Guayaquil.']), {
+      clarification: flow,
+      onDelta: async () => {
+        serializedWhilePending = JSON.stringify(flow);
+        await sessions.save('memory_update_pending', runner.session.getMessages().map(({ role, content }) => ({ role, content })));
+      },
+    });
+    assert.doesNotMatch(serializedWhilePending, /oldValue|newValue|Cuenca|Guayaquil/u);
+    const visibleMessages = runner.session.getMessages().map(({ role, content }) => ({ role, content }));
+    const saved = await sessions.get('memory_update_pending');
+    assert.deepEqual(saved?.messages, visibleMessages);
+    assert.equal(JSON.stringify(saved?.messages).includes('oldValue'), false);
+    assert.equal(JSON.stringify(saved?.messages).includes('newValue'), false);
+  });
+});
+
+test('memory update pending state is cleared by /clear, load-session, exit, and session change', async () => {
+  for (const command of ['/clear', '/load-session demo', '/exit']) {
+    await withStores(async ({ reminders, notes, sessions, memory }) => {
+      await memory.set('city', 'Cuenca');
+      const outcome = await runFlow({ reminders, notes, sessions, memory }, [
+        'Actualiza city a Guayaquil.', command, 'Sí', '/exit',
+      ]);
+      assert.equal(await memory.get('city'), 'Cuenca', command);
+      assert.equal(outcome.providerCalls, command === '/exit' ? 0 : 1, command);
+    });
+  }
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('city', 'Cuenca');
+    const outcome = await runFlow({ reminders, notes, sessions, memory }, [
+      'Actualiza city a Guayaquil.', 'Cambiemos de tema. Cuéntame un chiste.', '/exit',
+    ]);
+    assert.equal(await memory.get('city'), 'Cuenca');
+    assert.equal(outcome.providerCalls, 1);
+  });
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('city', 'Cuenca');
+    const flow = new SafeClarificationFlow({
+      toolManager: createLocalToolManager({ reminderStore: reminders, noteStore: notes, savedSessionStore: sessions }),
+      sessionId: 'original-session',
+      memoryStore: memory,
+    });
+    assert.match(await flow.handle('Actualiza city a Guayaquil.', { sessionId: 'original-session' }) ?? '', /¿Quieres cambiarlo/u);
+    assert.equal(await flow.handle('Sí', { sessionId: 'different-session' }), undefined);
+    assert.equal(await flow.handle('Sí', { sessionId: 'original-session' }), undefined);
+    assert.equal(await memory.get('city'), 'Cuenca');
+  });
+});
+
+test('ambiguous natural key matches do not select or update either memory', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('city', 'Cuenca');
+    await memory.set('home_city', 'Loja');
+    const outcome = await runFlow({ reminders, notes, sessions, memory }, ['Cambia mi ciudad a Guayaquil.', '/exit']);
+    assert.equal(await memory.get('city'), 'Cuenca');
+    assert.equal(await memory.get('home_city'), 'Loja');
+    assert.match(outcome.runner.session.getMessages()[1]?.content ?? '', /No encontré una única memoria/u);
+    assert.equal(outcome.providerCalls, 0);
+  });
+});
+
+test('updated memory is immediately available to contextual recall on the next turn', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('city', 'Cuenca');
+    const result = await runFlow({ reminders, notes, sessions, memory }, [
+      'Actualiza mi ciudad a Guayaquil.', 'Sí', '/exit',
+    ]);
+    assert.match(result.runner.session.getMessages().map(({ content }) => content).join('\n'), /Memoria actualizada: city/u);
+    const requestContents: string[] = [];
+    const core = new AssistantCore({
+      provider: new MockAIProvider({ responder: (request) => {
+        requestContents.push(request.messages.map(({ content }) => content).join('\n'));
+        return { text: 'Guayaquil.', provider: 'mock', model: 'scripted', finishReason: 'stop' };
+      } }),
+    });
+    await core.respond(core.createSession(), '¿En qué ciudad vivo?', { memory: await memory.snapshot() });
+    assert.match(requestContents[0] ?? '', /Guayaquil/u);
+    assert.doesNotMatch(requestContents[0] ?? '', /Cuenca/u);
   });
 });
 
