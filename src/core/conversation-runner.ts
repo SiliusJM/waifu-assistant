@@ -18,6 +18,7 @@ export const CONVERSATION_MEMORY_COMMAND = '/memory';
 export const CONVERSATION_FORGET_COMMAND = '/forget';
 export const CONVERSATION_SAVE_SESSION_COMMAND = '/save-session';
 export const CONVERSATION_SESSIONS_COMMAND = '/sessions';
+export const CONVERSATION_SESSION_SEARCH_COMMAND = '/session-search';
 export const CONVERSATION_LOAD_SESSION_COMMAND = '/load-session';
 export const CONVERSATION_DELETE_SESSION_COMMAND = '/delete-session';
 export const CONVERSATION_EXPORT_COMMAND = '/export';
@@ -56,6 +57,7 @@ export const LOCAL_COMMAND_HELP = [
   '  /forget <key>      Elimina una memoria',
   '  /save-session <name>  Guarda la sesion actual',
   '  /sessions           Lista las sesiones guardadas',
+  '  /session-search <id> <texto>  Busca texto en una sesión guardada',
   '  /load-session <name>  Carga una sesion guardada',
   '  /delete-session <name>  Elimina una sesion guardada',
   '  /export [nombre]   Exporta la conversacion actual a Markdown',
@@ -230,6 +232,8 @@ export class ConversationRunner {
       || input === CONVERSATION_SAVE_SESSION_COMMAND
       || input.startsWith(`${CONVERSATION_SAVE_SESSION_COMMAND} `)
       || input === CONVERSATION_SESSIONS_COMMAND
+      || input === CONVERSATION_SESSION_SEARCH_COMMAND
+      || input.startsWith(`${CONVERSATION_SESSION_SEARCH_COMMAND} `)
       || input === CONVERSATION_LOAD_SESSION_COMMAND
       || input.startsWith(`${CONVERSATION_LOAD_SESSION_COMMAND} `)
       || input === CONVERSATION_DELETE_SESSION_COMMAND

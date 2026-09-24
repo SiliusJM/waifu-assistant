@@ -432,6 +432,7 @@ test('saved-session commands stay local and do not call the provider or contamin
   const commands: string[] = [];
   const result = await runner.run(inputs([
     '/sessions',
+    '/session-search demo Groq',
     '/save-session demo',
     '/load-session demo',
     '/delete-session demo',
@@ -443,7 +444,7 @@ test('saved-session commands stay local and do not call the provider or contamin
 
   assert.equal(result.status, 'completed');
   assert.equal(providerCalls, 1);
-  assert.deepEqual(commands, ['/sessions', '/save-session demo', '/load-session demo', '/delete-session demo']);
+  assert.deepEqual(commands, ['/sessions', '/session-search demo Groq', '/save-session demo', '/load-session demo', '/delete-session demo']);
   assert.deepEqual(runner.session.getMessages().map(({ role, content }) => ({ role, content })), [
     { role: 'user', content: 'message A' },
     { role: 'assistant', content: 'reply' },
@@ -511,6 +512,7 @@ test('/rename and /session-info are local metadata commands and preserve convers
   ]);
   assert.match(LOCAL_COMMAND_HELP, /\/rename <nombre>/u);
   assert.match(LOCAL_COMMAND_HELP, /\/session-info/u);
+  assert.match(LOCAL_COMMAND_HELP, /\/session-search <id> <texto>/u);
   assert.match(LOCAL_COMMAND_HELP, /\/remind <YYYY-MM-DD HH:mm> <texto>/u);
   assert.match(LOCAL_COMMAND_HELP, /\/reminders/u);
   assert.match(LOCAL_COMMAND_HELP, /\/reminders --all/u);

@@ -84,6 +84,7 @@ Yuki permite guardar y recuperar conversaciones de forma explícita con:
 ```text
 /save-session <name>
 /sessions
+/session-search <id> <texto>
 /load-session <name>
 /delete-session <name>
 /rename <nombre>
@@ -116,6 +117,10 @@ La CLI reconoce `/help`, `/time`, `/calc <expression>`, `/remind <YYYY-MM-DD HH:
 y `/exit`. Estos comandos no requieren una llamada al
 LLM. La memoria explícita se guarda localmente y puede redirigirse mediante
 `YUKI_MEMORY_PATH`; no se mezcla con las sesiones guardadas.
+
+`/session-search <id> <texto>` busca texto literal, sin distinguir mayúsculas,
+en los mensajes visibles de una sola conversación guardada. Muestra como máximo
+cinco fragmentos breves y no carga ni modifica la sesión activa o guardada.
 
 Los recordatorios se guardan localmente en `~/.waifu-assistant/reminders.json`
 (o en la ruta indicada por `YUKI_REMINDERS_PATH`). Aceptan fecha/hora explícita

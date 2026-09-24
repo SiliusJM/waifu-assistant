@@ -14,6 +14,12 @@ import { createLocalStatusSummaryTool, LOCAL_STATUS_SUMMARY_TOOL_ID, type LocalS
 import { isExplicitLocalStatusQuery } from './local-status-query-intent.js';
 import { createLocalSavedSessionsQueryTool, LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID } from './local-saved-session-query-tool.js';
 import { parseSavedSessionQueryIntent } from './saved-session-query-intent.js';
+import {
+  createLocalSavedSessionContentSearchTool,
+  formatSavedSessionSearch,
+  LOCAL_SAVED_SESSION_SEARCH_TOOL_ID,
+  type SavedSessionSearchValue,
+} from './local-saved-session-content-search-tool.js';
 import type { ReminderStore } from '../reminders/reminder-store.js';
 import type { NoteStore } from '../notes/note-store.js';
 import type { SavedSessionStore } from '../core/saved-session-store.js';
@@ -27,6 +33,7 @@ export const LOCAL_NATURAL_QUERY_TOOL_ALLOWLIST = [
   LOCAL_NOTES_LIST_TOOL_ID,
   LOCAL_NOTE_SHOW_TOOL_ID,
   LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID,
+  LOCAL_SAVED_SESSION_SEARCH_TOOL_ID,
 ] as const;
 
 export interface LocalToolManagerOptions {
@@ -65,6 +72,7 @@ export function getLocalToolAllowlist(options: LocalToolManagerOptions = {}): re
     ...(options.noteStore ? [LOCAL_NOTES_LIST_TOOL_ID, LOCAL_NOTE_SHOW_TOOL_ID] : []),
     ...(options.statusSummary ? [LOCAL_STATUS_SUMMARY_TOOL_ID] : []),
     ...(options.savedSessionStore ? [LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID] : []),
+    ...(options.savedSessionStore ? [LOCAL_SAVED_SESSION_SEARCH_TOOL_ID] : []),
   ];
 }
 
@@ -85,6 +93,7 @@ export function createLocalToolManager(nowOrOptions?: TimeSource | LocalToolMana
   }
   if (options.statusSummary) registry.register(createLocalStatusSummaryTool(options.statusSummary));
   if (options.savedSessionStore) registry.register(createLocalSavedSessionsQueryTool({ store: options.savedSessionStore }));
+  if (options.savedSessionStore) registry.register(createLocalSavedSessionContentSearchTool(options.savedSessionStore));
   return new ToolManager({
     registry,
     authorizer: {
@@ -110,10 +119,21 @@ export function createLocalToolManager(nowOrOptions?: TimeSource | LocalToolMana
           && context.metadata.source === LLM_TOOL_CALL_AUTHORIZATION_SOURCE
           && context.metadata.toolId === tool.id
           && parseSavedSessionQueryIntent(context.metadata.userInput) !== undefined;
+        const explicitSavedSessionSearch = tool.id === LOCAL_SAVED_SESSION_SEARCH_TOOL_ID
+          && context.authorization?.source === 'explicit-cli-command'
+          && context.metadata.source === 'explicit-cli-command'
+          && typeof context.metadata.command === 'string'
+          && context.metadata.command.startsWith('/session-search ');
+        const naturalSavedSessionSearch = tool.id === LOCAL_SAVED_SESSION_SEARCH_TOOL_ID
+          && context.authorization?.source === LLM_TOOL_CALL_AUTHORIZATION_SOURCE
+          && context.metadata.source === LLM_TOOL_CALL_AUTHORIZATION_SOURCE
+          && context.metadata.toolId === tool.id;
         const isSavedSessionQuery = tool.id === LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID;
         return {
           allowed: explicitCommand || naturalStatusQuery
             || naturalSavedSessionQuery
+            || explicitSavedSessionSearch
+            || naturalSavedSessionSearch
             || (llmCommand && !isStatusSummary
               && !isSavedSessionQuery
               && (!naturalAction || isExplicitNaturalAction(context.metadata.userInput, tool.id))),
@@ -123,6 +143,8 @@ export function createLocalToolManager(nowOrOptions?: TimeSource | LocalToolMana
               ? 'This read-only status tool cannot change provider settings and is available only for status questions.'
               : isSavedSessionQuery
                 ? 'Saved-session queries are read-only and available only for explicit metadata questions.'
+                : tool.id === LOCAL_SAVED_SESSION_SEARCH_TOOL_ID
+                  ? 'Saved-session content search requires an explicit ID and query for one conversation.'
               : 'The tool requires an explicit local command.',
         authorization: context.authorization,
         };
@@ -167,6 +189,23 @@ export function formatLocalTime(value: LocalTimeValue): string {
   const minutes = (absoluteMinutes % 60).toString().padStart(2, '0');
   return `Hora local: ${value.localTime} (${sign}${hours}:${minutes})`;
 }
+
+export async function executeLocalSavedSessionSearch(
+  manager: ToolManager,
+  sessionId: string,
+  query: string,
+  options: LocalCommandOptions = {},
+): Promise<ToolResult<SavedSessionSearchValue>> {
+  const command = `/session-search ${sessionId} ${query}`;
+  return manager.execute<SavedSessionSearchValue>(LOCAL_SAVED_SESSION_SEARCH_TOOL_ID, { sessionId, query }, {
+    signal: options.signal,
+    sessionId: options.sessionId,
+    metadata: { command, source: 'explicit-cli-command', userInput: command },
+    authorization: { source: 'explicit-cli-command' },
+  });
+}
+
+export { formatSavedSessionSearch };
 
 export { createLocalTimeTool };
 export { createCalculatorTool, evaluateExpression } from './calculator-tool.js';
