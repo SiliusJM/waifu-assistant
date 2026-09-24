@@ -14,6 +14,7 @@ import { createLocalStatusSummaryTool, LOCAL_STATUS_SUMMARY_TOOL_ID, type LocalS
 import { isExplicitLocalStatusQuery } from './local-status-query-intent.js';
 import { createLocalSavedSessionsQueryTool, LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID } from './local-saved-session-query-tool.js';
 import { parseSavedSessionQueryIntent } from './saved-session-query-intent.js';
+import { isAuthorizedClarification } from './clarification-tool-authorization.js';
 import {
   createLocalSavedSessionContentSearchTool,
   formatSavedSessionSearch,
@@ -128,12 +129,21 @@ export function createLocalToolManager(nowOrOptions?: TimeSource | LocalToolMana
           && context.authorization?.source === LLM_TOOL_CALL_AUTHORIZATION_SOURCE
           && context.metadata.source === LLM_TOOL_CALL_AUTHORIZATION_SOURCE
           && context.metadata.toolId === tool.id;
+        const clarificationAllowed = (tool.id === LOCAL_REMINDER_CREATE_TOOL_ID
+          && isAuthorizedClarification(context, LOCAL_REMINDER_CREATE_TOOL_ID, 'reminder-hour'))
+          || (tool.id === LOCAL_NOTE_CREATE_TOOL_ID
+            && isAuthorizedClarification(context, LOCAL_NOTE_CREATE_TOOL_ID, 'note-content'))
+          || (tool.id === LOCAL_SAVED_SESSION_SEARCH_TOOL_ID
+            && isAuthorizedClarification(context, LOCAL_SAVED_SESSION_SEARCH_TOOL_ID, 'saved-session-search-id'))
+          || (tool.id === LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID
+            && isAuthorizedClarification(context, LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID, 'saved-session-info-id'));
         const isSavedSessionQuery = tool.id === LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID;
         return {
           allowed: explicitCommand || naturalStatusQuery
             || naturalSavedSessionQuery
             || explicitSavedSessionSearch
             || naturalSavedSessionSearch
+            || clarificationAllowed
             || (llmCommand && !isStatusSummary
               && !isSavedSessionQuery
               && (!naturalAction || isExplicitNaturalAction(context.metadata.userInput, tool.id))),

@@ -2,6 +2,7 @@ import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 import { AssistantCore } from './core/assistant-core.js';
 import { ConversationRunner } from './core/conversation-runner.js';
+import { SafeClarificationFlow } from './core/safe-clarification-flow.js';
 import { createAIProvider } from './config/provider-factory.js';
 import { loadConfig } from './config/config.js';
 import { formatProviderStatus, toSafeProviderConfig } from './config/provider-config.js';
@@ -132,6 +133,12 @@ export async function main(
   });
   try {
     const runner = new ConversationRunner(core);
+    const clarification = new SafeClarificationFlow({
+      toolManager: localToolManager,
+      sessionId: runner.session.id,
+      now,
+      onReminderCreated: () => reminderScheduler.refresh(),
+    });
     const conversationExporter = new MarkdownConversationExporter();
     await reminderScheduler.start();
     await runner.run(terminal, {
@@ -139,6 +146,7 @@ export async function main(
       interruptible: true,
       personality,
       memory: () => memoryStore.snapshot(),
+      clarification,
       onDelta: (delta): void => { process.stdout.write(delta); },
       onResponse: (): void => { process.stdout.write('\n'); },
       onInterruption: (): void => { process.stdout.write('\n[Respuesta interrumpida]\n'); },
