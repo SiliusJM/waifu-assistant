@@ -144,6 +144,10 @@ eliminarlos. No se ejecuta un daemon ni se programan avisos cuando Yuki está
 cerrada. Las notificaciones toast nativas de Windows quedan diferidas; el
 fallback de consola es portable y no ejecuta contenido del recordatorio.
 
+`/summary` resume mediante el provider configurado los mensajes visibles (`user` y
+`assistant`) recientes y acotados de la conversación actual. No incluye memoria,
+tools ni otras sesiones, y no guarda el prompt o el resumen en la Session.
+
 ### Notas locales
 
 Las aclaraciones naturales seguras solicitan un solo dato faltante. Su estado es

@@ -38,6 +38,7 @@ import {
   CONVERSATION_SESSIONS_COMMAND,
   CONVERSATION_SESSION_SEARCH_COMMAND,
   CONVERSATION_STATUS_COMMAND,
+  CONVERSATION_SUMMARY_COMMAND,
   CONVERSATION_TONE_COMMAND,
   CONVERSATION_FORMAT_COMMAND,
   CONVERSATION_REMIND_COMMAND,
@@ -208,6 +209,15 @@ export async function main(
         }
         if (command === CONVERSATION_HELP_COMMAND) {
           process.stdout.write(LOCAL_COMMAND_HELP + '\n');
+          return;
+        }
+        if (command === CONVERSATION_SUMMARY_COMMAND) {
+          try {
+            const summary = await core.summarizeSession(runner.session, { signal: context.signal });
+            process.stdout.write(`Resumen de la conversación:\n${summary}\n`);
+          } catch {
+            process.stdout.write('No pude resumir la conversación.\n');
+          }
           return;
         }
         if (command === CONVERSATION_REMIND_COMMAND || command.startsWith(`${CONVERSATION_REMIND_COMMAND} `)) {

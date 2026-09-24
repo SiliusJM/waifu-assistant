@@ -7,7 +7,7 @@ import type { AIRequest } from '../../src/ai/ai-types.js';
 import type { AIProvider } from '../../src/ai/ai-provider.js';
 import type { MemorySnapshot } from '../../src/memory/memory-types.js';
 import type { PersonalitySnapshot } from '../../src/personality/personality-types.js';
-import { AssistantCore } from '../../src/core/assistant-core.js';
+import { AssistantCore, INSUFFICIENT_SUMMARY_TEXT, SUMMARY_MAX_CHARACTERS, SUMMARY_MAX_MESSAGES } from '../../src/core/assistant-core.js';
 import { SavedSessionStore } from '../../src/core/saved-session-store.js';
 import { PersistentMemoryStore } from '../../src/memory/memory-store.js';
 import { MockAIProvider } from '../../src/ai/mock-ai-provider.js';
@@ -57,6 +57,131 @@ test('assistant core rejects empty input', async () => {
       && 'code' in error
       && error.code === 'VALIDATION_ERROR',
   );
+});
+
+test('conversation summary sends only bounded visible messages and leaves Session unchanged', async () => {
+  const requests: AIRequest[] = [];
+  const provider = new MockAIProvider({
+    responder: (request) => {
+      requests.push(request);
+      return { text: 'Resumen breve.', provider: 'mock', model: 'scripted', finishReason: 'stop' };
+    },
+  });
+  const core = new AssistantCore({
+    provider,
+    conversationTone: () => 'concise',
+    responseFormat: () => 'bullets',
+  });
+  const session = core.createSession();
+  session.addMessage('system', 'HIDDEN_SYSTEM_SENTINEL');
+  session.addMessage('tool', 'RAW_TOOL_PAYLOAD_SENTINEL');
+  for (let index = 0; index < SUMMARY_MAX_MESSAGES + 4; index += 1) {
+    session.addMessage(index % 2 === 0 ? 'user' : 'assistant', `${index}: ${'🧪'.repeat(20)}`);
+  }
+  const before = session.getMessages();
+
+  const summary = await core.summarizeSession(session);
+
+  assert.equal(summary, 'Resumen breve.');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]?.sessionId, session.id);
+  assert.equal(requests[0]?.tools, undefined);
+  const sentMessages = requests[0]?.messages ?? [];
+  assert.equal(sentMessages[0]?.role, 'system');
+  assert.match(sentMessages[0]?.content ?? '', /No inventes hechos/u);
+  assert.ok(sentMessages.slice(1).length <= SUMMARY_MAX_MESSAGES);
+  assert.equal(sentMessages.slice(1).every(({ role }) => role === 'user' || role === 'assistant'), true);
+  assert.ok(sentMessages.slice(1).reduce((count, message) => count + message.content.length, 0) <= SUMMARY_MAX_CHARACTERS);
+  assert.equal(JSON.stringify(sentMessages).includes('HIDDEN_SYSTEM_SENTINEL'), false);
+  assert.equal(JSON.stringify(sentMessages).includes('RAW_TOOL_PAYLOAD_SENTINEL'), false);
+  assert.equal(JSON.stringify(sentMessages).includes('concise'), false);
+  assert.equal(JSON.stringify(sentMessages).includes('bullets'), false);
+  assert.deepEqual(session.getMessages(), before);
+});
+
+test('conversation summary bounds oversized transcripts while preserving Unicode and the newest content', async () => {
+  let observed: AIRequest | undefined;
+  const provider = new MockAIProvider({
+    responder: (request) => {
+      observed = request;
+      return { text: 'Resumen.', provider: 'mock', model: 'scripted', finishReason: 'stop' };
+    },
+  });
+  const core = new AssistantCore({ provider });
+  const session = core.createSession();
+  session.addMessage('user', 'x'.repeat(4000));
+  session.addMessage('assistant', `fin-${'🧪'.repeat(2000)}`);
+
+  await core.summarizeSession(session);
+
+  const transcript = observed?.messages.slice(1) ?? [];
+  assert.ok(transcript.reduce((count, message) => count + message.content.length, 0) <= SUMMARY_MAX_CHARACTERS);
+  assert.equal(transcript.at(-1)?.content.endsWith('🧪'.repeat(10)), true);
+});
+
+test('conversation summary returns locally for empty or too-small sessions without calling the provider', async () => {
+  let providerCalls = 0;
+  const provider = new MockAIProvider({ responder: () => {
+    providerCalls += 1;
+    return { text: 'unused', provider: 'mock', model: 'test', finishReason: 'stop' };
+  } });
+  const core = new AssistantCore({ provider });
+  const empty = core.createSession();
+  const small = core.createSession();
+  small.addMessage('user', 'solo una intervención');
+
+  assert.equal(await core.summarizeSession(empty), INSUFFICIENT_SUMMARY_TEXT);
+  assert.equal(await core.summarizeSession(small), INSUFFICIENT_SUMMARY_TEXT);
+  assert.equal(providerCalls, 0);
+  assert.deepEqual(empty.getMessages(), []);
+  assert.equal(small.getMessages().length, 1);
+});
+
+test('conversation summary provider failure is controlled and does not alter Session', async () => {
+  const provider = new MockAIProvider({ responder: () => { throw new Error('scripted provider failure'); } });
+  const core = new AssistantCore({ provider });
+  const session = core.createSession();
+  session.addMessage('user', 'Tema');
+  session.addMessage('assistant', 'Respuesta');
+  const before = session.getMessages();
+
+  await assert.rejects(
+    () => core.summarizeSession(session),
+    (error: unknown) => error instanceof Error && 'code' in error && error.code === 'PROVIDER_ERROR',
+  );
+  assert.deepEqual(session.getMessages(), before);
+});
+
+test('conversation summary never exposes or executes tools, including unexpected provider tool calls', async () => {
+  let executions = 0;
+  const registry = new ToolRegistry();
+  registry.register({
+    id: 'test.mutate', name: 'Mutate', description: 'test side effect', risk: 'high',
+    argumentSchema: { type: 'object', properties: {} },
+    execute: async () => {
+      executions += 1;
+      return { status: 'success', value: true };
+    },
+  });
+  const manager = new ToolManager({
+    registry,
+    authorizer: { authorize: () => ({ allowed: true }) },
+  });
+  let requestSeen: AIRequest | undefined;
+  const provider = new MockAIProvider({ responder: (request) => {
+    requestSeen = request;
+    return toolResponse('test_mutate', '{}');
+  } });
+  const core = new AssistantCore({ provider, toolManager: manager, toolAllowlist: ['test.mutate'] });
+  const session = core.createSession();
+  session.addMessage('user', 'Tema');
+  session.addMessage('assistant', 'Respuesta');
+
+  await assert.rejects(() => core.summarizeSession(session), (error: unknown) => (
+    error instanceof Error && 'code' in error && error.code === 'INVALID_RESPONSE_ERROR'
+  ));
+  assert.equal(requestSeen?.tools, undefined);
+  assert.equal(executions, 0);
 });
 
 test('mock provider exposes the streaming-compatible contract', async () => {

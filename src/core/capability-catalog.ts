@@ -15,6 +15,7 @@ export const CAPABILITY_CATALOG: readonly CapabilityCatalogEntry[] = [
       '/help                Muestra esta ayuda',
       '/cancel              Interrumpe la respuesta activa',
       '/history             Muestra el historial actual',
+      '/summary             Resume la conversación actual',
       '/clear               Limpia la sesión actual',
       '/exit                Cierra la conversación',
       '/tone [nombre]       Consulta o cambia el estilo de respuesta local',
