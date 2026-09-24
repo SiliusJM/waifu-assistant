@@ -169,6 +169,13 @@ El estilo solo influye en la presentación enviada al provider: no reemplaza la
 personalidad ni cambia seguridad, tools o memoria. La instrucción interna no se
 añade a la Session.
 
+La estructura de respuesta se configura por separado con `/format` o
+`/format <nombre>`: `default`, `prose`, `bullets` y `steps`. Solo se persiste
+el identificador en `~/.waifu-assistant/response-format.json` (o mediante
+`YUKI_RESPONSE_FORMAT_PATH`). Frases naturales explícitas pueden seleccionar
+una opción cerrada; comentarios casuales no cambian la preferencia. El formato
+no altera el tono, la personalidad, las políticas ni la Session.
+
 Las notas se guardan en `~/.waifu-assistant/notes.json` (o en la ruta configurada
 con `YUKI_NOTES_PATH`) y se gestionan explícitamente con `/note-add Comprar
 adaptador HDMI`, `/notes`, `/note-show n-a1b2c3d4` y `/note-delete n-a1b2c3d4`. No usan IA,

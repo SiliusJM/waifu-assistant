@@ -39,6 +39,7 @@ import {
   CONVERSATION_SESSION_SEARCH_COMMAND,
   CONVERSATION_STATUS_COMMAND,
   CONVERSATION_TONE_COMMAND,
+  CONVERSATION_FORMAT_COMMAND,
   CONVERSATION_REMIND_COMMAND,
   CONVERSATION_REMINDERS_COMMAND,
   CONVERSATION_REMINDER_DELETE_COMMAND,
@@ -69,6 +70,13 @@ import {
   parseNaturalToneRequest,
   parseToneCommand,
 } from './personality/conversation-tone-preferences.js';
+import { ResponseFormatStore, resolveResponseFormatPath } from './personality/response-format-store.js';
+import {
+  formatResponseFormatConfirmation,
+  formatResponseFormatStatus,
+  parseNaturalResponseFormatRequest,
+  parseResponseFormatCommand,
+} from './personality/response-format-preferences.js';
 
 export async function main(
   argv: readonly string[] = process.argv.slice(2),
@@ -96,6 +104,8 @@ export async function main(
   await noteStore.load();
   const toneStore = new ConversationToneStore(resolveConversationTonePath(env));
   await toneStore.load();
+  const responseFormatStore = new ResponseFormatStore(resolveResponseFormatPath(env));
+  await responseFormatStore.load();
   const handleNaturalTonePreference = async (input: string): Promise<boolean> => {
     const tone = parseNaturalToneRequest(input);
     if (tone === undefined) return false;
@@ -104,6 +114,17 @@ export async function main(
       process.stdout.write(formatToneConfirmation(tone) + '\n');
     } catch {
       process.stdout.write('No pude guardar la preferencia de tono local.\n');
+    }
+    return true;
+  };
+  const handleNaturalResponseFormatPreference = async (input: string): Promise<boolean> => {
+    const format = parseNaturalResponseFormatRequest(input);
+    if (format === undefined) return false;
+    try {
+      await responseFormatStore.set(format);
+      process.stdout.write(formatResponseFormatConfirmation(format) + '\n');
+    } catch {
+      process.stdout.write('No pude guardar la preferencia de formato local.\n');
     }
     return true;
   };
@@ -133,12 +154,14 @@ export async function main(
     toolAllowlist: getLocalToolAllowlist(localToolOptions),
     localActionNow: now,
     conversationTone: () => toneStore.getCurrent(),
+    responseFormat: () => responseFormatStore.getCurrent(),
   });
   const personality = new PersonalityCompiler().compile({
     profile: new PersonalityRegistry().defaultProfile,
   });
   if (!interactive) {
     if (await handleNaturalTonePreference(input)) return;
+    if (await handleNaturalResponseFormatPreference(input)) return;
     const response = await core.respond(core.createSession(), input, {
       personality,
       memory: await memoryStore.snapshot(),
@@ -173,6 +196,7 @@ export async function main(
       clarification,
       onDelta: (delta): void => { process.stdout.write(delta); },
       onTonePreference: handleNaturalTonePreference,
+      onResponseFormatPreference: handleNaturalResponseFormatPreference,
       onResponse: (): void => { process.stdout.write('\n'); },
       onInterruption: (): void => { process.stdout.write('\n[Respuesta interrumpida]\n'); },
       onCommand: async (command, context): Promise<void> => {
@@ -374,6 +398,22 @@ export async function main(
             }
           } else {
             process.stdout.write(`Uso: ${CONVERSATION_TONE_COMMAND} [${['default', 'concise', 'warm', 'technical', 'playful'].join('|')}]\n`);
+          }
+          return;
+        }
+        if (command === CONVERSATION_FORMAT_COMMAND || command.startsWith(`${CONVERSATION_FORMAT_COMMAND} `)) {
+          const parsed = parseResponseFormatCommand(command);
+          if (parsed.kind === 'show') {
+            process.stdout.write(formatResponseFormatStatus(responseFormatStore.getCurrent()) + '\n');
+          } else if (parsed.kind === 'set') {
+            try {
+              await responseFormatStore.set(parsed.format);
+              process.stdout.write(formatResponseFormatConfirmation(parsed.format) + '\n');
+            } catch {
+              process.stdout.write('No pude guardar la preferencia de formato local.\n');
+            }
+          } else {
+            process.stdout.write(`Formato no reconocido. Uso: ${CONVERSATION_FORMAT_COMMAND} [${['default', 'prose', 'bullets', 'steps'].join('|')}]\n`);
           }
           return;
         }
