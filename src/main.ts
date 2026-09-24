@@ -15,7 +15,7 @@ import {
   executeLocalTime,
   formatCalculation,
   formatLocalTime,
-  LOCAL_TOOL_ALLOWLIST,
+  getLocalToolAllowlist,
 } from './tools/local-tool-manager.js';
 import {
   CONVERSATION_CLEAR_COMMAND,
@@ -77,14 +77,19 @@ export async function main(
   await memoryStore.load();
   const savedSessionStore = new SavedSessionStore(resolveSavedSessionPath(env));
   await savedSessionStore.load();
-  const reminderStore = new ReminderStore(resolveReminderPath(env));
+  const now = (): Date => new Date();
+  const reminderStore = new ReminderStore(resolveReminderPath(env), { now });
   await reminderStore.load();
-  const localToolManager = createLocalToolManager();
+  const noteStore = new NoteStore(resolveNotesPath(env), { now });
+  await noteStore.load();
+  const localToolOptions = { now, reminderStore, noteStore };
+  const localToolManager = createLocalToolManager(localToolOptions);
   const core = new AssistantCore({
     provider: createAIProvider(config),
     logger,
     toolManager: localToolManager,
-    toolAllowlist: LOCAL_TOOL_ALLOWLIST,
+    toolAllowlist: getLocalToolAllowlist(localToolOptions),
+    localActionNow: now,
   });
   const personality = new PersonalityCompiler().compile({
     profile: new PersonalityRegistry().defaultProfile,
@@ -98,8 +103,6 @@ export async function main(
     return;
   }
 
-  const noteStore = new NoteStore(resolveNotesPath(env));
-  await noteStore.load();
   const controller = new AbortController();
   const onInterrupt = (): void => controller.abort();
   process.once('SIGINT', onInterrupt);
