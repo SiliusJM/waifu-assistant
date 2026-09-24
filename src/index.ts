@@ -39,10 +39,37 @@ export {
 export {
   LOCAL_TOOL_ALLOWLIST,
   LOCAL_NATURAL_ACTION_TOOL_ALLOWLIST,
+  LOCAL_NATURAL_QUERY_TOOL_ALLOWLIST,
   getLocalToolAllowlist,
 } from './tools/local-tool-manager.js';
 export { LOCAL_REMINDER_CREATE_TOOL_ID, createLocalReminderCreateTool } from './tools/local-reminder-create-tool.js';
 export { LOCAL_NOTE_CREATE_TOOL_ID, createLocalNoteCreateTool } from './tools/local-note-create-tool.js';
+export {
+  LOCAL_REMINDERS_LIST_TOOL_ID,
+  createLocalRemindersListTool,
+  type LocalReminderSummary,
+  type LocalRemindersListArguments,
+  type LocalRemindersListValue,
+} from './tools/local-reminders-list-tool.js';
+export {
+  LOCAL_REMINDER_NEXT_TOOL_ID,
+  createLocalReminderNextTool,
+  type LocalReminderNextArguments,
+  type LocalReminderNextValue,
+} from './tools/local-reminder-next-tool.js';
+export {
+  LOCAL_NOTES_LIST_TOOL_ID,
+  createLocalNotesListTool,
+  type LocalNoteSummary,
+  type LocalNotesListArguments,
+  type LocalNotesListValue,
+} from './tools/local-notes-list-tool.js';
+export {
+  LOCAL_NOTE_SHOW_TOOL_ID,
+  createLocalNoteShowTool,
+  type LocalNoteShowArguments,
+  type LocalNoteShowValue,
+} from './tools/local-note-show-tool.js';
 export {
   REMINDER_SCHEMA_VERSION,
   REMINDER_MAX_ENTRIES,

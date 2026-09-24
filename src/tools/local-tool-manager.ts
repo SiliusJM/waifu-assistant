@@ -6,12 +6,22 @@ import { createCalculatorTool, LOCAL_CALCULATOR_TOOL_ID, type CalculatorValue } 
 import { LOCAL_TIME_TOOL_ID, createLocalTimeTool, type LocalTimeValue, type TimeSource } from './time-tool.js';
 import { createLocalReminderCreateTool, LOCAL_REMINDER_CREATE_TOOL_ID } from './local-reminder-create-tool.js';
 import { createLocalNoteCreateTool, LOCAL_NOTE_CREATE_TOOL_ID } from './local-note-create-tool.js';
+import { createLocalRemindersListTool, LOCAL_REMINDERS_LIST_TOOL_ID } from './local-reminders-list-tool.js';
+import { createLocalReminderNextTool, LOCAL_REMINDER_NEXT_TOOL_ID } from './local-reminder-next-tool.js';
+import { createLocalNotesListTool, LOCAL_NOTES_LIST_TOOL_ID } from './local-notes-list-tool.js';
+import { createLocalNoteShowTool, LOCAL_NOTE_SHOW_TOOL_ID } from './local-note-show-tool.js';
 import type { ReminderStore } from '../reminders/reminder-store.js';
 import type { NoteStore } from '../notes/note-store.js';
 
 export const LOCAL_TIME_COMMAND = '/time';
 export const LOCAL_TOOL_ALLOWLIST = [LOCAL_TIME_TOOL_ID, LOCAL_CALCULATOR_TOOL_ID] as const;
 export const LOCAL_NATURAL_ACTION_TOOL_ALLOWLIST = [LOCAL_REMINDER_CREATE_TOOL_ID, LOCAL_NOTE_CREATE_TOOL_ID] as const;
+export const LOCAL_NATURAL_QUERY_TOOL_ALLOWLIST = [
+  LOCAL_REMINDERS_LIST_TOOL_ID,
+  LOCAL_REMINDER_NEXT_TOOL_ID,
+  LOCAL_NOTES_LIST_TOOL_ID,
+  LOCAL_NOTE_SHOW_TOOL_ID,
+] as const;
 
 export interface LocalToolManagerOptions {
   readonly now?: TimeSource;
@@ -39,6 +49,8 @@ export function getLocalToolAllowlist(options: LocalToolManagerOptions = {}): re
     ...LOCAL_TOOL_ALLOWLIST,
     ...(options.reminderStore ? [LOCAL_REMINDER_CREATE_TOOL_ID] : []),
     ...(options.noteStore ? [LOCAL_NOTE_CREATE_TOOL_ID] : []),
+    ...(options.reminderStore ? [LOCAL_REMINDERS_LIST_TOOL_ID, LOCAL_REMINDER_NEXT_TOOL_ID] : []),
+    ...(options.noteStore ? [LOCAL_NOTES_LIST_TOOL_ID, LOCAL_NOTE_SHOW_TOOL_ID] : []),
   ];
 }
 
@@ -49,6 +61,14 @@ export function createLocalToolManager(nowOrOptions?: TimeSource | LocalToolMana
   registry.register(createCalculatorTool());
   if (options.reminderStore) registry.register(createLocalReminderCreateTool(options.reminderStore));
   if (options.noteStore) registry.register(createLocalNoteCreateTool(options.noteStore));
+  if (options.reminderStore) {
+    registry.register(createLocalRemindersListTool(options.reminderStore));
+    registry.register(createLocalReminderNextTool(options.reminderStore));
+  }
+  if (options.noteStore) {
+    registry.register(createLocalNotesListTool(options.noteStore));
+    registry.register(createLocalNoteShowTool(options.noteStore));
+  }
   return new ToolManager({
     registry,
     authorizer: {

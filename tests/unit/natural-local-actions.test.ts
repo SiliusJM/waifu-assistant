@@ -109,6 +109,7 @@ test('explicit natural reminder creates exactly one reminder and keeps tool payl
     ]);
     assert.deepEqual(requests[0]?.tools?.map(({ function: definition }) => definition.name), [
       'local_time', 'local_calculate', 'local_reminder_create', 'local_note_create',
+      'local_reminders_list', 'local_reminder_next', 'local_notes_list', 'local_note_show',
     ]);
     assert.match(requests[0]?.messages.find(({ content }) => content.includes('Controlled host local time'))?.content ?? '', /2026-09-23T12:00:00.000Z/);
     assert.equal(requests[2]?.messages.some(({ role }) => role === 'tool'), false);
