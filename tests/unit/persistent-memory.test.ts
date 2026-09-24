@@ -99,6 +99,24 @@ test('optimistic update refreshes persisted state before comparing the expected 
   });
 });
 
+test('optimistic forget refreshes persisted state and preserves the current value on conflict', async () => {
+  await withStore(async (first, filePath, directory) => {
+    await first.set('favorite_game', 'Genshin Impact');
+    const second = new PersistentMemoryStore(filePath);
+    await second.load();
+    assert.equal(await second.forget('missing', 'old'), 'missing');
+    assert.equal(await first.forget('favorite_game', 'stale'), 'conflict');
+    assert.equal(await first.get('favorite_game'), 'Genshin Impact');
+
+    assert.equal(await second.forget('favorite_game', 'Genshin Impact'), 'deleted');
+    const persisted = new PersistentMemoryStore(filePath);
+    await persisted.load();
+    assert.equal(await persisted.get('favorite_game'), undefined);
+    const files = await readdir(directory, { recursive: true });
+    assert.equal(files.some((file) => file.endsWith('.tmp') || file.endsWith('.bak')), false);
+  });
+});
+
 test('memory key validation accepts boundaries and rejects unsafe values', async () => {
   await withStore(async (store) => {
     for (const key of ['a', 'A', 'abc123', 'a_b', 'a-b', 'x'.repeat(64)]) {
@@ -224,6 +242,8 @@ test('write failures are controlled and do not leave the final file partially wr
     assert.equal(await new PersistentMemoryStore(filePath).get('city'), 'Cuenca');
     await assertCode(failingUpdate.remember('new_entry', 'value'), 'MEMORY_IO_ERROR');
     assert.equal(await failingUpdate.get('new_entry'), undefined);
+    await assertCode(failingUpdate.forget('city', 'Cuenca'), 'MEMORY_IO_ERROR');
+    assert.equal(await failingUpdate.get('city'), 'Cuenca');
     assert.equal((await readdir(directory)).some((file) => file.endsWith('.tmp') || file.endsWith('.bak')), false);
   } finally {
     await rm(directory, { recursive: true, force: true });

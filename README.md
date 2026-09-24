@@ -123,6 +123,9 @@ Una solicitud explícita como `Recuerda que mi ciudad es Guayaquil` puede propon
 una sola memoria nueva; Yuki muestra únicamente la clave y el valor y espera un
 “sí” claro. Las frases casuales no se guardan, los datos sensibles se rechazan y
 una clave existente sigue el flujo de confirmación de actualización.
+Una solicitud explícita para olvidar una memoria existente muestra solo esa
+entrada y requiere confirmación; si el valor cambió mientras esperabas, Yuki no
+elimina el valor nuevo. Los valores sensibles se ocultan en la confirmación.
 
 `/session-search <id> <texto>` busca texto literal, sin distinguir mayúsculas,
 en los mensajes visibles de una sola conversación guardada. Muestra como máximo

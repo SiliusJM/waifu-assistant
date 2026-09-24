@@ -369,6 +369,169 @@ test('existing keys route to the existing update confirmation and never use crea
   });
 });
 
+test('explicit memory forget shows only the selected entry and deletes it once after confirmation', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('favorite_game', 'Genshin Impact');
+    await memory.set('city', 'Guayaquil');
+    let forgetCalls = 0;
+    const forget = memory.forget.bind(memory);
+    memory.forget = async (...args) => { forgetCalls += 1; return forget(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions, memory }, [
+      'Olvida mi juego favorito.', 'Sí', 'Sí', '/exit',
+    ]);
+
+    const messages = outcome.runner.session.getMessages().map(({ content }) => content);
+    assert.match(messages[1] ?? '', /favorite_game = "Genshin Impact"/u);
+    assert.doesNotMatch(messages[1] ?? '', /Guayaquil|city/u);
+    assert.match(messages[3] ?? '', /Memoria olvidada: favorite_game/u);
+    assert.equal(await memory.get('favorite_game'), undefined);
+    assert.equal(await memory.get('city'), 'Guayaquil');
+    assert.equal(forgetCalls, 1);
+    assert.equal(outcome.providerCalls, 1);
+  });
+});
+
+test('forget supports explicit Spanish forms and requires an identifiable existing key', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('city', 'Quito');
+    await memory.set('name', 'Jhon');
+    await memory.set('favorite_game', 'Genshin Impact');
+    const flow = new SafeClarificationFlow({
+      toolManager: createLocalToolManager({ reminderStore: reminders, noteStore: notes, savedSessionStore: sessions }),
+      sessionId: 'forget-forms',
+      memoryStore: memory,
+    });
+    for (const [request, key] of [
+      ['Borra de tu memoria mi ciudad.', 'city'],
+      ['Elimina de tu memoria mi nombre.', 'name'],
+      ['Deja de recordar mi juego favorito.', 'favorite_game'],
+    ] as const) {
+      assert.match(await flow.handle(request, { sessionId: 'forget-forms' }) ?? '', new RegExp(`Tengo guardado ${key}`));
+      assert.match(await flow.handle('Sí', { sessionId: 'forget-forms' }) ?? '', new RegExp(`Memoria olvidada: ${key}`));
+    }
+    assert.equal(await memory.count(), 0);
+
+    const missing = await runFlow({ reminders, notes, sessions, memory }, ['Olvida mi ciudad.', 'Sí', '/exit']);
+    assert.match(missing.runner.session.getMessages()[1]?.content ?? '', /no eliminé nada/u);
+    assert.equal(await memory.count(), 0);
+  });
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('city', 'Cuenca');
+    const unknown = await runFlow({ reminders, notes, sessions, memory }, ['Olvida mi animal favorito.', 'Sí', '/exit']);
+    assert.match(unknown.runner.session.getMessages()[1]?.content ?? '', /no tengo guardada una memoria identificable/iu);
+    assert.equal(await memory.get('city'), 'Cuenca');
+    assert.equal(unknown.providerCalls, 1);
+  });
+});
+
+test('forget rejects multiple keys, casual statements, ambiguous confirmation and topic change', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('city', 'Cuenca');
+    await memory.set('favorite_game', 'Genshin Impact');
+    const multi = await runFlow({ reminders, notes, sessions, memory }, [
+      'Olvida mi ciudad y mi juego favorito.', '/exit',
+    ]);
+    assert.match(multi.runner.session.getMessages()[1]?.content ?? '', /una memoria por vez/u);
+    assert.equal(await memory.get('city'), 'Cuenca');
+    assert.equal(await memory.get('favorite_game'), 'Genshin Impact');
+    assert.equal(multi.providerCalls, 0);
+
+    const casual = await runFlow({ reminders, notes, sessions, memory }, [
+      'Ya no me gusta Genshin Impact.', 'No quiero hablar de mi juego favorito.', '/exit',
+    ]);
+    assert.equal(await memory.get('favorite_game'), 'Genshin Impact');
+    // The topic-change sentence is answered by local capability help, not the provider.
+    assert.equal(casual.providerCalls, 1);
+  });
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('city', 'Cuenca');
+    const ambiguous = await runFlow({ reminders, notes, sessions, memory }, ['Olvida mi ciudad.', 'quizá', '/exit']);
+    assert.match(ambiguous.runner.session.getMessages()[3]?.content ?? '', /confirmación clara/u);
+    assert.equal(await memory.get('city'), 'Cuenca');
+    assert.equal(ambiguous.providerCalls, 0);
+
+    const topic = await runFlow({ reminders, notes, sessions, memory }, [
+      'Olvida mi ciudad.', 'Cambiemos de tema. Cuéntame un chiste.', '/exit',
+    ]);
+    assert.equal(await memory.get('city'), 'Cuenca');
+    assert.equal(topic.providerCalls, 1);
+  });
+});
+
+test('forget confirmation detects stale values and duplicate confirmations cannot delete again', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('city', 'Cuenca');
+    const external = new PersistentMemoryStore(memory.filePath);
+    const toolOptions = { reminderStore: reminders, noteStore: notes, savedSessionStore: sessions };
+    const flow = new SafeClarificationFlow({ toolManager: createLocalToolManager(toolOptions), sessionId: 'forget-conflict', memoryStore: memory });
+    assert.match(await flow.handle('Olvida mi ciudad.', { sessionId: 'forget-conflict' }) ?? '', /Cuenca/u);
+    await external.set('city', 'Quito');
+    assert.match(await flow.handle('Sí', { sessionId: 'forget-conflict' }) ?? '', /cambió desde la solicitud/u);
+    assert.equal(await memory.get('city'), 'Quito');
+    assert.equal(await flow.handle('Sí', { sessionId: 'forget-conflict' }), undefined);
+    assert.equal(await memory.get('city'), 'Quito');
+  });
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('city', 'Quito');
+    let forgetCalls = 0;
+    const forget = memory.forget.bind(memory);
+    memory.forget = async (...args) => { forgetCalls += 1; return forget(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions, memory }, [
+      'Olvida mi ciudad.', 'Sí', 'Sí', '/exit',
+    ]);
+    assert.equal(await memory.count(), 0);
+    assert.equal(forgetCalls, 1);
+    assert.equal(outcome.providerCalls, 1);
+  });
+});
+
+test('forget state is ephemeral, clears on lifecycle boundaries, and hides sensitive values', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('city', 'Quito');
+    const options = { toolManager: createLocalToolManager({ reminderStore: reminders, noteStore: notes, savedSessionStore: sessions }), sessionId: 'forget-ephemeral', memoryStore: memory };
+    const flow = new SafeClarificationFlow(options);
+    const prompt = await flow.handle('Olvida mi ciudad.', { sessionId: options.sessionId });
+    assert.match(prompt ?? '', /city = "Quito"/u);
+    assert.doesNotMatch(JSON.stringify(flow), /memory-forget|expectedValue|Quito/u);
+    assert.equal(await flow.handle('Sí', { sessionId: 'other-session' }), undefined);
+    assert.equal(await flow.handle('Sí', { sessionId: options.sessionId }), undefined);
+    assert.equal(await memory.get('city'), 'Quito');
+  });
+  for (const command of ['/clear', '/load-session demo', '/exit']) {
+    await withStores(async ({ reminders, notes, sessions, memory }) => {
+      await memory.set('city', 'Quito');
+      const outcome = await runFlow({ reminders, notes, sessions, memory }, ['Olvida mi ciudad.', command, 'Sí', '/exit']);
+      assert.equal(await memory.get('city'), 'Quito', command);
+      assert.equal(outcome.providerCalls, command === '/exit' ? 0 : 1, command);
+    });
+  }
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('city', 'password is never-print-this-placeholder');
+    const outcome = await runFlow({ reminders, notes, sessions, memory }, ['Olvida mi ciudad.', '/exit']);
+    const prompt = outcome.runner.session.getMessages()[1]?.content ?? '';
+    assert.match(prompt, /dato sensible oculto/u);
+    assert.doesNotMatch(prompt, /never-print-this-placeholder/u);
+    assert.equal(await memory.get('city'), 'password is never-print-this-placeholder');
+    assert.equal(outcome.providerCalls, 0);
+  });
+});
+
+test('forgotten memory is absent from the next contextual recall snapshot', async () => {
+  await withStores(async ({ reminders, notes, sessions, memory }) => {
+    await memory.set('favorite_game', 'Genshin Impact');
+    const outcome = await runFlow({ reminders, notes, sessions, memory }, ['Olvida mi juego favorito.', 'Sí', '/exit']);
+    assert.match(outcome.runner.session.getMessages().map(({ content }) => content).join('\n'), /Memoria olvidada: favorite_game/u);
+    const requestContents: string[] = [];
+    const core = new AssistantCore({ provider: new MockAIProvider({ responder: (request) => {
+      requestContents.push(request.messages.map(({ content }) => content).join('\n'));
+      return { text: 'No tengo ese dato guardado.', provider: 'mock', model: 'scripted', finishReason: 'stop' };
+    } }) });
+    await core.respond(core.createSession(), '¿Cuál es mi juego favorito?', { memory: await memory.snapshot() });
+    assert.doesNotMatch(requestContents[0] ?? '', /Genshin Impact|favorite_game/u);
+    assert.equal(await memory.get('favorite_game'), undefined);
+  });
+});
+
 test('multi-memory and sensitive create requests are rejected without exposing values', async () => {
   await withStores(async ({ reminders, notes, sessions, memory }) => {
     const multi = await runFlow({ reminders, notes, sessions, memory }, [

@@ -51,6 +51,11 @@ export type PendingClarification =
     readonly kind: 'memory-create';
     readonly key: string;
     readonly value: string;
+  }
+  | {
+    readonly kind: 'memory-forget';
+    readonly key: string;
+    readonly expectedValue: string;
   };
 
 export interface ClarificationInputContext {
@@ -146,6 +151,11 @@ function parseExplicitMemoryUpdate(input: string): MemoryUpdateIntent | undefine
 function parseExplicitMemoryCreate(input: string): { readonly text: string } | undefined {
   const match = input.trim().match(/^\s*(?:por favor\s+)?(?:recuerda(?:me)?(?:\s+que)?|guarda\s+en\s+tu\s+memoria(?:\s+que)?|quiero\s+que\s+recuerdes\s+que|memoriza(?:\s+que)?)\s+(.+?)\s*[.!?]*\s*$/iu);
   return match?.[1] ? { text: match[1].trim() } : undefined;
+}
+
+function parseExplicitMemoryForget(input: string): { readonly keyLabel: string } | undefined {
+  const match = input.trim().match(/^\s*(?:por favor\s+)?(?:(?:olvida|olvidar|deja\s+de\s+recordar)\s+(?:(?:mi|el|la)\s+)?|(?:borra|elimina)\s+de\s+tu\s+memoria\s+(?:(?:mi|el|la)\s+)?)(.+?)\s*[.!?]*\s*$/iu);
+  return match?.[1] ? { keyLabel: match[1].trim() } : undefined;
 }
 
 function parseMemoryFact(text: string): MemoryCreateIntent | undefined {
@@ -316,6 +326,13 @@ export class SafeClarificationFlow {
     }
     const pending = this.#pending;
     if (!pending) {
+      const memoryForget = this.detectMemoryForget(input);
+      if (memoryForget) {
+        const detected = await memoryForget;
+        if (detected.kind === 'memory-unavailable') return detected.response;
+        this.#pending = detected;
+        return this.promptFor(detected);
+      }
       const memoryCreate = this.detectMemoryCreate(input);
       if (memoryCreate) {
         const detected = await memoryCreate;
@@ -364,6 +381,7 @@ export class SafeClarificationFlow {
         case 'saved-session-info-id': return await this.resolveSavedSessionInfo(input, context);
         case 'memory-update': return await this.resolveMemoryUpdate(pending, input);
         case 'memory-create': return await this.resolveMemoryCreate(pending, input);
+        case 'memory-forget': return await this.resolveMemoryForget(pending, input);
       }
     } catch {
       return 'No pude completar la aclaración. No se realizó ninguna acción.';
@@ -378,6 +396,34 @@ export class SafeClarificationFlow {
       case 'saved-session-info-id': return '¿Qué ID de conversación guardada quieres que consulte?';
       case 'memory-update': return `Tengo guardado ${pending.key} = ${JSON.stringify(pending.oldValue)}. ¿Quieres cambiarlo a ${JSON.stringify(pending.newValue)}? Responde sí o no.`;
       case 'memory-create': return `¿Quieres que guarde ${pending.key} = ${JSON.stringify(pending.value)}? Responde sí o no.`;
+      case 'memory-forget': {
+        const entry = { key: pending.key, value: pending.expectedValue };
+        const visibleValue = isSafeExplicitMemoryEntry(entry) ? JSON.stringify(pending.expectedValue) : '[dato sensible oculto]';
+        return `Tengo guardado ${pending.key} = ${visibleValue}. ¿Quieres que lo olvide? Responde sí o no.`;
+      }
+    }
+  }
+
+  private detectMemoryForget(input: string): Promise<MemoryDetection> | undefined {
+    if (!this.memoryStore) return undefined;
+    const intent = parseExplicitMemoryForget(input);
+    if (!intent) return undefined;
+    return this.resolveMemoryForgetIntent(intent.keyLabel, this.memoryStore);
+  }
+
+  private async resolveMemoryForgetIntent(keyLabel: string, memoryStore: PersistentMemoryStore): Promise<MemoryDetection> {
+    if (!isOneKeyLabel(keyLabel) || hasMultipleMemoryClaims(keyLabel)) {
+      return { kind: 'memory-unavailable', response: 'Solo puedo proponer olvidar una memoria por vez; no eliminé nada. Pídeme cada dato por separado.' };
+    }
+    try {
+      const entries = await memoryStore.list();
+      const key = resolveMemoryKey(keyLabel, entries);
+      if (!key) return { kind: 'memory-unavailable', response: 'No tengo guardada una memoria identificable con esa clave; no eliminé nada.' };
+      const current = entries.find((entry) => entry.key === key);
+      if (!current) return { kind: 'memory-unavailable', response: 'Esa memoria ya no está guardada; no eliminé nada.' };
+      return { kind: 'memory-forget', key, expectedValue: current.value };
+    } catch {
+      return { kind: 'memory-unavailable', response: 'No pude consultar esa memoria; no eliminé nada.' };
     }
   }
 
@@ -477,6 +523,21 @@ export class SafeClarificationFlow {
     return result === 'created'
       ? `Memoria guardada: ${pending.key}.`
       : `La memoria ${pending.key} ya existe; no la sobrescribí. Si quieres cambiarla, pídeme explícitamente actualizarla.`;
+  }
+
+  private async resolveMemoryForget(
+    pending: Extract<PendingClarification, { kind: 'memory-forget' }>,
+    input: string,
+  ): Promise<string> {
+    if (isNegative(input)) return `Entendido. No olvidé ${pending.key}.`;
+    if (!isAffirmative(input)) return 'No recibí una confirmación clara; cancelé la solicitud y no eliminé nada.';
+    if (!this.memoryStore) return 'La eliminación no está disponible; no cambié la memoria.';
+    const result = await this.memoryStore.forget(pending.key, pending.expectedValue);
+    switch (result) {
+      case 'deleted': return `Memoria olvidada: ${pending.key}.`;
+      case 'missing': return `La memoria ${pending.key} ya no existe; no eliminé otra entrada.`;
+      case 'conflict': return `La memoria ${pending.key} cambió desde la solicitud. No la eliminé; vuelve a pedirlo si todavía quieres olvidarla.`;
+    }
   }
 
   private async resolveReminder(
