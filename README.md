@@ -155,7 +155,10 @@ inequívoca, Yuki puede redirigirla una sola vez; no deshace acciones que ya se
 ejecutaron y descarta el contexto de reparación al cambiar de tema o sesión.
 También puede redirigir una consulta local de solo lectura a otra consulta
 compatible; conserva solo el tipo y los identificadores/texto de búsqueda mínimos,
-y no guarda resultados de herramientas en la Session.
+y no guarda resultados de herramientas en la Session. Una consulta de solo lectura
+puede recibir un único seguimiento breve (por ejemplo, cambiar el término buscado
+en la misma conversación guardada); ese contexto mínimo se consume enseguida y se
+descarta ante comandos, cambios de tema o sesión.
 
 Las notas se guardan en `~/.waifu-assistant/notes.json` (o en la ruta configurada
 con `YUKI_NOTES_PATH`) y se gestionan explícitamente con `/note-add Comprar
