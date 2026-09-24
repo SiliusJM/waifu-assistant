@@ -26,6 +26,7 @@ export const CONVERSATION_SESSION_INFO_COMMAND = '/session-info';
 export const CONVERSATION_REMIND_COMMAND = '/remind';
 export const CONVERSATION_REMINDERS_COMMAND = '/reminders';
 export const CONVERSATION_REMINDER_DELETE_COMMAND = '/reminder-delete';
+export const CONVERSATION_REMINDER_COMPLETE_COMMAND = '/reminder-complete';
 export const LOCAL_COMMAND_HELP = [
   'Comandos disponibles:',
   '  /help              Muestra esta ayuda',
@@ -34,6 +35,8 @@ export const LOCAL_COMMAND_HELP = [
   '  /remind <YYYY-MM-DD HH:mm> <texto>  Crea un recordatorio local',
   '  /remind HH:mm <texto>  Programa la siguiente ocurrencia de hoy/mañana',
   '  /reminders         Lista recordatorios pendientes',
+  '  /reminders --all  Incluye recordatorios completados',
+  '  /reminder-complete <id>  Marca un recordatorio como completado',
   '  /reminder-delete <id>  Elimina un recordatorio',
   '  /calc <expresion>  Calcula una expresion aritmetica',
   '  /exit              Cierra la conversacion',
@@ -231,8 +234,11 @@ export class ConversationRunner {
       || input === CONVERSATION_REMIND_COMMAND
       || input.startsWith(`${CONVERSATION_REMIND_COMMAND} `)
       || input === CONVERSATION_REMINDERS_COMMAND
+      || input.startsWith(`${CONVERSATION_REMINDERS_COMMAND} `)
       || input === CONVERSATION_REMINDER_DELETE_COMMAND
-      || input.startsWith(`${CONVERSATION_REMINDER_DELETE_COMMAND} `);
+      || input.startsWith(`${CONVERSATION_REMINDER_DELETE_COMMAND} `)
+      || input === CONVERSATION_REMINDER_COMPLETE_COMMAND
+      || input.startsWith(`${CONVERSATION_REMINDER_COMPLETE_COMMAND} `);
 
     const executeLocalCommand = async (input: string, activeAtArrival: boolean): Promise<void> => {
       if (!options.onCommand) {

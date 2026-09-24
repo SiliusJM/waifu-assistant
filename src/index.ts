@@ -26,6 +26,7 @@ export {
   CONVERSATION_REMIND_COMMAND,
   CONVERSATION_REMINDERS_COMMAND,
   CONVERSATION_REMINDER_DELETE_COMMAND,
+  CONVERSATION_REMINDER_COMPLETE_COMMAND,
   ConversationRunner,
   type ConversationRunOptions,
   type ConversationRunResult,
@@ -42,11 +43,14 @@ export {
   parseReminderCommand,
   formatReminderDate,
   formatDueReminderNotice,
+  formatReminderList,
   type Reminder,
   type ReminderDateInput,
   type ReminderFileSystem,
   type ReminderStoreOptions,
 } from './reminders/reminder-store.js';
+export { ConsoleReminderNotifier, type ReminderNotifier, type ReminderConsoleWriter } from './reminders/reminder-notifier.js';
+export { ReminderScheduler, type ReminderSchedulerOptions, type ReminderTimerScheduler } from './reminders/reminder-scheduler.js';
 export * from './memory/index.js';
 export {
   SAVED_SESSION_MAX_CONTENT_LENGTH,

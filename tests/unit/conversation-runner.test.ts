@@ -361,6 +361,8 @@ test('reminder commands stay local, preserve Session, and do not invoke the prov
   const result = await runner.run(inputs([
     '/remind 2026-09-24 20:00 Revisar el proyecto',
     '/reminders',
+    '/reminders --all',
+    '/reminder-complete r-a1b2c3d4',
     '/reminder-delete r-a1b2c3d4',
     'mensaje conversacional',
     '/exit',
@@ -372,6 +374,8 @@ test('reminder commands stay local, preserve Session, and do not invoke the prov
   assert.deepEqual(commands, [
     '/remind 2026-09-24 20:00 Revisar el proyecto',
     '/reminders',
+    '/reminders --all',
+    '/reminder-complete r-a1b2c3d4',
     '/reminder-delete r-a1b2c3d4',
   ]);
   assert.equal(providerCalls, 1);
@@ -474,6 +478,8 @@ test('/rename and /session-info are local metadata commands and preserve convers
   assert.match(LOCAL_COMMAND_HELP, /\/session-info/u);
   assert.match(LOCAL_COMMAND_HELP, /\/remind <YYYY-MM-DD HH:mm> <texto>/u);
   assert.match(LOCAL_COMMAND_HELP, /\/reminders/u);
+  assert.match(LOCAL_COMMAND_HELP, /\/reminders --all/u);
+  assert.match(LOCAL_COMMAND_HELP, /\/reminder-complete <id>/u);
   assert.match(LOCAL_COMMAND_HELP, /\/reminder-delete <id>/u);
   assert.throws(() => runner.session.setTitle('   '), (error: unknown) => error instanceof Error && 'code' in error && error.code === 'SESSION_CONFIGURATION_ERROR');
   assert.throws(() => runner.session.setTitle('🌸'.repeat(101)), (error: unknown) => error instanceof Error && 'code' in error && error.code === 'SESSION_CONFIGURATION_ERROR');
