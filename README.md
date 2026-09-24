@@ -112,7 +112,10 @@ Las respuestas interactivas pueden mostrarse progresivamente mediante streaming;
 naturales claras sobre cómo usarlas consultan el mismo catálogo. Las acciones
 explícitas locales no requieren una llamada al LLM. La memoria explícita se guarda
 localmente y puede redirigirse mediante `YUKI_MEMORY_PATH`; no se mezcla con las
-sesiones guardadas.
+sesiones guardadas. En turnos normales, Yuki solo comparte con el provider hasta
+tres memorias explícitas que coincidan claramente con la consulta; no crea
+memorias automáticamente y ese contexto interno no se guarda en la Session ni en
+sesiones exportadas/guardadas.
 
 `/session-search <id> <texto>` busca texto literal, sin distinguir mayúsculas,
 en los mensajes visibles de una sola conversación guardada. Muestra como máximo

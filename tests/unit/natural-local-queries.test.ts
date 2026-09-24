@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import type { AIRequest } from '../../src/ai/ai-types.js';
+import type { MemorySnapshot } from '../../src/memory/memory-types.js';
 import { MockAIProvider } from '../../src/ai/mock-ai-provider.js';
 import { AssistantCore } from '../../src/core/assistant-core.js';
 import { NoteStore } from '../../src/notes/note-store.js';
@@ -77,6 +78,39 @@ async function runQuery(
   const result = await core.respond(core.createSession(), input);
   return { response: result.text, requests };
 }
+
+test('contextual memory recall does not read or mutate notes and reminders', async () => {
+  await withFixture(async ({ reminderStore, noteStore, reminderPath, notePath }) => {
+    await reminderStore.add('Guardar turno de laboratorio', new Date('2026-09-24T09:00:00.000Z'));
+    await noteStore.add('Nota privada de prueba');
+    const reminderBefore = await readFile(reminderPath, 'utf8');
+    const noteBefore = await readFile(notePath, 'utf8');
+    const requests: AIRequest[] = [];
+    const provider = new MockAIProvider({
+      responder: (request) => {
+        requests.push(request);
+        return { text: 'Tu juego favorito guardado es Genshin Impact.', provider: 'mock', model: 'mock-model', finishReason: 'stop' };
+      },
+    });
+    const options = { reminderStore, noteStore, now: () => new Date(NOW) };
+    const core = new AssistantCore({ provider, toolManager: createLocalToolManager(options), toolAllowlist: getLocalToolAllowlist(options) });
+    const memory: MemorySnapshot = Object.freeze({
+      version: 1,
+      entries: Object.freeze([
+        { key: 'favorite_game', value: 'Genshin Impact' },
+        { key: 'note', value: 'unrelated memory entry' },
+      ]),
+    });
+
+    await core.respond(core.createSession(), '¿Cuál era el juego que me gustaba?', { memory });
+
+    const recallBlock = requests[0]?.messages.find(({ content }) => content.includes('<relevant-explicit-memories>'))?.content ?? '';
+    assert.match(recallBlock, /Genshin Impact/u);
+    assert.doesNotMatch(recallBlock, /unrelated memory entry/u);
+    assert.equal(await readFile(reminderPath, 'utf8'), reminderBefore);
+    assert.equal(await readFile(notePath, 'utf8'), noteBefore);
+  });
+});
 
 test('pending reminders, all reminders, next reminder, and empty reminders are read-only', async () => {
   await withFixture(async ({ reminderStore, noteStore, reminderPath }) => {

@@ -603,8 +603,8 @@ test('memory commands are local and snapshots are requested only for conversatio
   const provider = new MockAIProvider({
     responder: (request) => {
       providerCalls += 1;
-      assert.equal(request.messages.at(-1)?.content, 'Hello');
-      assert.match(request.messages.find(({ content }) => content.includes('memory-data'))?.content ?? '', /Jhon/);
+      assert.equal(request.messages.at(-1)?.content, 'What is my name?');
+      assert.match(request.messages.find(({ content }) => content.includes('<relevant-explicit-memories>'))?.content ?? '', /Jhon/);
       return { text: 'reply', provider: 'mock', model: 'mock-model', finishReason: 'stop' };
     },
   });
@@ -614,7 +614,7 @@ test('memory commands are local and snapshots are requested only for conversatio
     entries: Object.freeze([{ key: 'name', value: 'Jhon' }]),
   });
   const localCommands: string[] = [];
-  const result = await runner.run(inputs(['/remember name Jhon', '/memory', 'Hello', '/forget name', '/clear', '/exit']), {
+  const result = await runner.run(inputs(['/remember name Jhon', '/memory', 'What is my name?', '/forget name', '/clear', '/exit']), {
     memory: () => {
       snapshots += 1;
       return memory;
@@ -626,7 +626,7 @@ test('memory commands are local and snapshots are requested only for conversatio
   assert.equal(providerCalls, 1);
   assert.equal(snapshots, 1);
   assert.deepEqual(localCommands, ['/remember name Jhon', '/memory', '/forget name', '/clear']);
-  assert.deepEqual(result.session.getMessages().map(({ content }) => content), ['Hello', 'reply']);
+  assert.deepEqual(result.session.getMessages().map(({ content }) => content), ['What is my name?', 'reply']);
 });
 
 test('conversation runner cancels while waiting for input and closes the source', async () => {
