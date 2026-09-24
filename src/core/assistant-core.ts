@@ -16,6 +16,7 @@ import type { ToolResult } from '../tools/tool-types.js';
 import type { ToolErrorCode } from '../tools/errors.js';
 import type { MemorySnapshot } from '../memory/memory-types.js';
 import { CURRENT_DATA_HONESTY_POLICY } from './current-data-policy.js';
+import { isExplicitLocalStatusQuery } from '../tools/local-status-query-intent.js';
 
 const MAX_TOOL_ARGUMENTS_JSON_LENGTH = 4096;
 
@@ -95,7 +96,7 @@ export class AssistantCore {
         signal: options.signal,
       });
       const finalResponse = providerResponse.toolCalls?.length
-        ? await this.completeToolRound(request, providerResponse.toolCalls, options.signal)
+        ? await this.completeToolRound(request, providerResponse.toolCalls, options.signal, session)
         : providerResponse;
       if (!finalResponse.text && !finalResponse.toolCalls?.length) {
         throw new AssistantError('The provider returned an empty response.', {
@@ -171,7 +172,7 @@ export class AssistantCore {
         });
       }
       const finalResponse = first.toolCalls?.length
-        ? yield* this.streamToolRound(request, first.toolCalls, options)
+        ? yield* this.streamToolRound(request, first.toolCalls, options, session)
         : first;
       if (options.isCurrent && !options.isCurrent()) {
         throw new AssistantError('The AI response was superseded.', {
@@ -214,11 +215,12 @@ export class AssistantCore {
 
   private buildRequest(session: Session, options: RespondOptions): AIRequest {
     const context = createContext(session);
+    const isStatusQuery = isExplicitLocalStatusQuery(session.getMessages().at(-1)?.content);
     const personalityMessages = options.personality?.instructions.map(({ text }) => ({
       role: 'system' as const,
       content: text,
     })) ?? [];
-    const memoryMessages = options.memory && options.memory.entries.length > 0
+    const memoryMessages = !isStatusQuery && options.memory && options.memory.entries.length > 0
       ? [{
         role: 'system' as const,
         content: [
@@ -324,11 +326,12 @@ export class AssistantCore {
     request: AIRequest,
     toolCalls: readonly ToolCallRequest[],
     options: RespondOptions,
+    session: Session,
   ): AsyncGenerator<AssistantStreamEvent, AIResponse, unknown> {
     if (options.signal?.aborted || (options.isCurrent && !options.isCurrent())) {
       throw new AssistantError('The tool call was cancelled.', { code: 'CANCELLATION_ERROR', retryable: false });
     }
-    const toolRequest = await this.prepareToolRoundRequest(request, toolCalls, options.signal);
+    const toolRequest = await this.prepareToolRoundRequest(request, toolCalls, options.signal, session);
     if (options.signal?.aborted) {
       throw new AssistantError('The tool call was cancelled.', { code: 'CANCELLATION_ERROR', retryable: false });
     }
@@ -345,8 +348,9 @@ export class AssistantCore {
     request: AIRequest,
     toolCalls: readonly ToolCallRequest[],
     signal: AbortSignal | undefined,
+    session: Session,
   ): Promise<AIResponse> {
-    const toolRequest = await this.prepareToolRoundRequest(request, toolCalls, signal);
+    const toolRequest = await this.prepareToolRoundRequest(request, toolCalls, signal, session);
     const finalResponse = await this.provider.complete(toolRequest, { signal });
     if (finalResponse.toolCalls?.length) {
       throw new AssistantError('The provider requested another tool round.', {
@@ -361,6 +365,7 @@ export class AssistantCore {
     request: AIRequest,
     toolCalls: readonly ToolCallRequest[],
     signal: AbortSignal | undefined,
+    session: Session,
   ): Promise<AIRequest> {
     if (toolCalls.length > 2) {
       throw new AssistantError('The provider requested too many tools.', {
@@ -414,6 +419,14 @@ export class AssistantCore {
           toolId,
           toolCallId: toolCall.id,
           userInput: request.messages.filter(({ role }) => role === 'user').at(-1)?.content ?? '',
+          ...(toolId === 'local.status_summary' ? {
+            localStatusSession: {
+              id: session.id,
+              title: session.title ?? null,
+              messageCount: session.getMessages().length,
+              saved: session.savedName !== undefined,
+            },
+          } : {}),
         },
         authorization: { source: LLM_TOOL_CALL_AUTHORIZATION_SOURCE },
       });

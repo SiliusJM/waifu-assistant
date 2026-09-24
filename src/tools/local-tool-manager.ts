@@ -10,6 +10,8 @@ import { createLocalRemindersListTool, LOCAL_REMINDERS_LIST_TOOL_ID } from './lo
 import { createLocalReminderNextTool, LOCAL_REMINDER_NEXT_TOOL_ID } from './local-reminder-next-tool.js';
 import { createLocalNotesListTool, LOCAL_NOTES_LIST_TOOL_ID } from './local-notes-list-tool.js';
 import { createLocalNoteShowTool, LOCAL_NOTE_SHOW_TOOL_ID } from './local-note-show-tool.js';
+import { createLocalStatusSummaryTool, LOCAL_STATUS_SUMMARY_TOOL_ID, type LocalStatusProviderSummary } from './local-status-summary-tool.js';
+import { isExplicitLocalStatusQuery } from './local-status-query-intent.js';
 import type { ReminderStore } from '../reminders/reminder-store.js';
 import type { NoteStore } from '../notes/note-store.js';
 
@@ -27,6 +29,11 @@ export interface LocalToolManagerOptions {
   readonly now?: TimeSource;
   readonly reminderStore?: ReminderStore;
   readonly noteStore?: NoteStore;
+  readonly statusSummary?: {
+    readonly provider: LocalStatusProviderSummary;
+    readonly noteStore: NoteStore;
+    readonly reminderStore: ReminderStore;
+  };
 }
 
 export interface LocalCommandOptions {
@@ -51,6 +58,7 @@ export function getLocalToolAllowlist(options: LocalToolManagerOptions = {}): re
     ...(options.noteStore ? [LOCAL_NOTE_CREATE_TOOL_ID] : []),
     ...(options.reminderStore ? [LOCAL_REMINDERS_LIST_TOOL_ID, LOCAL_REMINDER_NEXT_TOOL_ID] : []),
     ...(options.noteStore ? [LOCAL_NOTES_LIST_TOOL_ID, LOCAL_NOTE_SHOW_TOOL_ID] : []),
+    ...(options.statusSummary ? [LOCAL_STATUS_SUMMARY_TOOL_ID] : []),
   ];
 }
 
@@ -69,6 +77,7 @@ export function createLocalToolManager(nowOrOptions?: TimeSource | LocalToolMana
     registry.register(createLocalNotesListTool(options.noteStore));
     registry.register(createLocalNoteShowTool(options.noteStore));
   }
+  if (options.statusSummary) registry.register(createLocalStatusSummaryTool(options.statusSummary));
   return new ToolManager({
     registry,
     authorizer: {
@@ -83,11 +92,21 @@ export function createLocalToolManager(nowOrOptions?: TimeSource | LocalToolMana
           && context.metadata.source === LLM_TOOL_CALL_AUTHORIZATION_SOURCE
           && context.metadata.toolId === tool.id;
         const naturalAction = tool.id === LOCAL_REMINDER_CREATE_TOOL_ID || tool.id === LOCAL_NOTE_CREATE_TOOL_ID;
+        const naturalStatusQuery = tool.id === LOCAL_STATUS_SUMMARY_TOOL_ID
+          && context.authorization?.source === LLM_TOOL_CALL_AUTHORIZATION_SOURCE
+          && context.metadata.source === LLM_TOOL_CALL_AUTHORIZATION_SOURCE
+          && context.metadata.toolId === tool.id
+          && isExplicitLocalStatusQuery(context.metadata.userInput);
+        const isStatusSummary = tool.id === LOCAL_STATUS_SUMMARY_TOOL_ID;
         return {
-          allowed: explicitCommand || (llmCommand && (!naturalAction || isExplicitNaturalAction(context.metadata.userInput, tool.id))),
+          allowed: explicitCommand || naturalStatusQuery
+            || (llmCommand && !isStatusSummary
+              && (!naturalAction || isExplicitNaturalAction(context.metadata.userInput, tool.id))),
           reason: naturalAction
             ? 'The tool requires an explicit natural-language action request.'
-            : 'The tool requires an explicit local command.',
+            : tool.id === LOCAL_STATUS_SUMMARY_TOOL_ID
+              ? 'This read-only status tool cannot change provider settings and is available only for status questions.'
+              : 'The tool requires an explicit local command.',
         authorization: context.authorization,
         };
       },

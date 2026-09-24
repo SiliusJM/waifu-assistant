@@ -155,6 +155,13 @@ el listado de notas usa previews acotadas y `note_show` muestra solo la nota sol
 Pedir explícitamente todos los recordatorios permite incluir los completados; una consulta
 normal muestra solo los pendientes. Las consultas no modifican stores ni contaminan la Session.
 
+Yuki puede resumir su estado local con preguntas como `¿Qué proveedor y modelo usas?`,
+`¿Tienes configurada la credencial?`, `¿Qué sesión tengo abierta?` o `Dame un resumen de tu estado local`.
+El resumen incluye solo metadata segura del provider, la sesión actual, el conteo de notas y
+conteos/fecha del próximo recordatorio. Nunca revela credenciales ni entrega al modelo el contenido
+de notas, recordatorios o Persistent Memory. La consulta no cambia el provider ni la configuración;
+`/status` sigue disponible como comando explícito.
+
 ### Exportar conversaciones
 
 En el modo interactivo, `/export` guarda la conversación actual como Markdown;
