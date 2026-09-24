@@ -1,6 +1,11 @@
 import type { ToolManager } from '../tools/tool-manager.js';
 import type { ToolResult } from '../tools/tool-types.js';
-import { createClarificationToolOptions } from '../tools/clarification-tool-authorization.js';
+import {
+  createClarificationToolOptions,
+  createReadOnlyQueryRepairToolOptions,
+  type ReadOnlyQueryRepairKind,
+  type ReadOnlyQueryRepairToolId,
+} from '../tools/clarification-tool-authorization.js';
 import { LOCAL_REMINDER_CREATE_TOOL_ID, type LocalReminderCreateValue } from '../tools/local-reminder-create-tool.js';
 import { LOCAL_NOTE_CREATE_TOOL_ID, type LocalNoteCreateValue } from '../tools/local-note-create-tool.js';
 import {
@@ -15,6 +20,13 @@ import { validateMemoryValue } from '../memory/memory-store.js';
 import type { PersistentMemoryStore } from '../memory/memory-store.js';
 import { isSafeExplicitMemoryEntry } from '../memory/memory-recall.js';
 import { resolveNaturalCapabilityHelp } from './capability-catalog.js';
+import { parseSavedSessionQueryIntent, isExplicitSavedSessionContentSearch } from '../tools/saved-session-query-intent.js';
+import { isExplicitLocalStatusQuery } from '../tools/local-status-query-intent.js';
+import { LOCAL_REMINDERS_LIST_TOOL_ID, type LocalRemindersListValue } from '../tools/local-reminders-list-tool.js';
+import { LOCAL_REMINDER_NEXT_TOOL_ID, type LocalReminderNextValue } from '../tools/local-reminder-next-tool.js';
+import { LOCAL_NOTES_LIST_TOOL_ID, type LocalNotesListValue } from '../tools/local-notes-list-tool.js';
+import { LOCAL_NOTE_SHOW_TOOL_ID, type LocalNoteShowValue } from '../tools/local-note-show-tool.js';
+import { LOCAL_STATUS_SUMMARY_TOOL_ID, type LocalStatusSummaryValue } from '../tools/local-status-summary-tool.js';
 
 const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,64}$/u;
 const HOUR_FOLLOW_UP = /^\s*(?:(?:a\s+)?las?\s+)?(\d{1,2})(?::(\d{2}))?\s*[.!?]*\s*$/iu;
@@ -43,6 +55,15 @@ export type PendingClarification =
     readonly originalIntent: { readonly kind: 'saved-session.info' };
   }
   | {
+    readonly kind: 'saved-session-search-query';
+    readonly missingField: 'query';
+    readonly sessionId: string;
+  }
+  | {
+    readonly kind: 'note-show-id';
+    readonly missingField: 'noteId';
+  }
+  | {
     readonly kind: 'memory-update';
     readonly key: string;
     readonly oldValue: string;
@@ -62,6 +83,15 @@ export type PendingClarification =
 interface RepairCorrection {
   readonly instruction: string;
 }
+
+type ReadOnlyQueryIntent =
+  | { readonly kind: 'reminders-list'; readonly includeCompleted: boolean }
+  | { readonly kind: 'reminder-next' }
+  | { readonly kind: 'notes-list' }
+  | { readonly kind: 'note-show'; readonly noteId?: string }
+  | { readonly kind: 'saved-sessions'; readonly operation: 'list' | 'count' | 'recent' | 'info'; readonly sessionId?: string }
+  | { readonly kind: 'saved-session-search'; readonly sessionId?: string; readonly query?: string }
+  | { readonly kind: 'status-summary' };
 
 export interface ClarificationInputContext {
   readonly sessionId: string;
@@ -165,7 +195,7 @@ function parseExplicitMemoryForget(input: string): { readonly keyLabel: string }
 }
 
 function parseRepairCorrection(input: string): RepairCorrection | undefined {
-  const match = input.trim().match(/^\s*(?:no\s*,?\s*(?:quer[ií]a\s+decir|me\s+refer[ií]a\s+a(?:\s+eso)?|quise\s+decir|en\s+realidad\s+quer[ií]a|en\s+realidad)|mejor|corrige\s+eso)\s*[:,]?\s*(.*?)\s*[.!?]*\s*$/iu);
+  const match = input.trim().match(/^\s*(?:no\s*,?\s*(?:quer[ií]a(?:\s+decir)?|me\s+refer[ií]a\s+a(?:\s+eso)?|quise\s+decir|en\s+realidad\s+quer[ií]a|en\s+realidad)|mejor|corrige\s+eso)\s*[:,]?\s*(.*?)\s*[.!?]*\s*$/iu);
   return match ? { instruction: match[1]?.trim() ?? '' } : undefined;
 }
 
@@ -214,6 +244,76 @@ function parseRepairSavedSearch(
 function parseRepairSavedInfo(input: string): string | undefined {
   const match = input.trim().match(/^\s*(?:mu[eé]strame|ens[eé][ñn]ame|consulta(?:r)?)\s+(?:(?:la\s+)?informaci[oó]n\s+de\s+)?(?:la\s+)?(?:conversaci[oó]n|sesi[oó]n)(?:\s+guardada)?\s+([A-Za-z0-9_-]{1,64})\s*[.!?]*\s*$/iu);
   return match?.[1] ? validSessionId(match[1]) : undefined;
+}
+
+function safeSessionIdIn(input: string): string | undefined {
+  const match = input.match(/(?:conversaci[oó]n|sesi[oó]n)(?:\s+guardada)?\s+([A-Za-z0-9_-]{1,64})(?:\b|$)/iu);
+  return match?.[1] ? validSessionId(match[1]) : undefined;
+}
+
+function requestedAllReminders(input: string): boolean {
+  const normalized = input.toLocaleLowerCase();
+  return /\btod(?:o|os|as)\b/u.test(normalized) || /\bhistorial\b/u.test(normalized)
+    ? /\b(recordatorios?|recordatorio)\b/u.test(normalized)
+      && (/\bcomplet(?:o|os|adas?|ados?)\b/u.test(normalized)
+        || /\bincluso\b.*\bcomplet/u.test(normalized)
+        || /\btodos?\b/u.test(normalized))
+    : false;
+}
+
+function parseReadOnlyQueryIntent(input: string): ReadOnlyQueryIntent | undefined {
+  const text = input.trim();
+  const normalized = normalize(text);
+  if (/\b(?:borra\w*|elimina\w*|delete\w*|renombra\w*|edita\w*|modifica\w*|completa(?:r)?|marca(?:r)?\s+como\s+completad[oa]s?)\b/iu.test(normalized)) {
+    return undefined;
+  }
+
+  const search = text.match(/^\s*(?:busca|buscar|encuentra)\s+(?:(?:['"“])(.+?)(?:['"”])|(.+?))\s+(?:dentro\s+de|en)\s+(?:(?:esa|esta|la)\s+)?(?:conversaci[oó]n|sesi[oó]n)(?:\s+guardada)?(?:\s+([A-Za-z0-9_-]{1,64}))?\s*[.!?]*\s*$/iu);
+  const searchWithoutText = text.match(/^\s*(?:busca|buscar|encuentra)\s+(?:dentro\s+de|en)\s+(?:(?:esa|esta|la)\s+)?(?:conversaci[oó]n|sesi[oó]n)(?:\s+guardada)?(?:\s+([A-Za-z0-9_-]{1,64}))?\s*[.!?]*\s*$/iu);
+  if (search?.[1] || search?.[2] || searchWithoutText) {
+    const query = (search?.[1] ?? search?.[2] ?? '').trim();
+    const sessionId = search?.[3] ? validSessionId(search[3])
+      : searchWithoutText?.[1] ? validSessionId(searchWithoutText[1]) : undefined;
+    if (query && Array.from(query).length <= 120 && !/[\r\n\0]/u.test(query)) {
+      if (sessionId && !isExplicitSavedSessionContentSearch(text, sessionId, query)) return undefined;
+      return { kind: 'saved-session-search', ...(sessionId ? { sessionId } : {}), query };
+    }
+    return { kind: 'saved-session-search', ...(sessionId ? { sessionId } : {}) };
+  }
+
+  const savedIntent = parseSavedSessionQueryIntent(text);
+  if (savedIntent) {
+    const infoAsked = /\b(?:informaci[oó]n|detalles?)\b/iu.test(text)
+      && !/\b(?:borra|elimina|renombra|edita|modifica|abre|carga|restaura)\w*/iu.test(text);
+    const operation = infoAsked ? 'info' : savedIntent.kind;
+    const sessionId = operation === 'info' ? safeSessionIdIn(text) : undefined;
+    return { kind: 'saved-sessions', operation, ...(sessionId ? { sessionId } : {}) };
+  }
+
+  if (/\bnota\b/iu.test(normalized)
+    && /\b(?:muestra|mostrar|mu[eé]strame|ens[eé]ñame|ver|lee|consulta)\b/iu.test(normalized)) {
+    const id = text.match(/\bnota\s+([A-Za-z0-9_-]{10})\b/iu)?.[1];
+    return { kind: 'note-show', ...(id ? { noteId: id } : {}) };
+  }
+
+  if (/\b(?:pr[oó]xim[oa]|siguiente|next)\b/iu.test(normalized)
+    && /\b(?:recordatorio|recordatorios)\b/iu.test(normalized)) return { kind: 'reminder-next' };
+
+  if (/\b(?:recordatorio|recordatorios)\b/iu.test(normalized)
+    && /\b(?:qu[eé]|cu[aá]l(?:es)?|mis|lista|listar|muestra|mu[eé]strame|ver|tengo|pendientes|todos?|historial)\b/iu.test(normalized)) {
+    return { kind: 'reminders-list', includeCompleted: requestedAllReminders(text) };
+  }
+
+  if (/\b(?:nota|notas)\b/iu.test(normalized)
+    && /\b(?:qu[eé]|cu[aá]l(?:es)?|mis|lista|listar|muestra|mu[eé]strame|ver|tengo|guardad[oa]s?)\b/iu.test(normalized)) {
+    return { kind: 'notes-list' };
+  }
+
+  if (isExplicitLocalStatusQuery(text)
+    && /\b(?:estado|resumen|proveedor|modelo|credencial|clave)\b/iu.test(normalized)) {
+    return { kind: 'status-summary' };
+  }
+  return undefined;
 }
 
 function parseMemoryFact(text: string): MemoryCreateIntent | undefined {
@@ -359,6 +459,7 @@ function failText(result: ToolResult<unknown>, subject: string): string {
 
 export class SafeClarificationFlow {
   #pending: PendingClarification | undefined;
+  #previousReadOnlyQuery: ReadOnlyQueryIntent | undefined;
   #repairAvailable = false;
   #repairConsumed = false;
   #lastActionExecuted: string | undefined;
@@ -378,6 +479,7 @@ export class SafeClarificationFlow {
 
   clear(): void {
     this.#pending = undefined;
+    this.#previousReadOnlyQuery = undefined;
     this.#repairAvailable = false;
     this.#repairConsumed = false;
     this.#lastActionExecuted = undefined;
@@ -385,6 +487,7 @@ export class SafeClarificationFlow {
 
   observeCapabilityHelp(): void {
     this.#pending = undefined;
+    this.#previousReadOnlyQuery = undefined;
     this.#lastActionExecuted = undefined;
     this.#repairAvailable = true;
     this.#repairConsumed = false;
@@ -396,6 +499,10 @@ export class SafeClarificationFlow {
       return undefined;
     }
     const correction = parseRepairCorrection(input);
+    if (!this.#pending && this.#previousReadOnlyQuery && !correction && cancellationKind(input)) {
+      this.clear();
+      return 'Entendido. Cancelé la reparación y no ejecuté ninguna consulta.';
+    }
     if (this.#lastActionExecuted !== undefined) {
       this.#lastActionExecuted = undefined;
       if (correction) {
@@ -406,6 +513,18 @@ export class SafeClarificationFlow {
       }
     }
     const pending = this.#pending;
+    if (correction && this.#previousReadOnlyQuery) {
+      if (!this.#repairAvailable || this.#repairConsumed) {
+        this.clear();
+        return 'Ya utilicé la única reparación permitida para esta consulta; no ejecuté otra acción.';
+      }
+      this.#repairAvailable = false;
+      this.#repairConsumed = true;
+      const previousQuery = this.#previousReadOnlyQuery;
+      this.#previousReadOnlyQuery = undefined;
+      const repaired = await this.executeReadOnlyQueryRepair(correction.instruction, previousQuery, context);
+      return repaired ?? 'No pude reparar la consulta de forma inequívoca; cancelé la intención anterior y no ejecuté ninguna consulta.';
+    }
     if (correction && (pending !== undefined || this.#repairAvailable)) {
       if (!this.#repairAvailable || this.#repairConsumed) {
         this.clear();
@@ -419,6 +538,7 @@ export class SafeClarificationFlow {
     }
     if (!pending && !this.#repairAvailable) this.#repairConsumed = false;
     if (!pending && this.#repairAvailable && !correction) this.#repairAvailable = false;
+    if (!pending && this.#previousReadOnlyQuery && !correction) this.#previousReadOnlyQuery = undefined;
     if (!pending) {
       const memoryForget = this.detectMemoryForget(input);
       if (memoryForget) {
@@ -450,7 +570,10 @@ export class SafeClarificationFlow {
         ?? detectSavedSearch(input)
         ?? detectNote(input)
         ?? detectSavedSessionInfo(input);
-      if (!detected) return undefined;
+      if (!detected) {
+        this.rememberReadOnlyQuery(input);
+        return undefined;
+      }
       this.#pending = detected;
       this.#repairAvailable = true;
       this.#repairConsumed = false;
@@ -466,6 +589,7 @@ export class SafeClarificationFlow {
     }
     if (isClearlyDifferentQuestion(input)) {
       this.clear();
+      this.rememberReadOnlyQuery(input);
       return undefined;
     }
     if (pending.kind === 'note-content' && isDifferentActionRequest(input)) {
@@ -479,7 +603,9 @@ export class SafeClarificationFlow {
       switch (pending.kind) {
         case 'reminder-hour': return await this.resolveReminder(pending, input, context);
         case 'saved-session-search-id': return await this.resolveSavedSearch(pending, input, context);
+        case 'saved-session-search-query': return await this.resolveSavedSearchQuery(pending, input, context);
         case 'note-content': return await this.resolveNote(input, context);
+        case 'note-show-id': return await this.resolveNoteShow(input, context);
         case 'saved-session-info-id': return await this.resolveSavedSessionInfo(input, context);
         case 'memory-update': return await this.resolveMemoryUpdate(pending, input);
         case 'memory-create': return await this.resolveMemoryCreate(pending, input);
@@ -496,6 +622,8 @@ export class SafeClarificationFlow {
       case 'saved-session-search-id': return '¿Qué ID de conversación guardada quieres consultar?';
       case 'note-content': return '¿Qué texto explícito quieres guardar como nota? No asumiré a qué se refiere “eso”.';
       case 'saved-session-info-id': return '¿Qué ID de conversación guardada quieres que consulte?';
+      case 'saved-session-search-query': return '¿Qué texto literal quieres buscar dentro de esa conversación?';
+      case 'note-show-id': return '¿Qué ID de nota quieres mostrar?';
       case 'memory-update': return `Tengo guardado ${pending.key} = ${JSON.stringify(pending.oldValue)}. ¿Quieres cambiarlo a ${JSON.stringify(pending.newValue)}? Responde sí o no.`;
       case 'memory-create': return `¿Quieres que guarde ${pending.key} = ${JSON.stringify(pending.value)}? Responde sí o no.`;
       case 'memory-forget': {
@@ -515,6 +643,9 @@ export class SafeClarificationFlow {
     if (!target) return undefined;
     const cancellation = cancellationKind(target);
     if (cancellation) return 'Entendido. Cancelé la intención anterior y no inicié otra acción.';
+
+    const readOnly = await this.executeReadOnlyQueryRepair(target, undefined, context);
+    if (readOnly !== undefined) return readOnly;
 
     const noteText = parseRepairNote(target, previous);
     if (noteText) return this.resolveNote(noteText, context);
@@ -562,6 +693,168 @@ export class SafeClarificationFlow {
     }
 
     return resolveNaturalCapabilityHelp(target);
+  }
+
+  private rememberReadOnlyQuery(input: string): void {
+    const intent = parseReadOnlyQueryIntent(input);
+    this.#previousReadOnlyQuery = intent;
+    this.#repairAvailable = intent !== undefined;
+    this.#repairConsumed = false;
+  }
+
+  private async executeReadOnlyQueryRepair(
+    input: string,
+    previous: ReadOnlyQueryIntent | undefined,
+    context: ClarificationInputContext,
+  ): Promise<string | undefined> {
+    const intent = parseReadOnlyQueryIntent(input);
+    if (!intent) {
+      return resolveNaturalCapabilityHelp(input);
+    }
+
+    if (intent.kind === 'saved-session-search') {
+      const query = intent.query ?? (previous?.kind === 'saved-session-search' ? previous.query : undefined);
+      const sessionId = intent.sessionId
+        ?? (previous?.kind === 'saved-sessions' ? previous.sessionId : undefined)
+        ?? (previous?.kind === 'saved-session-search' ? previous.sessionId : undefined);
+      if (!sessionId && query) {
+        const pending: Extract<PendingClarification, { kind: 'saved-session-search-id' }> = {
+          kind: 'saved-session-search-id', missingField: 'sessionId',
+          originalIntent: { kind: 'saved-session.search', query },
+        };
+        this.#pending = pending;
+        return this.promptFor(pending);
+      }
+      if (sessionId && !query) {
+        const pending: Extract<PendingClarification, { kind: 'saved-session-search-query' }> = {
+          kind: 'saved-session-search-query', missingField: 'query', sessionId,
+        };
+        this.#pending = pending;
+        return this.promptFor(pending);
+      }
+      if (!sessionId || !query || Array.from(query).length > 120 || /[\r\n\0]/u.test(query)) return undefined;
+      return this.executeSavedSessionSearch(sessionId, query, input, context);
+    }
+
+    if (intent.kind === 'saved-sessions' && intent.operation === 'info' && !intent.sessionId) {
+      const referencedId = /\b(?:esa|esta)\s+(?:conversaci[oó]n|sesi[oó]n)\b/iu.test(input)
+        ? previous?.kind === 'saved-sessions' ? previous.sessionId
+          : previous?.kind === 'saved-session-search' ? previous.sessionId : undefined
+        : undefined;
+      if (!referencedId) {
+        const pending: Extract<PendingClarification, { kind: 'saved-session-info-id' }> = {
+          kind: 'saved-session-info-id', missingField: 'sessionId', originalIntent: { kind: 'saved-session.info' },
+        };
+        this.#pending = pending;
+        return this.promptFor(pending);
+      }
+      return this.executeSavedSessionMetadata('info', referencedId, input, context);
+    }
+
+    if (intent.kind === 'note-show' && !intent.noteId) {
+      const pending: Extract<PendingClarification, { kind: 'note-show-id' }> = {
+        kind: 'note-show-id', missingField: 'noteId',
+      };
+      this.#pending = pending;
+      return this.promptFor(pending);
+    }
+
+    switch (intent.kind) {
+      case 'reminders-list': {
+        const result = await this.executeReadOnlyTool<LocalRemindersListValue>(
+          LOCAL_REMINDERS_LIST_TOOL_ID, 'reminders-list', { includeCompleted: intent.includeCompleted }, input, context,
+        );
+        if (result.status !== 'success') return failText(result, 'No pude consultar los recordatorios.');
+        if (result.value.reminders.length === 0) return result.value.includeCompleted
+          ? 'No tienes recordatorios guardados.' : 'No tienes recordatorios pendientes.';
+        return result.value.reminders.map(({ id, text, dueAt, status }) =>
+          `${status === 'pending' ? 'Pendiente' : 'Completado'} · ${formatReminderDate(dueAt)} · ${text} (${id})`).join('\n');
+      }
+      case 'reminder-next': {
+        const result = await this.executeReadOnlyTool<LocalReminderNextValue>(
+          LOCAL_REMINDER_NEXT_TOOL_ID, 'reminder-next', {}, input, context,
+        );
+        if (result.status !== 'success') return failText(result, 'No pude consultar el próximo recordatorio.');
+        const reminder = result.value.reminder;
+        return reminder ? `Próximo recordatorio: ${reminder.text}\nFecha: ${formatReminderDate(reminder.dueAt)} (${reminder.id})`
+          : 'No tienes recordatorios pendientes.';
+      }
+      case 'notes-list': {
+        const result = await this.executeReadOnlyTool<LocalNotesListValue>(
+          LOCAL_NOTES_LIST_TOOL_ID, 'notes-list', {}, input, context,
+        );
+        if (result.status !== 'success') return failText(result, 'No pude consultar las notas.');
+        return result.value.notes.length === 0 ? 'No tienes notas guardadas.'
+          : result.value.notes.map(({ id, preview, updatedAt }) => `${id} · ${preview} · ${updatedAt}`).join('\n');
+      }
+      case 'note-show': {
+        const result = await this.executeReadOnlyTool<LocalNoteShowValue>(
+          LOCAL_NOTE_SHOW_TOOL_ID, 'note-show', { id: intent.noteId }, input, context,
+        );
+        return result.status === 'success' ? `Nota ${result.value.id}:\n${result.value.text}`
+          : failText(result, 'No pude mostrar esa nota.');
+      }
+      case 'saved-sessions':
+        return this.executeSavedSessionMetadata(intent.operation, intent.sessionId, input, context);
+      case 'status-summary': {
+        const result = await this.executeReadOnlyTool<LocalStatusSummaryValue>(
+          LOCAL_STATUS_SUMMARY_TOOL_ID, 'status-summary', {}, input, context,
+        );
+        if (result.status !== 'success') return failText(result, 'No pude consultar el estado local.');
+        const { provider, session, notes, reminders } = result.value;
+        return `Proveedor: ${provider.provider} · modelo: ${provider.model} · credencial configurada: ${provider.credentialConfigured ? 'sí' : 'no'}\nSesión actual: ${session.id} · ${session.messageCount} mensajes · ${session.saved ? 'guardada' : 'no guardada'}\nNotas: ${notes.count} · recordatorios pendientes: ${reminders.pendingCount} · completados: ${reminders.completedCount}`;
+      }
+    }
+  }
+
+  private executeReadOnlyTool<T>(
+    toolId: ReadOnlyQueryRepairToolId,
+    kind: ReadOnlyQueryRepairKind,
+    args: object,
+    userInput: string,
+    context: ClarificationInputContext,
+  ): Promise<ToolResult<T>> {
+    return this.toolManager.execute<T>(toolId, args, {
+      ...createReadOnlyQueryRepairToolOptions(toolId, kind, context.sessionId, userInput),
+      signal: context.signal,
+    });
+  }
+
+  private async executeSavedSessionMetadata(
+    operation: 'list' | 'count' | 'recent' | 'info',
+    sessionId: string | undefined,
+    userInput: string,
+    context: ClarificationInputContext,
+  ): Promise<string> {
+    const result = await this.executeReadOnlyTool<SavedSessionQueryValue>(
+      LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID, 'saved-sessions-query',
+      { operation, ...(operation === 'info' && sessionId ? { sessionId } : {}) }, userInput, context,
+    );
+    if (result.status !== 'success') return failText(result, 'No pude consultar las conversaciones guardadas.');
+    switch (result.value.operation) {
+      case 'count': return `Tienes ${result.value.count} conversaciones guardadas.`;
+      case 'list': return result.value.sessions.length === 0 ? 'No tienes conversaciones guardadas.'
+        : result.value.sessions.map(({ name, title, messageCount, savedAt }) => `${name} · ${title} · ${messageCount} mensajes · ${savedAt}`).join('\n');
+      case 'recent': return result.value.session
+        ? `Conversación guardada más reciente: ${result.value.session.name} · ${result.value.session.title} · ${result.value.session.messageCount} mensajes · ${result.value.session.savedAt}`
+        : 'No tienes conversaciones guardadas.';
+      case 'info': return result.value.session
+        ? `Conversación ${result.value.session.name}: ${result.value.session.title} · ${result.value.session.messageCount} mensajes · guardada ${result.value.session.savedAt}`
+        : `No existe la conversación guardada: ${sessionId ?? 'ID no disponible'}`;
+    }
+  }
+
+  private async executeSavedSessionSearch(
+    sessionId: string,
+    query: string,
+    userInput: string,
+    context: ClarificationInputContext,
+  ): Promise<string> {
+    const result = await this.executeReadOnlyTool<SavedSessionSearchValue>(
+      LOCAL_SAVED_SESSION_SEARCH_TOOL_ID, 'saved-session-search', { sessionId, query }, userInput, context,
+    );
+    return result.status === 'success' ? formatSavedSessionSearch(result.value)
+      : failText(result, 'No pude buscar en esa conversación.');
   }
 
   private detectMemoryForget(input: string): Promise<MemoryDetection> | undefined {
@@ -731,16 +1024,43 @@ export class SafeClarificationFlow {
   ): Promise<string> {
     const sessionId = validSessionId(input);
     if (!sessionId) return 'El ID no es válido; no busqué en ninguna conversación.';
-    const result = await this.toolManager.execute<SavedSessionSearchValue>(LOCAL_SAVED_SESSION_SEARCH_TOOL_ID, {
+    if (!pending.originalIntent.query) {
+      const queryPending: Extract<PendingClarification, { kind: 'saved-session-search-query' }> = {
+        kind: 'saved-session-search-query', missingField: 'query', sessionId,
+      };
+      this.#pending = queryPending;
+      return this.promptFor(queryPending);
+    }
+    return this.executeSavedSessionSearch(
       sessionId,
-      query: pending.originalIntent.query,
-    }, {
-      ...createClarificationToolOptions(LOCAL_SAVED_SESSION_SEARCH_TOOL_ID, 'saved-session-search-id', context.sessionId),
-      signal: context.signal,
-    });
-    return result.status === 'success'
-      ? formatSavedSessionSearch(result.value)
-      : failText(result, 'No pude buscar en esa conversación.');
+      pending.originalIntent.query,
+      `Busca ${pending.originalIntent.query} en la conversación guardada ${sessionId}.`,
+      context,
+    );
+  }
+
+  private async resolveSavedSearchQuery(
+    pending: Extract<PendingClarification, { kind: 'saved-session-search-query' }>,
+    input: string,
+    context: ClarificationInputContext,
+  ): Promise<string> {
+    const query = stripEndingPunctuation(input.trim());
+    if (!query || Array.from(query).length > 120 || /[\r\n\0]/u.test(query)) {
+      return 'El texto de búsqueda está vacío o no es válido; no consulté la conversación.';
+    }
+    return this.executeSavedSessionSearch(
+      pending.sessionId, query, `Busca ${query} en la conversación guardada ${pending.sessionId}.`, context,
+    );
+  }
+
+  private async resolveNoteShow(input: string, context: ClarificationInputContext): Promise<string> {
+    const id = input.trim();
+    if (!/^[A-Za-z0-9_-]{10}$/u.test(id)) return 'El ID de nota no es válido; no consulté ninguna nota.';
+    const result = await this.executeReadOnlyTool<LocalNoteShowValue>(
+      LOCAL_NOTE_SHOW_TOOL_ID, 'note-show', { id }, `Muéstrame la nota ${id}.`, context,
+    );
+    return result.status === 'success' ? `Nota ${result.value.id}:\n${result.value.text}`
+      : failText(result, 'No pude mostrar esa nota.');
   }
 
   private async resolveNote(input: string, context: ClarificationInputContext): Promise<string> {
