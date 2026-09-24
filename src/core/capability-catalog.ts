@@ -109,8 +109,11 @@ function cleanQuestion(input: string): string {
 
 function isCapabilityQuestion(question: string): boolean {
   return /^(?:que puedes hacer|que sabes hacer|que capacidades tienes|que comandos tienes|cuales son tus comandos|como te uso|como puedo usar(?:te)?|what can you do|what commands do you have)$/u.test(question)
-    || /^(?:como|how)\b/u.test(question)
     || /\b(?:ayuda|instrucciones|capacidad|capacidades|comandos)\b/u.test(question);
+}
+
+function isHowToQuestion(question: string): boolean {
+  return /^(?:como|how)\b/u.test(question);
 }
 
 function matchesTopic(question: string, id: CapabilityCatalogEntry['id']): boolean {
@@ -143,14 +146,23 @@ export function resolveNaturalCapabilityHelp(input: string): string | undefined 
   const question = cleanQuestion(input);
   if (!question) return undefined;
 
-  const asksCapability = isCapabilityQuestion(question) || /^(?:puedes|puedo|tienes|tiene|hay|can you|do you have)\b/u.test(question);
+  const isCapabilityIntent = isCapabilityQuestion(question);
+  const isHowTo = isHowToQuestion(question);
+  const asksCapability = isCapabilityIntent || /^(?:puedes|puedo|tienes|tiene|hay|can you|do you have)\b/u.test(question);
   if (asksCapability) {
     const unavailable = UNAVAILABLE_CAPABILITIES.find(({ pattern }) => pattern.test(question));
     if (unavailable) return unavailable.answer;
   }
 
-  if (!isCapabilityQuestion(question)) return undefined;
   const entry = CAPABILITY_CATALOG.find(({ id }) => matchesTopic(question, id));
+  if (entry && (isCapabilityIntent || isHowTo)) return formatNaturalEntry(entry);
+  if (!isCapabilityIntent) {
+    if (isHowTo) {
+      const unavailable = UNAVAILABLE_CAPABILITIES.find(({ pattern }) => pattern.test(question));
+      if (unavailable) return unavailable.answer;
+    }
+    return undefined;
+  }
   if (entry) return formatNaturalEntry(entry);
   return `Puedo conversar y ayudar con las capacidades locales que aparecen en /help. ${formatCapabilityHelp()}`;
 }
