@@ -11,6 +11,9 @@ import {
 import { LOCAL_SAVED_SESSIONS_QUERY_TOOL_ID, type SavedSessionQueryValue } from '../tools/local-saved-session-query-tool.js';
 import { formatReminderDate } from '../reminders/reminder-store.js';
 import { NOTE_MAX_TEXT_LENGTH } from '../notes/note-store.js';
+import { validateMemoryValue } from '../memory/memory-store.js';
+import type { PersistentMemoryStore } from '../memory/memory-store.js';
+import { isSafeExplicitMemoryEntry } from '../memory/memory-recall.js';
 
 const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,64}$/u;
 const HOUR_FOLLOW_UP = /^\s*(?:(?:a\s+)?las?\s+)?(\d{1,2})(?::(\d{2}))?\s*[.!?]*\s*$/iu;
@@ -37,6 +40,12 @@ export type PendingClarification =
     readonly kind: 'saved-session-info-id';
     readonly missingField: 'sessionId';
     readonly originalIntent: { readonly kind: 'saved-session.info' };
+  }
+  | {
+    readonly kind: 'memory-update';
+    readonly key: string;
+    readonly oldValue: string;
+    readonly newValue: string;
   };
 
 export interface ClarificationInputContext {
@@ -49,7 +58,15 @@ export interface SafeClarificationFlowOptions {
   readonly sessionId: string;
   readonly now?: () => Date;
   readonly onReminderCreated?: () => void | Promise<void>;
+  readonly memoryStore?: PersistentMemoryStore;
 }
+
+interface MemoryUpdateIntent {
+  readonly keyLabel: string;
+  readonly newValue: string;
+}
+
+type MemoryUpdateDetection = PendingClarification | { readonly kind: 'memory-update-unavailable'; readonly response: string };
 
 function normalize(value: string): string {
   return value.toLocaleLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').trim();
@@ -101,6 +118,75 @@ function detectNote(input: string): PendingClarification | undefined {
 function detectSavedSessionInfo(input: string): PendingClarification | undefined {
   if (!/^(?:mu[eé]strame|ens[eé]ñame)\s+(?:esa|esta)\s+(?:conversaci[oó]n|sesi[oó]n)(?:\s+guardada)?\s*[.!?]*$/iu.test(input.trim())) return undefined;
   return { kind: 'saved-session-info-id', missingField: 'sessionId', originalIntent: { kind: 'saved-session.info' } };
+}
+
+function parseExplicitMemoryUpdate(input: string): MemoryUpdateIntent | undefined {
+  const text = input.trim();
+  const direct = text.match(/^\s*(?:por favor\s+)?(?:cambia|actualiza|corrige|change|update|correct)\s+(?:mi\s+|my\s+)?(.+?)\s+(?:a|por|to)\s+(.+?)\s*[.!?]*\s*$/iu);
+  if (direct?.[1] && direct[2]) return { keyLabel: direct[1].trim(), newValue: cleanMemoryValue(direct[2]) };
+
+  const statementThenRequest = text.match(/^\s*(?:ahora\s+)?(?:vivo en|mi ciudad es|my city is|me llamo|mi nombre es|my name is)\s+(.+?)\s*,\s*(?:por favor\s+)?(?:cambia|actualiza|corrige|change|update|correct)\s+(?:mi\s+|my\s+)?(.+?)\s*[.!?]*\s*$/iu);
+  if (statementThenRequest?.[1] && statementThenRequest[2]) {
+    return { keyLabel: statementThenRequest[2].trim(), newValue: cleanMemoryValue(statementThenRequest[1]) };
+  }
+  return undefined;
+}
+
+function cleanMemoryValue(value: string): string {
+  const trimmed = value.trim().replace(/[.!?]+\s*$/u, '').trim();
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith('\u201c') && trimmed.endsWith('\u201d'))
+    || (trimmed.startsWith("'") && trimmed.endsWith("'"))) return trimmed.slice(1, -1).trim();
+  return trimmed;
+}
+
+function normalizedLabel(value: string): string {
+  return value.toLocaleLowerCase('en-US').normalize('NFKD').replace(/\p{Diacritic}/gu, '')
+    .replace(/[_-]+/gu, ' ').replace(/\s+/gu, ' ').trim()
+    .replace(/^(?:mi|my|la|el|the)\s+/u, '').replace(/\s+(?:guardad[oa]|saved)$/u, '').trim();
+}
+
+function canonicalMemoryLabel(value: string): string | undefined {
+  const label = normalizedLabel(value);
+  if (/^(?:city|ciudad|home city|ciudad actual|location)$/u.test(label)) return 'city';
+  if (/^(?:name|nombre|user name|username|nombre de usuario|nombre guardado)$/u.test(label)) return 'name';
+  if (/^(?:favorite game|game favorite|juego favorito|videojuego favorito)$/u.test(label)) return 'favorite game';
+  return undefined;
+}
+
+function canonicalMemoryKey(value: string): string | undefined {
+  const key = normalizedLabel(value);
+  if (/\b(?:city|ciudad|location)\b/u.test(key)) return 'city';
+  if (/\b(?:name|nombre|username)\b/u.test(key)) return 'name';
+  if (/\b(?:favorite|favorito|favorita)\b/u.test(key) && /\b(?:game|juego|videojuego)\b/u.test(key)) return 'favorite game';
+  return undefined;
+}
+
+function isOneKeyLabel(label: string): boolean {
+  return !/(?:,|;|\b(?:and|y|all|todas?|every|each|memories|memorias)\b)/u.test(normalizedLabel(label));
+}
+
+function isSingleMemoryValue(value: string): boolean {
+  return !/\b(?:and|y)\s+(?:my\s+|mi\s+)?[\w-]+\s+(?:a|to|por)\s+/iu.test(value);
+}
+
+function resolveMemoryKey(label: string, entries: readonly { readonly key: string; readonly value: string }[]): string | undefined {
+  const normalized = normalizedLabel(label);
+  const exact = entries.filter(({ key }) => normalizedLabel(key) === normalized);
+  if (exact.length === 1) return exact[0]?.key;
+  if (exact.length > 1) return undefined;
+
+  const requested = canonicalMemoryLabel(label);
+  if (!requested) return undefined;
+  const matches = entries.filter(({ key }) => canonicalMemoryKey(key) === requested);
+  return matches.length === 1 ? matches[0]?.key : undefined;
+}
+
+function isAffirmative(input: string): boolean {
+  return /^(?:si|yes|confirmo|confirmar|hazlo|adelante|de acuerdo|cambiala|actualizala|do it|go ahead)(?: por favor)?$/u.test(normalize(input).replace(/[.!?]+$/u, '').trim());
+}
+
+function isNegative(input: string): boolean {
+  return /^(?:no|no gracias|mejor no|rechazo|cancelar|cancelalo|olvidalo|never mind|no, gracias)$/u.test(normalize(input).replace(/[.!?]+$/u, '').trim());
 }
 
 function cancellationKind(input: string): 'cancel' | 'topic' | undefined {
@@ -169,12 +255,14 @@ export class SafeClarificationFlow {
   private readonly sessionId: string;
   private readonly now: () => Date;
   private readonly onReminderCreated?: () => void | Promise<void>;
+  private readonly memoryStore?: PersistentMemoryStore;
 
   constructor(options: SafeClarificationFlowOptions) {
     this.toolManager = options.toolManager;
     this.sessionId = options.sessionId;
     this.now = options.now ?? (() => new Date());
     this.onReminderCreated = options.onReminderCreated;
+    this.memoryStore = options.memoryStore;
   }
 
   clear(): void {
@@ -188,6 +276,12 @@ export class SafeClarificationFlow {
     }
     const pending = this.#pending;
     if (!pending) {
+      const memoryUpdate = await this.detectMemoryUpdate(input);
+      if (memoryUpdate) {
+        if (memoryUpdate.kind === 'memory-update-unavailable') return memoryUpdate.response;
+        this.#pending = memoryUpdate;
+        return this.promptFor(memoryUpdate);
+      }
       const detected = detectReminder(input, this.now())
         ?? detectSavedSearch(input)
         ?? detectNote(input)
@@ -221,6 +315,7 @@ export class SafeClarificationFlow {
         case 'saved-session-search-id': return await this.resolveSavedSearch(pending, input, context);
         case 'note-content': return await this.resolveNote(input, context);
         case 'saved-session-info-id': return await this.resolveSavedSessionInfo(input, context);
+        case 'memory-update': return await this.resolveMemoryUpdate(pending, input);
       }
     } catch {
       return 'No pude completar la aclaración. No se realizó ninguna acción.';
@@ -233,6 +328,49 @@ export class SafeClarificationFlow {
       case 'saved-session-search-id': return '¿Qué ID de conversación guardada quieres consultar?';
       case 'note-content': return '¿Qué texto explícito quieres guardar como nota? No asumiré a qué se refiere “eso”.';
       case 'saved-session-info-id': return '¿Qué ID de conversación guardada quieres que consulte?';
+      case 'memory-update': return `Tengo guardado ${pending.key} = ${JSON.stringify(pending.oldValue)}. ¿Quieres cambiarlo a ${JSON.stringify(pending.newValue)}? Responde sí o no.`;
+    }
+  }
+
+  private async detectMemoryUpdate(input: string): Promise<MemoryUpdateDetection | undefined> {
+    if (!this.memoryStore) return undefined;
+    const intent = parseExplicitMemoryUpdate(input);
+    if (!intent) return undefined;
+    if (!intent.newValue || /[\r\n\0]/u.test(intent.newValue)
+      || !isOneKeyLabel(intent.keyLabel) || !isSingleMemoryValue(intent.newValue)) {
+      return { kind: 'memory-update-unavailable', response: 'No pude identificar una sola memoria y un valor nuevo claro; no cambié nada.' };
+    }
+    try {
+      validateMemoryValue(intent.newValue);
+      const entries = await this.memoryStore.list();
+      const key = resolveMemoryKey(intent.keyLabel, entries);
+      if (!key) {
+        return { kind: 'memory-update-unavailable', response: 'No encontré una única memoria existente para actualizar; no crearé una nueva. Usa /remember <key> <value> para guardar una memoria nueva.' };
+      }
+      const current = entries.find((entry) => entry.key === key);
+      if (!current || !isSafeExplicitMemoryEntry(current)
+        || !isSafeExplicitMemoryEntry({ key, value: intent.newValue })) {
+        return { kind: 'memory-update-unavailable', response: 'No puedo actualizar esa memoria mediante confirmación natural.' };
+      }
+      return { kind: 'memory-update', key, oldValue: current.value, newValue: intent.newValue };
+    } catch {
+      return { kind: 'memory-update-unavailable', response: 'La solicitud de actualización no es válida; no cambié nada.' };
+    }
+  }
+
+  private async resolveMemoryUpdate(
+    pending: Extract<PendingClarification, { kind: 'memory-update' }>,
+    input: string,
+  ): Promise<string> {
+    if (isNegative(input)) return `Entendido. No cambié ${pending.key}.`;
+    if (!isAffirmative(input)) return 'No recibí una confirmación clara; cancelé la actualización y no cambié nada.';
+    if (!this.memoryStore) return 'La actualización no está disponible; no cambié nada.';
+    const result = await this.memoryStore.update(pending.key, pending.newValue, pending.oldValue);
+    switch (result) {
+      case 'updated': return `Memoria actualizada: ${pending.key}.`;
+      case 'unchanged': return `La memoria ${pending.key} ya tenía ese valor; no fue necesario cambiarla.`;
+      case 'missing': return `La memoria ${pending.key} ya no existe; no creé otra.`;
+      case 'conflict': return `La memoria ${pending.key} cambió desde la solicitud. No la sobrescribí; inicia de nuevo la actualización.`;
     }
   }
 

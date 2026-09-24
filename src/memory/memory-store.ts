@@ -187,6 +187,29 @@ export class PersistentMemoryStore {
     }
   }
 
+  /** Updates an existing entry only when its current value still matches the caller's snapshot. */
+  async update(key: string, value: string, expectedOldValue: string): Promise<'updated' | 'unchanged' | 'missing' | 'conflict'> {
+    validateMemoryKey(key);
+    validateMemoryValue(value);
+    validateMemoryValue(expectedOldValue);
+    // Refresh persisted state so an update from another store instance is not silently overwritten.
+    await this.load();
+    const current = this.entries.get(key);
+    if (current === undefined) return 'missing';
+    if (current !== expectedOldValue) return 'conflict';
+    if (current === value) return 'unchanged';
+
+    const previous = new Map(this.entries);
+    this.entries.set(key, value);
+    try {
+      await this.persist();
+      return 'updated';
+    } catch (error) {
+      this.entries = previous;
+      throw error;
+    }
+  }
+
   async delete(key: string): Promise<boolean> {
     validateMemoryKey(key);
     await this.ensureLoaded();

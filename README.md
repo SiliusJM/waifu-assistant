@@ -116,6 +116,9 @@ sesiones guardadas. En turnos normales, Yuki solo comparte con el provider hasta
 tres memorias explícitas que coincidan claramente con la consulta; no crea
 memorias automáticamente y ese contexto interno no se guarda en la Session ni en
 sesiones exportadas/guardadas.
+Una solicitud natural explícita para corregir una memoria existente muestra la
+clave y los valores actual/nuevo y requiere un “sí” claro antes de escribir;
+sin confirmación, ante conflicto o para una clave nueva no modifica la memoria.
 
 `/session-search <id> <texto>` busca texto literal, sin distinguir mayúsculas,
 en los mensajes visibles de una sola conversación guardada. Muestra como máximo
