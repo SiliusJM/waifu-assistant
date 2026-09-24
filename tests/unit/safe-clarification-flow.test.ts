@@ -14,6 +14,7 @@ import { NoteStore } from '../../src/notes/note-store.js';
 import { PersistentMemoryStore } from '../../src/memory/memory-store.js';
 import { ReminderStore } from '../../src/reminders/reminder-store.js';
 import { createLocalToolManager, getLocalToolAllowlist } from '../../src/tools/local-tool-manager.js';
+import { LOCAL_NOTES_LIST_TOOL_ID } from '../../src/tools/local-notes-list-tool.js';
 import { LOCAL_REMINDER_CREATE_TOOL_ID } from '../../src/tools/local-reminder-create-tool.js';
 
 const FIXED_NOW = new Date(2026, 8, 23, 12, 0, 0);
@@ -57,6 +58,13 @@ async function* inputs(values: readonly string[]): AsyncIterable<string> {
   yield* values;
 }
 
+async function* pacedInputs(values: readonly string[]): AsyncIterable<string> {
+  for (const value of values) {
+    yield value;
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 async function runFlow(
   stores: { readonly reminders: ReminderStore; readonly notes: NoteStore; readonly sessions: SavedSessionStore; readonly memory?: PersistentMemoryStore },
   values: readonly string[],
@@ -67,6 +75,7 @@ async function runFlow(
     readonly sessionId?: string;
     readonly now?: () => Date;
     readonly onReminderCreated?: () => void | Promise<void>;
+    readonly paceInputs?: boolean;
   } = {},
 ) {
   let providerCalls = 0;
@@ -91,7 +100,7 @@ async function runFlow(
     ...(stores.memory ? { memoryStore: stores.memory } : {}),
     onReminderCreated: options.onReminderCreated,
   });
-  const result = await runner.run(inputs(values), {
+  const result = await runner.run(options.paceInputs ? pacedInputs(values) : inputs(values), {
     signal: options.signal,
     interruptible: true,
     clarification: flow,
@@ -1113,6 +1122,216 @@ test('cancellation, invalid repairs, and unrelated next input never reuse safe c
     assert.equal(await flow.handle('¿Qué tiempo hace?', { sessionId: 'repair-expiration' }), undefined);
     assert.equal(await flow.handle('No, quería decir guarda una nota: ya tarde.', { sessionId: 'repair-expiration' }), undefined);
     assert.equal((await reminders.list({ all: true })).length, 0);
+    assert.equal((await notes.list()).length, 0);
+  });
+});
+
+test('read-only repair switches reminders list to notes list and executes only the corrected query once', async () => {
+  await withStores(async ({ directory, reminders, notes, sessions, memory }) => {
+    await reminders.add('old query must not be rerun', new Date('2026-09-24T09:00:00.000Z'));
+    await notes.add('corrected query result');
+    const remindersList = reminders.list.bind(reminders);
+    const notesList = notes.list.bind(notes);
+    let reminderReads = 0;
+    let noteReads = 0;
+    reminders.list = async (...args) => { reminderReads += 1; return remindersList(...args); };
+    notes.list = async (...args) => { noteReads += 1; return notesList(...args); };
+    const reminderBytes = await readFile(join(directory, 'reminders.json'), 'utf8');
+    const noteBytes = await readFile(join(directory, 'notes.json'), 'utf8');
+    const sessionBytes = await readFile(join(directory, 'sessions.json'), 'utf8');
+    const memoryBytes = await readFile(memory.filePath, 'utf8').catch(() => undefined);
+    const outcome = await runFlow({ reminders, notes, sessions, memory }, [
+      '¿Qué recordatorios tengo?', 'No, quería ver mis notas.', '/exit',
+    ], { paceInputs: true });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /corrected query result/u);
+    assert.doesNotMatch(outcome.runner.session.getMessages()[3]?.content ?? '', /old query must not be rerun/u);
+    assert.equal(reminderReads, 0);
+    assert.equal(noteReads, 1);
+    assert.equal(outcome.providerCalls, 1);
+    assert.equal(outcome.runner.session.getMessages().filter(({ role }) => role === 'user').length, 2);
+    assert.equal(await readFile(join(directory, 'reminders.json'), 'utf8'), reminderBytes);
+    assert.equal(await readFile(join(directory, 'notes.json'), 'utf8'), noteBytes);
+    assert.equal(await readFile(join(directory, 'sessions.json'), 'utf8'), sessionBytes);
+    assert.equal(await readFile(memory.filePath, 'utf8').catch(() => undefined), memoryBytes);
+  });
+});
+
+test('read-only repair switches notes list to reminders list and next reminder to reminders list', async () => {
+  await withStores(async ({ reminders, notes, sessions }) => {
+    await reminders.add('next repaired reminder', new Date('2026-09-24T09:00:00.000Z'));
+    await notes.add('a note preview');
+    let reminderReads = 0;
+    const reminderList = reminders.list.bind(reminders);
+    reminders.list = async (...args) => { reminderReads += 1; return reminderList(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      '¿Qué notas tengo guardadas?', 'No, quería ver mis recordatorios.', '/exit',
+    ], { paceInputs: true });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /next repaired reminder/u);
+    assert.equal(reminderReads, 1);
+    assert.equal(outcome.providerCalls, 1);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    await reminders.add('only the next item', new Date('2026-09-24T09:00:00.000Z'));
+    let listReads = 0;
+    const list = reminders.list.bind(reminders);
+    reminders.list = async (...args) => { listReads += 1; return list(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      '¿Cuál es mi próximo recordatorio?', 'No, quería ver mis recordatorios.', '/exit',
+    ], { paceInputs: true });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /only the next item/u);
+    assert.equal(listReads, 1);
+    assert.equal(outcome.providerCalls, 1);
+  });
+});
+
+test('read-only repair changes saved metadata to one-session content search and back', async () => {
+  await withStores(async ({ reminders, notes, sessions }) => {
+    let reads = 0;
+    const get = sessions.get.bind(sessions);
+    sessions.get = async (...args) => { reads += 1; return get(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      `Muéstrame información de la conversación guardada ${SAVED_ID}.`,
+      'No, quería buscar Groq dentro de esa conversación.', '/exit',
+    ], { paceInputs: true });
+    const reply = outcome.runner.session.getMessages()[3]?.content ?? '';
+    assert.match(reply, /Groq/u);
+    assert.equal(reads, 1);
+    assert.equal(outcome.providerCalls, 1);
+    assert.equal(outcome.runner.session.title, undefined);
+    assert.equal(outcome.runner.session.savedName, undefined);
+    assert.doesNotMatch(reply, /"matches"|"found"/u);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    let gets = 0;
+    let summaries = 0;
+    const get = sessions.get.bind(sessions);
+    const list = sessions.listSummaries.bind(sessions);
+    sessions.get = async (...args) => { gets += 1; return get(...args); };
+    sessions.listSummaries = async (...args) => { summaries += 1; return list(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      `Busca Groq en la conversación guardada ${SAVED_ID}.`,
+      `No, quería consultar información de la conversación ${SAVED_ID}.`, '/exit',
+    ], { paceInputs: true });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /Trip notes/u);
+    assert.equal(gets, 0);
+    assert.equal(summaries, 1);
+    assert.equal(outcome.providerCalls, 1);
+  });
+});
+
+test('read-only repair covers saved-session list to info, notes list to show, and status to capability help', async () => {
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      '¿Qué conversaciones guardadas tengo?',
+      `No, quería ver la información de la conversación ${SAVED_ID}.`, '/exit',
+    ], { paceInputs: true });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /Trip notes/u);
+    assert.equal(outcome.providerCalls, 1);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const note = await notes.add('show only this note');
+    let shows = 0;
+    const show = notes.show.bind(notes);
+    notes.show = async (...args) => { shows += 1; return show(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      '¿Qué notas tengo guardadas?', `No, quería mostrar la nota ${note.id}.`, '/exit',
+    ], { paceInputs: true });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /show only this note/u);
+    assert.equal(shows, 1);
+    assert.equal(outcome.providerCalls, 1);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      '¿Cuál es el estado del asistente?', 'No, quería decir ayuda.', '/exit',
+    ], { paceInputs: true });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /capacidades locales/u);
+    assert.equal(outcome.providerCalls, 1);
+  });
+});
+
+test('read-only repairs ask for missing note ID or search text and execute no query until supplied', async () => {
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const note = await notes.add('note loaded after clarification');
+    let shows = 0;
+    const show = notes.show.bind(notes);
+    notes.show = async (...args) => { shows += 1; return show(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      '¿Qué recordatorios tengo?', 'No, quería mostrar una nota.', `${note.id}`, '/exit',
+    ], { paceInputs: true });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /ID de nota/u);
+    assert.match(outcome.runner.session.getMessages()[5]?.content ?? '', /note loaded after clarification/u);
+    assert.equal(shows, 1);
+    assert.equal(outcome.providerCalls, 1);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    let searches = 0;
+    const get = sessions.get.bind(sessions);
+    sessions.get = async (...args) => { searches += 1; return get(...args); };
+    const outcome = await runFlow({ reminders, notes, sessions }, [
+      `¿Qué conversaciones guardadas tengo?`,
+      `No, quería buscar dentro de esa conversación ${SAVED_ID}.`,
+      'Groq', '/exit',
+    ], { paceInputs: true });
+    assert.match(outcome.runner.session.getMessages()[3]?.content ?? '', /texto literal/u);
+    assert.match(outcome.runner.session.getMessages()[5]?.content ?? '', /Groq/u);
+    assert.equal(searches, 1);
+    assert.equal(outcome.providerCalls, 1);
+  });
+});
+
+test('read-only repair cancellation, invalid correction, expiry, session binding and ephemeral state are safe', async () => {
+  await withStores(async ({ reminders, notes, sessions }) => {
+    let reads = 0;
+    const list = notes.list.bind(notes);
+    notes.list = async (...args) => { reads += 1; return list(...args); };
+    const cancelled = await runFlow({ reminders, notes, sessions }, [
+      '¿Qué recordatorios tengo?', 'No importa.', '/exit',
+    ], { paceInputs: true });
+    assert.match(cancelled.runner.session.getMessages()[3]?.content ?? '', /no ejecuté ninguna consulta/u);
+    assert.equal(reads, 0);
+    assert.equal(cancelled.providerCalls, 1);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    let reads = 0;
+    const list = notes.list.bind(notes);
+    notes.list = async (...args) => { reads += 1; return list(...args); };
+    const invalid = await runFlow({ reminders, notes, sessions }, [
+      '¿Qué recordatorios tengo?', 'No, quería borrar todas mis notas.', '/exit',
+    ], { paceInputs: true });
+    assert.match(invalid.runner.session.getMessages()[3]?.content ?? '', /no ejecuté ninguna consulta/u);
+    assert.equal(reads, 0);
+    assert.equal(invalid.providerCalls, 1);
+  });
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const flow = new SafeClarificationFlow({
+      toolManager: createLocalToolManager({ reminderStore: reminders, noteStore: notes, savedSessionStore: sessions }),
+      sessionId: 'query-repair-session', now: () => new Date(FIXED_NOW),
+    });
+    assert.equal(await flow.handle('¿Qué recordatorios tengo?', { sessionId: 'query-repair-session' }), undefined);
+    assert.equal(await flow.handle('¿Qué tiempo hace?', { sessionId: 'query-repair-session' }), undefined);
+    assert.equal(await flow.handle('No, quería ver mis notas.', { sessionId: 'query-repair-session' }), undefined);
+    assert.equal(await flow.handle('¿Qué recordatorios tengo?', { sessionId: 'query-repair-session' }), undefined);
+    assert.equal(await flow.handle('No, quería ver mis notas.', { sessionId: 'different-session' }), undefined);
+    assert.equal(await flow.handle('No, quería ver mis notas.', { sessionId: 'query-repair-session' }), undefined);
+    assert.equal((await notes.list()).length, 0);
+    assert.doesNotMatch(JSON.stringify(flow), /recordatorios tengo|mis notas|readOnlyQuery/u);
+  });
+});
+
+test('read-only repair authorization cannot be forged by metadata alone', async () => {
+  await withStores(async ({ reminders, notes, sessions }) => {
+    const manager = createLocalToolManager({ reminderStore: reminders, noteStore: notes, savedSessionStore: sessions });
+    const forged = await manager.execute(LOCAL_NOTES_LIST_TOOL_ID, {}, {
+      sessionId: 'forged-repair',
+      metadata: {
+        source: 'read-only-query-repair',
+        toolId: LOCAL_NOTES_LIST_TOOL_ID,
+        kind: 'notes-list',
+        userInput: 'No, quería ver mis notas.',
+      },
+      authorization: { source: 'read-only-query-repair' },
+    });
+    assert.equal(forged.status, 'failure');
     assert.equal((await notes.list()).length, 0);
   });
 });
