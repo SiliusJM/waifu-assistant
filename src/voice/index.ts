@@ -3,6 +3,22 @@ export { VoiceError, type VoiceErrorCode } from './voice-errors.js';
 export { VoiceService } from './voice-service.js';
 export { StreamingVoiceService } from './streaming-voice-service.js';
 export { VoiceConversationOrchestrator } from './voice-conversation-orchestrator.js';
+export {
+  PushToTalkController,
+  SherpaWhisperSTTProvider,
+  WindowsMicrophoneInputProvider,
+  WHISPER_TINY_MODEL,
+  convertFloatInputToPcm16Mono,
+  createLocalMicrophoneVoiceService,
+  resolveWhisperTinyModelPaths,
+} from './local/index.js';
+export type {
+  CpalRuntime,
+  SherpaRuntime,
+  SherpaWhisperModelPaths,
+  StoppableMicrophone,
+  WindowsMicrophoneInputOptions,
+} from './local/index.js';
 export { VoiceSession } from './voice-session.js';
 export { VoiceConcurrencyCoordinator } from './voice-concurrency-coordinator.js';
 export { BoundedAsyncQueue } from './bounded-async-queue.js';

@@ -12,7 +12,8 @@
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "npm run build && tsc -p tsconfig.test.json && node scripts/test.mjs",
-    "check": "npm run lint && npm run typecheck && npm test"
+    "check": "npm run lint && npm run typecheck && npm test",
+    "setup:local-stt-model": "npm run build && node scripts/setup-local-stt-model.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
@@ -21,5 +22,9 @@
     "playwright": "^1.63.0",
     "typescript": "5.9.3",
     "typescript-eslint": "8.70.0"
+  },
+  "dependencies": {
+    "node-cpal": "1.0.0",
+    "sherpa-onnx-node": "1.13.8"
   }
 }
