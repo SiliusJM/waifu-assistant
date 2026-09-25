@@ -4,11 +4,16 @@ import {
   MockStreamingTTSProvider,
 } from '../streaming-mock-providers.js';
 import { VoiceService } from '../voice-service.js';
-import { SherpaWhisperSTTProvider, type SherpaRuntime, type SherpaWhisperModelPaths } from './sherpa-whisper-stt-provider.js';
+import { SherpaWhisperSTTProvider, type SherpaRuntime, type SherpaSttDiagnosticEvent, type SherpaWhisperModelPaths } from './sherpa-whisper-stt-provider.js';
 import { SherpaVitsTTSProvider } from './sherpa-vits-tts-provider.js';
 import type { PiperSpanishTtsModelPaths } from './piper-spanish-tts-model.js';
 import { WindowsCpalStreamingAudioOutputProvider } from './windows-cpal-audio-output-provider.js';
-import { WindowsMicrophoneInputProvider, type CpalRuntime } from './windows-microphone-input-provider.js';
+import {
+  WindowsMicrophoneInputProvider,
+  type CpalRuntime,
+  type MicrophoneDiagnosticEvent,
+  type MicrophoneLifecycleEvent,
+} from './windows-microphone-input-provider.js';
 
 export function createLocalMicrophoneVoiceService(
   model: SherpaWhisperModelPaths,
@@ -19,6 +24,9 @@ export function createLocalMicrophoneVoiceService(
     readonly ttsModel?: PiperSpanishTtsModelPaths;
     readonly vadModelPath?: string;
     readonly vadMinSilenceMs?: number;
+    readonly onSttDiagnostic?: (event: SherpaSttDiagnosticEvent) => void;
+    readonly onMicrophoneDiagnostic?: (event: MicrophoneDiagnosticEvent) => void;
+    readonly onMicrophoneLifecycle?: (event: MicrophoneLifecycleEvent) => void;
   } = {},
 ): {
   readonly service: VoiceService;
@@ -26,11 +34,15 @@ export function createLocalMicrophoneVoiceService(
   readonly stt: SherpaWhisperSTTProvider;
   readonly tts: SherpaVitsTTSProvider | undefined;
 } {
-  const microphone = new WindowsMicrophoneInputProvider({ runtime: options.cpalRuntime });
+  const microphone = new WindowsMicrophoneInputProvider({
+    runtime: options.cpalRuntime,
+    onDiagnostic: options.onMicrophoneDiagnostic,
+    onLifecycle: options.onMicrophoneLifecycle,
+  });
   const stt = new SherpaWhisperSTTProvider(model, options.sherpaRuntime, options.vadModelPath ? {
     modelPath: options.vadModelPath,
     minSilenceMs: options.vadMinSilenceMs,
-  } : undefined);
+  } : undefined, { onDiagnostic: options.onSttDiagnostic });
   const tts = options.ttsModel ? new SherpaVitsTTSProvider(options.ttsModel) : undefined;
   const service = new VoiceService({
     input: new MockAudioInputProvider(),

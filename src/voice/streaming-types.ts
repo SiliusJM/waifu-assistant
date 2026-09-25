@@ -42,6 +42,12 @@ export interface STTStartRequest {
 export interface StreamingSTTSession {
   pushAudio(chunk: AudioChunk): Promise<void>;
   endInput(): Promise<void>;
+  /**
+   * A segmented local STT implementation may retain a copied, complete utterance
+   * after its capture stream reports a late native failure. This never applies to
+   * user cancellation, early capture failures, or a subsequent superseding turn.
+   */
+  canCompleteAfterCaptureError?(): boolean;
   events(): AsyncIterable<StreamingTranscriptionEvent>;
   cancel(reason?: VoiceTerminationReason): Promise<void>;
   close(): Promise<void>;

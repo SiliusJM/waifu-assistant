@@ -18,6 +18,13 @@ import {
   VoiceConcurrencyCoordinator,
   VoiceError,
   VoiceService,
+  type AudioChunk,
+  type AudioInputStream,
+  type StreamingAudioInputProvider,
+  type StreamingSTTProvider,
+  type StreamingSTTSession,
+  type StreamingTranscriptionEvent,
+  type VoiceProviderOptions,
 } from '../../src/voice/index.js';
 
 const silentLogger: Logger = { info() {}, warn() {}, error() {} };
@@ -44,6 +51,87 @@ function streamingService(overrides: Partial<NonNullable<ConstructorParameters<t
       ...overrides,
     },
   });
+}
+
+function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value: T) => void; readonly reject: (error: Error) => void } {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
+
+const CAPTURE_CHUNK: AudioChunk = {
+  data: new Uint8Array([0, 0]),
+  format: CANONICAL_AUDIO_FORMAT,
+  sequence: 0,
+  capturedAt: new Date(0).toISOString(),
+};
+
+class NativeFailureInput implements StreamingAudioInputProvider {
+  readonly name = 'native-failure-input';
+  stopCount = 0;
+
+  constructor(
+    private readonly emitChunk: boolean,
+    private readonly failureGate?: Promise<void>,
+  ) {}
+
+  async startCapture(): Promise<AudioInputStream> {
+    return {
+      format: CANONICAL_AUDIO_FORMAT,
+      chunks: () => this.chunks(),
+      stop: async (): Promise<void> => { this.stopCount += 1; },
+    };
+  }
+
+  private async *chunks(): AsyncIterable<AudioChunk> {
+    if (this.emitChunk) yield CAPTURE_CHUNK;
+    await this.failureGate;
+    throw new VoiceError('The microphone capture stream failed.', 'VOICE_CAPTURE_ERROR');
+  }
+}
+
+class FinalizedSegmentStt implements StreamingSTTSession {
+  private readonly output = new BoundedAsyncQueue<StreamingTranscriptionEvent>(8);
+  private finalized = false;
+  private closed = false;
+  private readonly decodeGate = deferred<void>();
+  readonly decodeStarted = deferred<void>();
+  endInputCount = 0;
+
+  constructor(private readonly signal: AbortSignal, private readonly text = 'finalized local utterance') {}
+
+  async pushAudio(): Promise<void> { this.finalized = true; }
+  canCompleteAfterCaptureError(): boolean { return this.finalized && !this.closed && !this.signal.aborted; }
+  events(): AsyncIterable<StreamingTranscriptionEvent> { return this.output; }
+  allowDecode(): void { this.decodeGate.resolve(); }
+
+  async endInput(): Promise<void> {
+    this.endInputCount += 1;
+    this.decodeStarted.resolve();
+    await Promise.race([
+      this.decodeGate.promise,
+      new Promise<void>((_resolve, reject) => this.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true })),
+    ]);
+    if (this.signal.aborted || this.closed) return;
+    await this.output.enqueue({ type: 'final', text: this.text }, this.signal);
+    this.output.finish();
+  }
+
+  async cancel(): Promise<void> { this.closed = true; this.decodeGate.resolve(); this.output.close(); }
+  async close(): Promise<void> { this.closed = true; this.decodeGate.resolve(); this.output.close(); }
+}
+
+class FinalizedSegmentProvider implements StreamingSTTProvider {
+  readonly name = 'finalized-segment-stt';
+  session: FinalizedSegmentStt | undefined;
+  readonly sessions: FinalizedSegmentStt[] = [];
+
+  async start(_request: { readonly sessionId: string }, options: VoiceProviderOptions): Promise<StreamingSTTSession> {
+    this.session = new FinalizedSegmentStt(options.signal);
+    this.sessions.push(this.session);
+    return this.session;
+  }
 }
 
 test('streaming transcription emits partial/final events with monotonic metadata', async () => {
@@ -280,6 +368,96 @@ test('streaming provider failures are categorized without leaking details', asyn
     assert.equal(result.code, 'VOICE_OUTPUT_ERROR');
     assert.equal(result.message.includes('private output detail'), false);
   }
+});
+
+test('a native capture failure before a finalized segment remains fatal', async () => {
+  const input = new NativeFailureInput(false);
+  const service = streamingService({ input });
+  const handle = service.startStreamingTranscription({ sessionId: 'early-native-failure' });
+  const [events, result] = await Promise.all([collect(handle.events()), handle.result()]);
+
+  assert.equal(result.status, 'failed');
+  if (result.status === 'failed') assert.equal(result.code, 'VOICE_CAPTURE_ERROR');
+  assert.equal(events.some((event) => event.type === 'transcription_final'), false);
+  assert.equal(input.stopCount, 1);
+});
+
+test('a late native capture failure preserves one finalized local segment through decode', async () => {
+  const input = new NativeFailureInput(true);
+  const stt = new FinalizedSegmentProvider();
+  const service = streamingService({ input, stt });
+  const handle = service.startStreamingTranscription({ sessionId: 'late-native-failure' });
+  const eventTask = collect(handle.events());
+  while (!stt.session) await new Promise<void>((resolve) => setImmediate(resolve));
+  await stt.session.decodeStarted.promise;
+  stt.session.allowDecode();
+
+  const [events, result] = await Promise.all([eventTask, handle.result()]);
+  assert.equal(result.status, 'completed');
+  if (result.status === 'completed') assert.equal(result.value.text, 'finalized local utterance');
+  assert.equal(events.filter((event) => event.type === 'transcription_final').length, 1);
+  assert.equal(stt.session.endInputCount, 1);
+  assert.equal(input.stopCount, 1);
+  assert.equal(handle.metrics().marks.late_capture_error_after_finalized_segment !== undefined, true);
+});
+
+test('a native failure after the final result does not retract the finalized transcript', async () => {
+  const failureGate = deferred<void>();
+  const input = new NativeFailureInput(true, failureGate.promise);
+  const stt = new FinalizedSegmentProvider();
+  const service = streamingService({ input, stt });
+  const handle = service.startStreamingTranscription({ sessionId: 'post-result-native-failure' });
+  const eventTask = collect(handle.events());
+  while (!stt.session) await new Promise<void>((resolve) => setImmediate(resolve));
+  stt.session.allowDecode();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  failureGate.resolve();
+
+  const [events, result] = await Promise.all([eventTask, handle.result()]);
+  assert.equal(result.status, 'completed');
+  assert.equal(events.filter((event) => event.type === 'transcription_final').length, 1);
+  assert.equal(input.stopCount, 1);
+});
+
+test('explicit user cancellation still wins over a late native capture failure during decode', async () => {
+  const input = new NativeFailureInput(true);
+  const stt = new FinalizedSegmentProvider();
+  const service = streamingService({ input, stt });
+  const handle = service.startStreamingTranscription({ sessionId: 'cancel-during-decode' });
+  while (!stt.session) await new Promise<void>((resolve) => setImmediate(resolve));
+  await stt.session.decodeStarted.promise;
+  assert.equal(handle.cancel('user cancelled'), true);
+  stt.session.allowDecode();
+
+  const result = await handle.result();
+  await collect(handle.events());
+  assert.equal(result.status, 'cancelled');
+  assert.equal(input.stopCount, 1);
+});
+
+test('a superseding turn suppresses the stale finalized segment after a late native failure', async () => {
+  const coordinator = new VoiceConcurrencyCoordinator();
+  const input = new NativeFailureInput(true);
+  const stt = new FinalizedSegmentProvider();
+  const service = streamingService({ coordinator, input, stt });
+  const first = service.startStreamingTranscription({ sessionId: 'same-session' });
+  const firstEvents = collect(first.events());
+  while (!stt.session) await new Promise<void>((resolve) => setImmediate(resolve));
+  const firstSession = stt.session;
+  await firstSession.decodeStarted.promise;
+  const second = service.startStreamingTranscription({ sessionId: 'same-session' }, { supersede: true });
+  const secondEvents = collect(second.events());
+  while (stt.sessions.length < 2) await new Promise<void>((resolve) => setImmediate(resolve));
+  const secondSession = stt.sessions[1];
+  if (!secondSession) throw new Error('Expected superseding STT session.');
+  await secondSession.decodeStarted.promise;
+  secondSession.allowDecode();
+
+  const [firstResult, secondResult, events] = await Promise.all([first.result(), second.result(), firstEvents]);
+  await secondEvents;
+  assert.equal(firstResult.status, 'cancelled');
+  assert.equal(secondResult.status, 'completed');
+  assert.equal(events.some((event) => event.type === 'transcription_final'), false);
 });
 
 test('streaming services preserve explicit integration with RealtimeEngine', async () => {

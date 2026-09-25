@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { SherpaWhisperSTTProvider, type SherpaRuntime } from '../../src/voice/local/sherpa-whisper-stt-provider.js';
+import { SherpaWhisperSTTProvider, type SherpaRuntime, type SherpaSttDiagnosticEvent } from '../../src/voice/local/sherpa-whisper-stt-provider.js';
 import {
   DEFAULT_VAD_MIN_SILENCE_MS,
   SILERO_VAD_SAMPLE_RATE,
@@ -235,6 +235,104 @@ test('Sherpa Whisper decodes sequential VAD segments only and keeps activity sep
     assert.deepEqual(new Set(starts.map((event) => event.segmentId)), new Set(finals.map((event) => event.segmentId)));
     assert.deepEqual(finals.map((event) => event.text), ['frase reconocida', 'frase reconocida']);
     assert.equal(decodedSamples, 1024);
+    await session.close();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('opt-in STT diagnostics trace a VAD segment through Whisper without exposing audio or transcript text', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'waifu-vad-stt-diagnostics-'));
+  const vadPath = join(directory, 'silero_vad.onnx');
+  const whisperPath = join(directory, 'whisper-model.onnx');
+  await Promise.all([writeFile(vadPath, 'vad fixture'), writeFile(whisperPath, 'whisper fixture')]);
+  const diagnostics: SherpaSttDiagnosticEvent[] = [];
+  const runtime: SherpaRuntime = {
+    Vad: FakeDetector,
+    OfflineRecognizer: {
+      async createAsync() {
+        return {
+          createStream: () => ({ acceptWaveform() {} }),
+          async decodeAsync() { return { text: 'private transcript must not be diagnostic data' }; },
+        };
+      },
+    },
+  };
+  try {
+    const provider = new SherpaWhisperSTTProvider(
+      { encoder: whisperPath, decoder: whisperPath, tokens: whisperPath },
+      runtime,
+      { modelPath: vadPath },
+      { onDiagnostic: (event) => diagnostics.push(event) },
+    );
+    const session = await provider.start({ sessionId: 'diagnostics' }, {
+      signal: new AbortController().signal,
+      correlationId: 'diagnostics',
+    });
+    const collecting = (async () => {
+      const events = [];
+      for await (const event of session.events()) events.push(event);
+      return events;
+    })();
+    await session.pushAudio({ data: pcmFrame(8000), format: { encoding: 'pcm_s16le', sampleRateHz: 16000, channels: 1 }, sequence: 0, capturedAt: '' });
+    await session.pushAudio({ data: pcmFrame(0), format: { encoding: 'pcm_s16le', sampleRateHz: 16000, channels: 1 }, sequence: 1, capturedAt: '' });
+    await session.endInput();
+    await collecting;
+    assert.deepEqual(diagnostics.map(({ stage }) => stage), [
+      'stt-recognizer-created', 'vad-feed-started', 'vad-speech-start', 'vad-speech-end', 'segment-finalized',
+      'stt-input-prepared', 'stt-accept-waveform-started', 'stt-accept-waveform-completed', 'stt-decode-started',
+      'stt-decode-completed', 'stt-result-read', 'final-transcript-available',
+    ]);
+    const segment = diagnostics.find(({ stage }) => stage === 'segment-finalized');
+    assert.equal(segment?.sampleCount, 512);
+    assert.equal(segment?.durationMs, 32);
+    assert.equal(JSON.stringify(diagnostics).includes('private transcript'), false);
+    await session.close();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('opt-in STT diagnostics preserve the decode boundary and safe native error metadata', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'waifu-vad-stt-error-diagnostics-'));
+  const vadPath = join(directory, 'silero_vad.onnx');
+  const whisperPath = join(directory, 'whisper-model.onnx');
+  await Promise.all([writeFile(vadPath, 'vad fixture'), writeFile(whisperPath, 'whisper fixture')]);
+  const diagnostics: SherpaSttDiagnosticEvent[] = [];
+  const runtime: SherpaRuntime = {
+    Vad: FakeDetector,
+    OfflineRecognizer: {
+      async createAsync() {
+        return {
+          createStream: () => ({ acceptWaveform() {} }),
+          async decodeAsync() { throw Object.assign(new Error('native decode rejected input'), { code: 'DECODE_FAILED' }); },
+        };
+      },
+    },
+  };
+  try {
+    const provider = new SherpaWhisperSTTProvider(
+      { encoder: whisperPath, decoder: whisperPath, tokens: whisperPath }, runtime, { modelPath: vadPath },
+      { onDiagnostic: (event) => diagnostics.push(event) },
+    );
+    const session = await provider.start({ sessionId: 'diagnostics-error' }, {
+      signal: new AbortController().signal,
+      correlationId: 'diagnostics-error',
+    });
+    const collecting = (async () => {
+      const events = [];
+      for await (const event of session.events()) events.push(event);
+      return events;
+    })();
+    await session.pushAudio({ data: pcmFrame(8000), format: { encoding: 'pcm_s16le', sampleRateHz: 16000, channels: 1 }, sequence: 0, capturedAt: '' });
+    await session.pushAudio({ data: pcmFrame(0), format: { encoding: 'pcm_s16le', sampleRateHz: 16000, channels: 1 }, sequence: 1, capturedAt: '' });
+    await assert.rejects(session.endInput(), (error: unknown) => error instanceof VoiceError && error.code === 'VOICE_STT_ERROR');
+    await collecting;
+    assert.deepEqual(diagnostics.at(-1), {
+      stage: 'error', operation: 'vad-segment-decode', code: 'DECODE_FAILED', message: 'native decode rejected input',
+    });
+    assert.ok(diagnostics.some(({ stage }) => stage === 'stt-decode-started'));
+    assert.equal(diagnostics.some(({ stage }) => stage === 'stt-decode-completed'), false);
     await session.close();
   } finally {
     await rm(directory, { recursive: true, force: true });

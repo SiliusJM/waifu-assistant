@@ -409,20 +409,29 @@ export class StreamingVoiceService {
     stt: StreamingSTTSession,
   ): Promise<void> {
     let previousSequence = -1;
-    for await (const chunk of input.chunks()) {
-      if (operation.signal.aborted) throw new VoiceError('The voice operation was cancelled.', 'VOICE_CANCELLATION_ERROR');
-      validateAudioChunk(chunk);
-      if (chunk.sequence <= previousSequence) throw new VoiceError('Audio chunk sequence is not monotonic.', 'VOICE_STREAMING_ERROR');
-      previousSequence = chunk.sequence;
-      if (previousSequence === 0) operation.mark('first_capture_chunk');
-      await operation.emit('audio_chunk_received', {
-        source: 'capture',
-        sequence: chunk.sequence,
-        byteLength: chunk.data.byteLength,
-        format: chunk.format,
-        timestampMs: performance.now(),
-      });
-      await stt.pushAudio({ ...chunk, data: new Uint8Array(chunk.data) });
+    try {
+      for await (const chunk of input.chunks()) {
+        if (operation.signal.aborted) throw new VoiceError('The voice operation was cancelled.', 'VOICE_CANCELLATION_ERROR');
+        validateAudioChunk(chunk);
+        if (chunk.sequence <= previousSequence) throw new VoiceError('Audio chunk sequence is not monotonic.', 'VOICE_STREAMING_ERROR');
+        previousSequence = chunk.sequence;
+        if (previousSequence === 0) operation.mark('first_capture_chunk');
+        await operation.emit('audio_chunk_received', {
+          source: 'capture',
+          sequence: chunk.sequence,
+          byteLength: chunk.data.byteLength,
+          format: chunk.format,
+          timestampMs: performance.now(),
+        });
+        await stt.pushAudio({ ...chunk, data: new Uint8Array(chunk.data) });
+      }
+    } catch (error) {
+      const lateNativeCaptureError = error instanceof VoiceError
+        && error.code === 'VOICE_CAPTURE_ERROR'
+        && !operation.signal.aborted
+        && stt.canCompleteAfterCaptureError?.() === true;
+      if (!lateNativeCaptureError) throw error;
+      operation.mark('late_capture_error_after_finalized_segment');
     }
     await stt.endInput();
   }

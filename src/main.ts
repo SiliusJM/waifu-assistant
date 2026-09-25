@@ -223,6 +223,11 @@ export async function main(
               ? { vadMinSilenceMs: Number(env.YUKI_VAD_MIN_SILENCE_MS) }
               : {}),
           } : {}),
+          ...(env.YUKI_STT_DIAGNOSTICS === '1' ? {
+            onSttDiagnostic: (event) => { process.stdout.write(`[voice-stt] ${JSON.stringify(event)}\n`); },
+            onMicrophoneDiagnostic: (event) => { process.stdout.write(`[voice-capture] ${JSON.stringify(event)}\n`); },
+            onMicrophoneLifecycle: (event) => { process.stdout.write(`[voice-capture] ${JSON.stringify(event)}\n`); },
+          } : {}),
         });
         await Promise.all([localVoiceService.stt.prepare(), localVoiceService.tts?.prepare()]);
         voiceOrchestrator ??= new VoiceConversationOrchestrator({
