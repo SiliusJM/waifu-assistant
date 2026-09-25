@@ -21,6 +21,7 @@ import {
   MockTTSProvider,
   VoiceService,
   VoiceConversationOrchestrator,
+  isVoiceResumeIntent,
   type VoiceConversationEvent,
 } from '../../src/voice/index.js';
 import type { StreamingTTSProvider } from '../../src/voice/streaming-types.js';
@@ -433,4 +434,270 @@ test('provider cancellation errors are normalized by the existing Core boundary'
   orchestrator.acceptTranscription({ type: 'final', text: 'question' });
   await orchestrator.whenIdle();
   assert.equal(events.some((event) => event.type === 'error' && event.stage === 'core' && event.code === 'CANCELLATION_ERROR'), true);
+});
+
+test('resume intent matching is explicit, accent-insensitive, and does not match arbitrary content', () => {
+  assert.equal(isVoiceResumeIntent('¿Qué decías?'), true);
+  assert.equal(isVoiceResumeIntent('Continúa.'), true);
+  assert.equal(isVoiceResumeIntent('Sigue'), true);
+  assert.equal(isVoiceResumeIntent('por cierto, continúa con otra cosa'), false);
+});
+
+test('confirmed speech stops playback immediately, ignores noise, and resumes with bounded ephemeral context only', async () => {
+  const firstStarted = deferred();
+  const interrupted = deferred();
+  const provider = new ScriptedProvider(async function* (request, signal) {
+    if (provider.requests.length === 1) {
+      yield { type: 'text_delta', delta: 'La respuesta comenzaba con un detalle.' };
+      firstStarted.resolve();
+      await new Promise<void>((resolve) => {
+        if (signal?.aborted) resolve();
+        else signal?.addEventListener('abort', () => resolve(), { once: true });
+      });
+      interrupted.resolve();
+      yield { type: 'text_delta', delta: 'NO-DEBE-APARECER' };
+      yield { type: 'completed', response: response('respuesta obsoleta') };
+      return;
+    }
+    assert.equal(request.messages.some((message) => message.role === 'system'
+      && message.content.includes('La respuesta comenzaba con un detalle.')), true);
+    yield { type: 'text_delta', delta: 'Retomo la explicación.' };
+    yield { type: 'completed', response: response('Retomo la explicación.') };
+  });
+  const output = new MockStreamingAudioOutputProvider({ delayMs: 30 });
+  const runner = new ConversationRunner(new AssistantCore({ provider, logger: silentLogger }));
+  const orchestrator = new VoiceConversationOrchestrator({ runner, voiceService: voiceService({ output }) });
+  const events: VoiceConversationEvent[] = [];
+  orchestrator.subscribe((event) => events.push(event));
+
+  orchestrator.acceptTranscription({ type: 'final', text: 'Explícame la primera idea.' });
+  await firstStarted.promise;
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Mock playback did not start.')), 1000);
+    const unsubscribe = orchestrator.subscribe((event) => {
+      if (event.type === 'stateChanged' && event.state === 'speaking') {
+        clearTimeout(timeout);
+        unsubscribe();
+        resolve();
+      }
+    });
+  });
+  orchestrator.speechStart('possible-noise');
+  assert.equal(events.some((event) => event.type === 'assistantTextDelta' && event.text === 'NO-DEBE-APARECER'), false);
+  const playbackStopped = new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Interrupted playback did not report completion.')), 1000);
+    const unsubscribe = orchestrator.subscribe((event) => {
+      if (event.type === 'assistantSpeechEnd') {
+        clearTimeout(timeout);
+        unsubscribe();
+        resolve();
+      }
+    });
+  });
+  orchestrator.speechStart('confirmed-user-speech');
+  await interrupted.promise;
+  await playbackStopped;
+  assert.equal(orchestrator.state, 'listening');
+  assert.equal(output.stopCount > 0, true);
+  orchestrator.acceptTranscription({ type: 'final', text: 'Continúa.' });
+  await orchestrator.whenIdle();
+
+  assert.equal(provider.requests.length, 2);
+  assert.equal(events.some((event) => event.type === 'assistantTextDelta' && event.text === 'NO-DEBE-APARECER'), false);
+  assert.equal(runner.session.getMessages().some(({ content }) => content.includes('La respuesta comenzaba')), false);
+  assert.equal(runner.session.getMessages().some(({ content }) => content === 'Continúa.'), true);
+  assert.equal(runner.session.getMessages().some(({ content }) => content === 'Retomo la explicación.'), true);
+  assert.equal(runner.session.getMessages().some(({ content }) => content.includes('interrupted-voice-context')), false);
+  assert.equal(orchestrator.state, 'idle');
+});
+
+test('possible noise and self-voice alone do not interrupt an active response', async () => {
+  const firstStarted = deferred();
+  const finish = deferred();
+  const provider = new ScriptedProvider(async function* (_request, signal) {
+    yield { type: 'text_delta', delta: 'Respuesta en curso.' };
+    firstStarted.resolve();
+    await finish.promise;
+    if (!signal?.aborted) yield { type: 'completed', response: response('Respuesta en curso.') };
+  });
+  const { orchestrator, runner } = setup(provider);
+  orchestrator.acceptTranscription({ type: 'final', text: 'Pregunta.' });
+  await firstStarted.promise;
+  orchestrator.speechStart('possible-noise');
+  orchestrator.speechStart('self-voice');
+  assert.notEqual(orchestrator.state, 'listening');
+  assert.equal(runner.session.getMessages().length, 1);
+  finish.resolve();
+  await orchestrator.whenIdle();
+  assert.equal(runner.session.getMessages().at(-1)?.content, 'Respuesta en curso.');
+});
+
+test('ambiguous pause plays at most one local cue, remains listening, and does not call Core or persist cue', async () => {
+  const entered = deferred();
+  const provider = new ScriptedProvider(async function* (_request, signal) {
+    yield { type: 'text_delta', delta: 'Respuesta interrumpible.' };
+    entered.resolve();
+    await new Promise<void>((resolve) => {
+      if (signal?.aborted) resolve();
+      else signal?.addEventListener('abort', () => resolve(), { once: true });
+    });
+    if (!signal?.aborted) yield { type: 'completed', response: response('Respuesta interrumpible.') };
+  });
+  const output = new MockStreamingAudioOutputProvider();
+  const runner = new ConversationRunner(new AssistantCore({ provider, logger: silentLogger }));
+  const orchestrator = new VoiceConversationOrchestrator({
+    runner,
+    voiceService: voiceService({ output }),
+    ambiguousPauseMs: 5,
+  });
+  const events: VoiceConversationEvent[] = [];
+  orchestrator.subscribe((event) => events.push(event));
+  orchestrator.acceptTranscription({ type: 'final', text: 'primer turno' });
+  await entered.promise;
+  orchestrator.speechStart('confirmed-user-speech');
+  orchestrator.speechEnd();
+  await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  orchestrator.speechStart('confirmed-user-speech');
+  orchestrator.acceptTranscription({ type: 'partial', text: 'sigo hablando' });
+  orchestrator.speechEnd();
+  await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  assert.equal(events.filter((event) => event.type === 'assistantCue').length, 1);
+  assert.equal(orchestrator.state, 'listening');
+  assert.equal(provider.requests.length, 1);
+  assert.equal(output.played.length > 0, true);
+  assert.equal(runner.session.getMessages().some(({ content }) => content === 'Te escucho.'), false);
+});
+
+test('resume without interruption returns a local clarification without inventing context or calling the provider', async () => {
+  const provider = fixedProvider();
+  const { orchestrator, runner, events } = setup(provider);
+  orchestrator.acceptTranscription({ type: 'final', text: '¿Qué decías?' });
+  await orchestrator.whenIdle();
+  assert.equal(provider.requests.length, 0);
+  assert.equal(runner.session.getMessages().length, 0);
+  assert.equal(events.some((event) => event.type === 'assistantTextDelta'
+    && event.text.includes('No tengo una respuesta interrumpida')), true);
+});
+
+test('a correction after barge-in reuses the interrupted topic for only that provider turn', async () => {
+  const firstStarted = deferred();
+  const provider = new ScriptedProvider(async function* (request, signal) {
+    if (provider.requests.length === 1) {
+      yield { type: 'text_delta', delta: 'Estaba explicando la configuración del ejemplo.' };
+      firstStarted.resolve();
+      await new Promise<void>((resolve) => {
+        if (signal?.aborted) resolve();
+        else signal?.addEventListener('abort', () => resolve(), { once: true });
+      });
+      return;
+    }
+    assert.equal(request.messages.some((message) => message.role === 'system'
+      && message.content.includes('Estaba explicando la configuración del ejemplo.')), true);
+    assert.equal(request.messages.some((message) => message.role === 'user'
+      && message.content === 'Espera, me refiero al proyecto de Spring.'), true);
+    yield { type: 'text_delta', delta: 'Entendido, sigo con Spring.' };
+    yield { type: 'completed', response: response('Entendido, sigo con Spring.') };
+  });
+  const { orchestrator, runner } = setup(provider);
+  orchestrator.acceptTranscription({ type: 'final', text: 'Explícame la configuración.' });
+  await firstStarted.promise;
+  orchestrator.speechStart();
+  orchestrator.acceptTranscription({ type: 'final', text: 'Espera, me refiero al proyecto de Spring.' });
+  await orchestrator.whenIdle();
+  assert.equal(provider.requests.length, 2);
+  assert.equal(runner.session.getMessages().some(({ content }) => content.includes('Estaba explicando la configuración')), false);
+});
+
+test('an explicit topic change discards interrupted context before the next request', async () => {
+  const firstStarted = deferred();
+  const provider = new ScriptedProvider(async function* (request, signal) {
+    if (provider.requests.length === 1) {
+      yield { type: 'text_delta', delta: 'Contexto antiguo.' };
+      firstStarted.resolve();
+      await new Promise<void>((resolve) => {
+        if (signal?.aborted) resolve();
+        else signal?.addEventListener('abort', () => resolve(), { once: true });
+      });
+      return;
+    }
+    assert.equal(request.messages.some((message) => message.content.includes('Contexto antiguo.')), false);
+    yield { type: 'text_delta', delta: 'Tema nuevo.' };
+    yield { type: 'completed', response: response('Tema nuevo.') };
+  });
+  const { orchestrator } = setup(provider);
+  orchestrator.acceptTranscription({ type: 'final', text: 'Háblame de A.' });
+  await firstStarted.promise;
+  orchestrator.speechStart();
+  orchestrator.acceptTranscription({ type: 'final', text: 'Cambiando de tema, hablemos de B.' });
+  await orchestrator.whenIdle();
+  assert.equal(provider.requests.length, 2);
+});
+
+test('/clear discards interrupted context and subsequent topic does not receive it', async () => {
+  const firstStarted = deferred();
+  const provider = new ScriptedProvider(async function* (request, signal) {
+    if (provider.requests.length === 1) {
+      yield { type: 'text_delta', delta: 'Privado y efímero.' };
+      firstStarted.resolve();
+      await new Promise<void>((resolve) => {
+        if (signal?.aborted) resolve();
+        else signal?.addEventListener('abort', () => resolve(), { once: true });
+      });
+      return;
+    }
+    assert.equal(request.messages.some((message) => message.content.includes('Privado y efímero.')), false);
+    yield { type: 'text_delta', delta: 'Respuesta nueva.' };
+    yield { type: 'completed', response: response('Respuesta nueva.') };
+  });
+  const { orchestrator } = setup(provider);
+  orchestrator.acceptTranscription({ type: 'final', text: 'Pregunta.' });
+  await firstStarted.promise;
+  orchestrator.speechStart();
+  assert.equal(orchestrator.acceptTranscription({ type: 'final', text: '/clear' }), true);
+  await orchestrator.whenIdle();
+  assert.equal(orchestrator.acceptTranscription({ type: 'final', text: 'Nueva pregunta.' }), true);
+  await orchestrator.whenIdle();
+  assert.equal(provider.requests.length, 2);
+});
+
+test('clearing the active Session invalidates interrupted context before a resume phrase', async () => {
+  const firstStarted = deferred();
+  const provider = new ScriptedProvider(async function* (_request, signal) {
+    yield { type: 'text_delta', delta: 'Contexto de otra sesión.' };
+    firstStarted.resolve();
+    await new Promise<void>((resolve) => {
+      if (signal?.aborted) resolve();
+      else signal?.addEventListener('abort', () => resolve(), { once: true });
+    });
+  });
+  const { orchestrator, runner } = setup(provider);
+  orchestrator.acceptTranscription({ type: 'final', text: 'Pregunta previa.' });
+  await firstStarted.promise;
+  orchestrator.speechStart();
+  runner.session.clear();
+  orchestrator.acceptTranscription({ type: 'final', text: 'Continúa.' });
+  await orchestrator.whenIdle();
+  assert.equal(provider.requests.length, 1);
+  assert.equal(runner.session.getMessages().length, 0);
+});
+
+test('explicit /cancel discards interrupted context', async () => {
+  const firstStarted = deferred();
+  const provider = new ScriptedProvider(async function* (_request, signal) {
+    yield { type: 'text_delta', delta: 'Contexto cancelado.' };
+    firstStarted.resolve();
+    await new Promise<void>((resolve) => {
+      if (signal?.aborted) resolve();
+      else signal?.addEventListener('abort', () => resolve(), { once: true });
+    });
+  });
+  const { orchestrator } = setup(provider);
+  orchestrator.acceptTranscription({ type: 'final', text: 'Pregunta previa.' });
+  await firstStarted.promise;
+  orchestrator.speechStart();
+  orchestrator.acceptTranscription({ type: 'final', text: '/cancel' });
+  await orchestrator.whenIdle();
+  orchestrator.acceptTranscription({ type: 'final', text: 'continúa' });
+  await orchestrator.whenIdle();
+  assert.equal(provider.requests.length, 1);
 });
