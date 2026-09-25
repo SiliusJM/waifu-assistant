@@ -2,6 +2,7 @@ export { MockAudioInputProvider, MockAudioOutputProvider, MockSTTProvider, MockT
 export { VoiceError, type VoiceErrorCode } from './voice-errors.js';
 export { VoiceService } from './voice-service.js';
 export { StreamingVoiceService } from './streaming-voice-service.js';
+export { VoiceConversationOrchestrator } from './voice-conversation-orchestrator.js';
 export { VoiceSession } from './voice-session.js';
 export { VoiceConcurrencyCoordinator } from './voice-concurrency-coordinator.js';
 export { BoundedAsyncQueue } from './bounded-async-queue.js';
@@ -63,3 +64,9 @@ export type {
   VoiceStreamingQueueOptions,
 } from './streaming-types.js';
 export type { VoiceResourceLease, VoiceAdmissionOptions } from './voice-concurrency-coordinator.js';
+export type {
+  VoiceConversationErrorStage,
+  VoiceConversationEvent,
+  VoiceConversationOrchestratorOptions,
+  VoiceInteractionState,
+} from './voice-conversation-orchestrator.js';
