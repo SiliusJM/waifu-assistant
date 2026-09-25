@@ -2,6 +2,12 @@ export { WindowsMicrophoneInputProvider, convertFloatInputToPcm16Mono } from './
 export type { CpalRuntime, WindowsMicrophoneInputOptions } from './windows-microphone-input-provider.js';
 export { SherpaWhisperSTTProvider } from './sherpa-whisper-stt-provider.js';
 export type { SherpaRuntime, SherpaWhisperModelPaths } from './sherpa-whisper-stt-provider.js';
+export { SherpaVitsTTSProvider, getNextTtsPhraseEnd, LOCAL_TTS_AUDIO_FORMAT, LOCAL_TTS_MAX_PHRASE_CHARACTERS } from './sherpa-vits-tts-provider.js';
+export type { SherpaVitsTtsProviderOptions } from './sherpa-vits-tts-provider.js';
+export { PIPER_SPANISH_TTS_MODEL, resolvePiperSpanishTtsModelPaths } from './piper-spanish-tts-model.js';
+export type { PiperSpanishTtsModelPaths } from './piper-spanish-tts-model.js';
+export { WindowsCpalStreamingAudioOutputProvider, convertPcm16MonoForDevice } from './windows-cpal-audio-output-provider.js';
+export type { CpalOutputRuntime, WindowsCpalAudioOutputOptions } from './windows-cpal-audio-output-provider.js';
 export { PushToTalkController } from './push-to-talk-controller.js';
 export type { StoppableMicrophone } from './push-to-talk-controller.js';
 export { WHISPER_TINY_MODEL, resolveWhisperTinyModelPaths } from './whisper-tiny-model.js';

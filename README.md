@@ -117,7 +117,41 @@ $env:YUKI_STT_MODEL_DIR = $env:STT_MODEL_DIR
 node dist/main.js --interactive
 ```
 
-En la conversación usa `/listen` para empezar a hablar y `/listen-stop` para finalizar la captura. El audio se procesa localmente y solo el transcript final entra al flujo normal de conversación. No se habilitan wake word, escucha en segundo plano ni almacenamiento de audio; la respuesta hablada/TTS no está incluida en este milestone.
+En la conversación usa `/listen` para empezar a hablar y `/listen-stop` para finalizar la captura. El audio se procesa localmente y solo el transcript final entra al flujo normal de conversación. La respuesta hablada se reproduce mediante el TTS local descrito abajo. No se habilitan wake word, escucha en segundo plano ni almacenamiento de audio.
+
+### TTS local y reproducción en Windows
+
+La respuesta del flujo `/listen` se sintetiza localmente con Sherpa-ONNX
+(modelo Piper VITS español) y se reproduce por el dispositivo de salida
+predeterminado de Windows. El texto y el audio permanecen en memoria; no se
+envían a un servicio remoto ni se guardan como archivos. No se descargan modelos
+al iniciar la aplicación o al ejecutar tests.
+
+Prepara el modelo explícitamente en una carpeta fuera del repositorio. En
+PowerShell, la descarga oficial fijada se puede verificar y extraer así:
+
+```powershell
+$modelRoot = "$env:LOCALAPPDATA\WaifuAssistant\models\tts"
+$archive = Join-Path $env:TEMP "vits-piper-es_AR-daniela-high-int8.tar.bz2"
+Invoke-WebRequest "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-es_AR-daniela-high-int8.tar.bz2" -OutFile $archive
+if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne "7218f0a119e4c16533ac187f71ab3019f2092f1594e43fef8392ae1f5b64abab") { throw "TTS model archive SHA-256 mismatch" }
+New-Item -ItemType Directory -Force $modelRoot | Out-Null
+tar -xjf $archive -C $modelRoot
+$env:YUKI_TTS_MODEL_DIR = Join-Path $modelRoot "vits-piper-es_AR-daniela-high-int8"
+```
+
+El directorio debe contener `es_AR-daniela-high.onnx`, `tokens.txt` y
+`espeak-ng-data`. El modelo es Daniela, español de Argentina, calidad alta,
+int8; conserva la atribución y condiciones indicadas en el `MODEL_CARD` incluido
+en el archivo oficial. Configura `YUKI_TTS_MODEL_DIR` antes de iniciar la app;
+`YUKI_STT_MODEL_DIR` sigue siendo necesario para `/listen`.
+
+Después de `npm run build`, se puede verificar TTS y reproducción reales sin
+micrófono ni provider de IA mediante `node scripts/voice-tts-smoke.mjs`. El
+smoke reproduce una frase breve por el dispositivo predeterminado y reporta
+solo metadatos de resultado. Para la conversación de voz, inicia el CLI
+interactivo, usa `/listen` y luego `/listen-stop`; la respuesta normal de Yuki
+se envía tanto al canal de texto como a síntesis/reproducción local.
 
 ## Comandos locales
 
