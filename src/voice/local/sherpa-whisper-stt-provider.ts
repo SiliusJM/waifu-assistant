@@ -192,7 +192,7 @@ class SherpaWhisperSession implements StreamingSTTSession {
 
 export class SherpaWhisperSTTProvider implements StreamingSTTProvider {
   readonly name = 'sherpa-onnx-whisper-local';
-  private recognizerPromise: Promise<SherpaRecognizer> | undefined;
+  private readonly recognizerPromises = new Map<string, Promise<SherpaRecognizer>>();
   private preparedVad: SherpaSileroVad | undefined;
 
   constructor(
@@ -202,7 +202,7 @@ export class SherpaWhisperSTTProvider implements StreamingSTTProvider {
   ) {}
 
   /** Explicitly invoked on /listen, before opening the microphone, never during app startup. */
-  async prepare(language = 'es'): Promise<void> {
+  async prepare(language = 'auto'): Promise<void> {
     await this.getRecognizer(language);
     if (this.vad && !this.preparedVad) {
       this.preparedVad = await SherpaSileroVad.create({
@@ -216,7 +216,7 @@ export class SherpaWhisperSTTProvider implements StreamingSTTProvider {
   async start(request: STTStartRequest, options: VoiceProviderOptions): Promise<StreamingSTTSession> {
     if (!request.sessionId.trim()) throw new VoiceError('A voice session is required.', 'VOICE_CONFIGURATION_ERROR');
     if (options.signal.aborted) throw new VoiceError('Local transcription was cancelled.', 'VOICE_CANCELLATION_ERROR');
-    const recognizer = await this.getRecognizer(request.language ?? 'es');
+    const recognizer = await this.getRecognizer(request.language ?? 'auto');
     if (options.signal.aborted) throw new VoiceError('Local transcription was cancelled.', 'VOICE_CANCELLATION_ERROR');
     const vad = this.preparedVad ?? (this.vad ? await SherpaSileroVad.create({
       modelPath: this.vad.modelPath,
@@ -232,25 +232,31 @@ export class SherpaWhisperSTTProvider implements StreamingSTTProvider {
   }
 
   private getRecognizer(language: string): Promise<SherpaRecognizer> {
-    if (!/^[a-z]{2,3}$/iu.test(language)) return Promise.reject(new VoiceError('The STT language is invalid.', 'VOICE_CONFIGURATION_ERROR'));
-    this.recognizerPromise ??= Promise.all([
+    if (language !== 'auto' && !/^[a-z]{2,3}$/iu.test(language)) {
+      return Promise.reject(new VoiceError('The STT language is invalid.', 'VOICE_CONFIGURATION_ERROR'));
+    }
+    const existing = this.recognizerPromises.get(language);
+    if (existing) return existing;
+    const pending = Promise.all([
       requireModelFile(this.model.encoder), requireModelFile(this.model.decoder), requireModelFile(this.model.tokens),
     ]).then(async () => {
       const sherpa = this.runtime ?? loadRuntime();
       return sherpa.OfflineRecognizer.createAsync({
         featConfig: { sampleRate: 16000, featureDim: 80 },
         modelConfig: {
-          whisper: { encoder: this.model.encoder, decoder: this.model.decoder, language, task: 'transcribe' },
+          // Sherpa-ONNX Whisper uses an empty language hint for multilingual autodetection.
+          whisper: { encoder: this.model.encoder, decoder: this.model.decoder, language: language === 'auto' ? '' : language, task: 'transcribe' },
           tokens: this.model.tokens,
           numThreads: 2,
           provider: 'cpu',
         },
       });
     }).catch((error: unknown) => {
-      this.recognizerPromise = undefined;
+      if (this.recognizerPromises.get(language) === pending) this.recognizerPromises.delete(language);
       if (error instanceof VoiceError) throw error;
       throw new VoiceError('The local speech model could not be initialized.', 'VOICE_STT_ERROR');
     });
-    return this.recognizerPromise;
+    this.recognizerPromises.set(language, pending);
+    return pending;
   }
 }

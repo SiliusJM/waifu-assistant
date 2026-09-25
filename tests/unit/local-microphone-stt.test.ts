@@ -46,6 +46,7 @@ interface FakeInputCallbacks {
 
 interface LifecycleCpalOptions {
   readonly emitOnPlay?: boolean;
+  readonly duringBuild?: () => void;
   readonly throwDeviceSelectionOnce?: boolean;
   readonly throwOnFirstPlay?: boolean;
   readonly errorDuringClose?: boolean;
@@ -85,6 +86,7 @@ function lifecycleCpal(options: LifecycleCpalOptions = {}): CpalRuntime & {
             supportedInputConfigs: () => [config],
             buildInputStream: (_inputConfig: unknown, _format: string, onData: FakeInputCallbacks['onData'], onError: FakeInputCallbacks['onError']) => {
               counts.streamsBuilt += 1;
+              options.duringBuild?.();
               callbacks.push({ onData, onError });
               const streamNumber = counts.streamsBuilt;
               return {
@@ -122,7 +124,7 @@ async function temporaryModelFiles(): Promise<{ readonly directory: string; read
 }
 
 test('Whisper Tiny model is pinned to one multilingual offline revision with bounded external files', () => {
-  assert.equal(WHISPER_TINY_MODEL.language, 'es');
+  assert.equal(WHISPER_TINY_MODEL.language, 'auto');
   assert.match(WHISPER_TINY_MODEL.revision, /^[a-f0-9]{40}$/u);
   assert.deepEqual(WHISPER_TINY_MODEL.files.map(({ name }) => name), [
     'tiny-encoder.int8.onnx', 'tiny-decoder.int8.onnx', 'tiny-tokens.txt',
@@ -190,12 +192,13 @@ test('a normal stop drains the final partial PCM chunk already received from CPA
 test('microphone readiness waits for real input and the same provider can stop and reopen', async () => {
   const runtime = lifecycleCpal({ emitOnPlay: false });
   const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
-  const microphone = new WindowsMicrophoneInputProvider({ runtime });
+  const lifecycle: Array<{ stage: string; elapsedMs: number }> = [];
+  const microphone = new WindowsMicrophoneInputProvider({ runtime, onLifecycle: (event) => lifecycle.push(event) });
 
   for (let capture = 0; capture < 2; capture += 1) {
     let ready = false;
-    const readiness = microphone.waitUntilReady().then(() => { ready = true; });
     const stream = await microphone.startCapture({ signal: new AbortController().signal, correlationId: `reopen-${capture}` });
+    const readiness = microphone.waitUntilReady().then(() => { ready = true; });
     assert.equal(ready, false, 'play() alone must not report input readiness');
     runtime.state.callbacks[capture]?.onData(new Float32Array(19200).fill(0.25));
     await readiness;
@@ -211,6 +214,100 @@ test('microphone readiness waits for real input and the same provider can stop a
   assert.deepEqual(runtime.state.counts, {
     hostsOpened: 2, hostsClosed: 2, devicesClosed: 2, streamsBuilt: 2, streamsClosed: 2, started: 2,
   });
+  assert.deepEqual(lifecycle.slice(0, 6).map(({ stage }) => stage), [
+    'host-created', 'device-selected', 'stream-created', 'play-called', 'first-callback', 'readiness-resolved',
+  ]);
+  assert.ok(lifecycle.every(({ elapsedMs }) => Number.isFinite(elapsedMs) && elapsedMs >= 0));
+});
+
+test('microphone readiness waiters registered before and after start resolve on real input', async () => {
+  const runtime = lifecycleCpal({ emitOnPlay: false });
+  const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
+  const microphone = new WindowsMicrophoneInputProvider({ runtime });
+  let readyBefore = false;
+  const beforeStart = microphone.waitUntilReady().then(() => { readyBefore = true; });
+  const stream = await microphone.startCapture({ signal: new AbortController().signal, correlationId: 'await-before-start' });
+  let readyAfter = false;
+  const afterStart = microphone.waitUntilReady().then(() => { readyAfter = true; });
+  assert.equal(readyBefore, false);
+  assert.equal(readyAfter, false);
+  runtime.state.callbacks[0]?.onData(new Float32Array(19200).fill(0.25));
+  await Promise.all([beforeStart, afterStart]);
+  assert.equal(readyBefore, true);
+  assert.equal(readyAfter, true);
+  await stream.stop();
+  assert.equal(runtime.state.counts.streamsClosed, 1);
+});
+
+test('readiness timeout starts only after play and not while native setup is in progress', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const runtime = lifecycleCpal({ emitOnPlay: false, duringBuild: () => t.mock.timers.tick(6000) });
+    const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
+    const lifecycle: string[] = [];
+    const microphone = new WindowsMicrophoneInputProvider({
+      runtime,
+      readinessTimeoutMs: 5000,
+      onLifecycle: (event) => lifecycle.push(event.stage),
+    });
+    const readiness = microphone.waitUntilReady();
+    const stream = await microphone.startCapture({ signal: new AbortController().signal, correlationId: 'deadline-after-play' });
+    runtime.state.callbacks[0]?.onData(new Float32Array(19200).fill(0.25));
+    await readiness;
+    await stream.stop();
+    assert.deepEqual(lifecycle.slice(0, 6), [
+      'host-created', 'device-selected', 'stream-created', 'play-called', 'first-callback', 'readiness-resolved',
+    ]);
+    assert.equal(runtime.state.counts.streamsClosed, 1);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
+test('readiness timeout is bounded, cleans up once, and ignores late callbacks', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const runtime = lifecycleCpal({ emitOnPlay: false });
+    const diagnostics: unknown[] = [];
+    const lifecycle: string[] = [];
+    const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
+    const microphone = new WindowsMicrophoneInputProvider({
+      runtime,
+      readinessTimeoutMs: 5000,
+      onDiagnostic: (event) => diagnostics.push(event),
+      onLifecycle: (event) => lifecycle.push(event.stage),
+    });
+    const stream = await microphone.startCapture({ signal: new AbortController().signal, correlationId: 'readiness-timeout' });
+    const readiness = microphone.waitUntilReady().then(() => undefined, (error: unknown) => error);
+    t.mock.timers.tick(5000);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const result = await readiness;
+    assert.ok(result instanceof VoiceError && result.code === 'VOICE_TIMEOUT_ERROR');
+    runtime.state.callbacks[0]?.onData(new Float32Array(19200).fill(0.25));
+    runtime.state.callbacks[0]?.onError({ code: 'XRUN', operation: 'lateCallback' });
+    await Promise.all([stream.stop(), microphone.stopCapture()]);
+    const iterator = stream.chunks()[Symbol.asyncIterator]();
+    await assert.rejects(iterator.next(), (error: unknown) => error instanceof VoiceError && error.code === 'VOICE_TIMEOUT_ERROR');
+    assert.equal(runtime.state.counts.streamsClosed, 1);
+    assert.equal(runtime.state.counts.hostsClosed, 1);
+    assert.deepEqual(diagnostics, []);
+    assert.deepEqual(lifecycle, ['host-created', 'device-selected', 'stream-created', 'play-called']);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
+test('readiness timeout configuration is bounded to 5–15 seconds', async () => {
+  const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
+  const runtime = lifecycleCpal();
+  for (const timeout of [4999, 15001]) {
+    assert.throws(
+      () => new WindowsMicrophoneInputProvider({ runtime, readinessTimeoutMs: timeout }),
+      (error: unknown) => error instanceof VoiceError && error.code === 'VOICE_CONFIGURATION_ERROR',
+    );
+  }
+  assert.doesNotThrow(() => new WindowsMicrophoneInputProvider({ runtime, readinessTimeoutMs: 5000 }));
+  assert.doesNotThrow(() => new WindowsMicrophoneInputProvider({ runtime, readinessTimeoutMs: 15000 }));
 });
 
 test('device-selection failure preserves only safe native diagnostics and closes the host before retry', async () => {
@@ -379,9 +476,84 @@ test('Sherpa provider validates local files and decodes a final Spanish transcri
     for await (const event of session.events()) events.push(event);
     assert.deepEqual(events, [{ type: 'final', text: 'Hola, Yuki.' }]);
     assert.equal(receivedSamples, 160);
-    assert.equal((receivedConfig as { modelConfig: { whisper: { language: string; task: string } } }).modelConfig.whisper.language, 'es');
+    assert.equal((receivedConfig as { modelConfig: { whisper: { language: string; task: string } } }).modelConfig.whisper.language, '');
     assert.equal(JSON.stringify(events).includes('1024'), false);
     await session.close();
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test('multilingual Whisper autodetection preserves Spanish, English, Japanese, romaji and technical entities verbatim', async () => {
+  const temporary = await temporaryModelFiles();
+  const transcripts = [
+    'Hola Yuki, esta es una prueba en español.',
+    'Yuki, check this error in Spring Boot.',
+    '愛より確かなものなんてない',
+    'Yuki revisa el QueryDSL y findByDocumentNumber.',
+    'Pon Ai yori tashikana mono nante nai.',
+    'Busca 愛より確かなものなんてない en YouTube.',
+    "Pon 'Burn It Down' de Linkin Park y revisa osu!.",
+  ];
+  let decoded = 0;
+  const configs: Array<{ modelConfig: { whisper: { language: string; task: string } } }> = [];
+  const runtime: SherpaRuntime = {
+    OfflineRecognizer: {
+      async createAsync(config) {
+        configs.push(config as typeof configs[number]);
+        return {
+          createStream: () => ({ acceptWaveform() {} }),
+          decodeAsync: async () => ({ text: transcripts[decoded++] }),
+        };
+      },
+    },
+  };
+  try {
+    const provider = new SherpaWhisperSTTProvider(temporary.paths, runtime);
+    for (const [index, expected] of transcripts.entries()) {
+      const session = await provider.start(
+        { sessionId: `multilingual-${index}` },
+        { signal: new AbortController().signal, correlationId: `multilingual-${index}` },
+      );
+      await session.pushAudio({
+        data: new Uint8Array([0, 4]),
+        format: CANONICAL_AUDIO_FORMAT,
+        sequence: 0,
+        capturedAt: new Date(0).toISOString(),
+      });
+      await session.endInput();
+      const events = [];
+      for await (const event of session.events()) events.push(event);
+      assert.deepEqual(events, [{ type: 'final', text: expected }]);
+      await session.close();
+    }
+    assert.equal(configs.length, 1, 'the shared autodetect recognizer is initialized once');
+    assert.equal(configs[0]?.modelConfig.whisper.language, '');
+    assert.equal(configs[0]?.modelConfig.whisper.task, 'transcribe');
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test('an explicit Whisper language hint remains isolated from the default auto recognizer', async () => {
+  const temporary = await temporaryModelFiles();
+  const languages: string[] = [];
+  const runtime: SherpaRuntime = {
+    OfflineRecognizer: {
+      async createAsync(config) {
+        languages.push(config.modelConfig.whisper.language);
+        return { createStream: () => ({ acceptWaveform() {} }), async decodeAsync() { return { text: '' }; } };
+      },
+    },
+  };
+  try {
+    const provider = new SherpaWhisperSTTProvider(temporary.paths, runtime);
+    await provider.prepare();
+    await provider.start({ sessionId: 'explicit-es', language: 'es' }, {
+      signal: new AbortController().signal,
+      correlationId: 'explicit-es',
+    });
+    assert.deepEqual(languages, ['', 'es']);
   } finally {
     await rm(temporary.directory, { recursive: true, force: true });
   }

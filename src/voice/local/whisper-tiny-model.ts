@@ -4,7 +4,7 @@ import { VoiceError } from '../voice-errors.js';
 export const WHISPER_TINY_MODEL = {
   repository: 'csukuangfj/sherpa-onnx-whisper-tiny',
   revision: '65176e2deb88badc814a94058666cadccc29b61c',
-  language: 'es',
+  language: 'auto',
   files: [
     { name: 'tiny-encoder.int8.onnx', sha256: 'd24fb083ae3b1041fc24e97971d60e280c9342201fbb67b0ab428a8b4a51a434', maxBytes: 20_000_000 },
     { name: 'tiny-decoder.int8.onnx', sha256: 'd2fece8dd42771f1df975c6c0445770d0c292bf7547c2cae04a6c0cc57540925', maxBytes: 100_000_000 },

@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { performance } from 'node:perf_hooks';
 import { VoiceError } from '../voice-errors.js';
 import type { AudioChunk, VoiceProviderOptions, VoiceTerminationReason } from '../voice-types.js';
 import { CANONICAL_AUDIO_FORMAT } from '../voice-types.js';
@@ -76,6 +77,20 @@ export interface MicrophoneDiagnosticEvent {
   readonly operation?: string;
 }
 
+export type MicrophoneLifecycleStage =
+  | 'host-created'
+  | 'device-selected'
+  | 'stream-created'
+  | 'play-called'
+  | 'first-callback'
+  | 'readiness-resolved';
+
+export interface MicrophoneLifecycleEvent {
+  readonly stage: MicrophoneLifecycleStage;
+  /** Monotonic milliseconds since startCapture began; contains no device identity or audio. */
+  readonly elapsedMs: number;
+}
+
 function safeNativeField(error: unknown, field: 'code' | 'operation'): string | undefined {
   try {
     if (typeof error !== 'object' || error === null || !(field in error)) return undefined;
@@ -120,17 +135,22 @@ export function convertFloatInputToPcm16Mono(
 export interface WindowsMicrophoneInputOptions {
   readonly maxDurationSeconds?: number;
   readonly queueCapacity?: number;
+  readonly readinessTimeoutMs?: number;
   readonly runtime?: CpalRuntime;
   /** Opt-in, metadata-only diagnostics. The callback never receives native messages or audio. */
   readonly onDiagnostic?: (event: MicrophoneDiagnosticEvent) => void;
+  /** Opt-in, metadata-only lifecycle timing. */
+  readonly onLifecycle?: (event: MicrophoneLifecycleEvent) => void;
 }
 
 export class WindowsMicrophoneInputProvider implements StreamingAudioInputProvider {
   readonly name = 'windows-wasapi-microphone';
   private readonly maxDurationSamples: number;
   private readonly queueCapacity: number;
+  private readonly readinessTimeoutMs: number;
   private readonly runtime?: CpalRuntime;
   private readonly onDiagnostic?: (event: MicrophoneDiagnosticEvent) => void;
+  private readonly onLifecycle?: (event: MicrophoneLifecycleEvent) => void;
   private activeStop: ((reason: VoiceTerminationReason) => Promise<void>) | undefined;
   private readiness: Promise<void> | undefined;
   private resolveReadiness: (() => void) | undefined;
@@ -140,14 +160,18 @@ export class WindowsMicrophoneInputProvider implements StreamingAudioInputProvid
   constructor(options: WindowsMicrophoneInputOptions = {}) {
     const duration = options.maxDurationSeconds ?? DEFAULT_MAX_DURATION_SECONDS;
     const capacity = options.queueCapacity ?? DEFAULT_QUEUE_CAPACITY;
+    const readinessTimeoutMs = options.readinessTimeoutMs ?? 5000;
     if (!Number.isInteger(duration) || duration < 1 || duration > 60
-      || !Number.isInteger(capacity) || capacity < 1 || capacity > 128) {
+      || !Number.isInteger(capacity) || capacity < 1 || capacity > 128
+      || !Number.isInteger(readinessTimeoutMs) || readinessTimeoutMs < 5000 || readinessTimeoutMs > 15000) {
       throw new VoiceError('Microphone capture limits are invalid.', 'VOICE_CONFIGURATION_ERROR');
     }
     this.maxDurationSamples = duration * TARGET_RATE;
     this.queueCapacity = capacity;
+    this.readinessTimeoutMs = readinessTimeoutMs;
     this.runtime = options.runtime;
     this.onDiagnostic = options.onDiagnostic;
+    this.onLifecycle = options.onLifecycle;
   }
 
   private reportDiagnostic(stage: MicrophoneDiagnosticStage, error?: unknown): void {
@@ -161,8 +185,18 @@ export class WindowsMicrophoneInputProvider implements StreamingAudioInputProvid
     }
   }
 
+  private reportLifecycle(startedAt: number, stage: MicrophoneLifecycleStage): void {
+    if (!this.onLifecycle) return;
+    try {
+      this.onLifecycle({ stage, elapsedMs: Math.max(0, performance.now() - startedAt) });
+    } catch {
+      // Lifecycle reporting is observational only and must never alter capture behavior.
+    }
+  }
+
   async startCapture(options: VoiceProviderOptions): Promise<AudioInputStream> {
     if (this.activeStop) throw new VoiceError('A microphone capture is already active.', 'VOICE_CONCURRENCY_ERROR');
+    const captureStartedAt = performance.now();
     this.clearReadiness();
     this.readiness = new Promise<void>((resolve, reject) => {
       this.resolveReadiness = resolve;
@@ -186,12 +220,14 @@ export class WindowsMicrophoneInputProvider implements StreamingAudioInputProvid
     let setupStage: 'host-open' | 'device-select' = 'host-open';
     try {
       host = cpal.defaultHost();
+      this.reportLifecycle(captureStartedAt, 'host-created');
       setupStage = 'device-select';
       const selected = host.defaultInputDevice();
       if (!selected) {
         throw new VoiceError('No default microphone is available.', 'VOICE_CAPTURE_ERROR');
       }
       device = selected;
+      this.reportLifecycle(captureStartedAt, 'device-selected');
     } catch (error) {
       this.reportDiagnostic(setupStage, error);
       try { host?.close(); } catch (closeError) { this.reportDiagnostic('host-close', closeError); }
@@ -205,7 +241,6 @@ export class WindowsMicrophoneInputProvider implements StreamingAudioInputProvid
     // The setup block above either assigns both native handles or throws.
     const captureHost = host as CpalHost;
     const captureDevice = device as CpalDevice;
-
     const rawQueue = new CaptureQueue<Float32Array>(this.queueCapacity);
     const queue = new CaptureQueue<AudioChunk>(this.queueCapacity);
     let stream: ReturnType<CpalDevice['buildInputStream']> | undefined;
@@ -220,10 +255,18 @@ export class WindowsMicrophoneInputProvider implements StreamingAudioInputProvid
     let rawPump: Promise<void> | undefined;
     let selectedConfig: CpalConfig | undefined;
     let releasePromise: Promise<void> | undefined;
+    let readinessTimer: NodeJS.Timeout | undefined;
+    let firstCallbackSeen = false;
+    let readinessResolved = false;
+    const clearReadinessTimer = (): void => {
+      if (readinessTimer) clearTimeout(readinessTimer);
+      readinessTimer = undefined;
+    };
     const release = async (reason: VoiceTerminationReason): Promise<void> => {
       if (releasePromise) return releasePromise;
       if (stopped) return;
       stopping = true;
+      clearReadinessTimer();
       options.signal.removeEventListener('abort', onAbort);
       let resolveRelease!: () => void;
       releasePromise = new Promise<void>((resolve) => { resolveRelease = resolve; });
@@ -245,7 +288,7 @@ export class WindowsMicrophoneInputProvider implements StreamingAudioInputProvid
           stopped = true;
           stopping = false;
           if (this.activeStop === stop) this.activeStop = undefined;
-          if (reason !== 'completed') this.rejectReadiness?.(new VoiceError('Microphone capture ended before it became ready.', 'VOICE_CAPTURE_ERROR'));
+          if (!readinessResolved) this.rejectReadiness?.(new VoiceError('Microphone capture ended before it became ready.', 'VOICE_CAPTURE_ERROR'));
           resolveRelease();
         })();
       });
@@ -318,7 +361,16 @@ export class WindowsMicrophoneInputProvider implements StreamingAudioInputProvid
       stage = 'stream-build';
       stream = captureDevice.buildInputStream(config, 'f32', (input) => {
         if (stopping || stopped) return;
-        if (input.length > 0) this.resolveReadiness?.();
+        if (!firstCallbackSeen) {
+          firstCallbackSeen = true;
+          this.reportLifecycle(captureStartedAt, 'first-callback');
+        }
+        if (input.length > 0 && !readinessResolved) {
+          readinessResolved = true;
+          clearReadinessTimer();
+          this.reportLifecycle(captureStartedAt, 'readiness-resolved');
+          this.resolveReadiness?.();
+        }
         if (!rawQueue.push(new Float32Array(input))) {
           fail(new VoiceError('Microphone capture exceeded its in-memory buffer limit.', 'VOICE_BACKPRESSURE_ERROR'));
         }
@@ -327,6 +379,7 @@ export class WindowsMicrophoneInputProvider implements StreamingAudioInputProvid
         this.reportDiagnostic('stream-callback', error);
         fail(new VoiceError('The microphone capture stream failed.', 'VOICE_CAPTURE_ERROR'));
       });
+      this.reportLifecycle(captureStartedAt, 'stream-created');
       this.activeStop = stop;
       rawPump = pumpRaw();
       void rawPump.catch(() => undefined);
@@ -334,7 +387,16 @@ export class WindowsMicrophoneInputProvider implements StreamingAudioInputProvid
       if (options.signal.aborted) onAbort();
       else {
         stage = 'stream-start';
+        this.reportLifecycle(captureStartedAt, 'play-called');
         stream.play();
+        // Start the readiness deadline only after native stream.play() has returned.
+        if (!readinessResolved && !stopping && !stopped) {
+          readinessTimer = setTimeout(() => {
+            const timeout = new VoiceError('The microphone did not deliver input before the readiness timeout.', 'VOICE_TIMEOUT_ERROR');
+            this.rejectReadiness?.(timeout);
+            fail(timeout);
+          }, this.readinessTimeoutMs);
+        }
       }
     } catch (error) {
       this.reportDiagnostic(stage, error);
@@ -358,23 +420,10 @@ export class WindowsMicrophoneInputProvider implements StreamingAudioInputProvid
   }
 
   async waitUntilReady(): Promise<void> {
-    let timer: NodeJS.Timeout | undefined;
-    try {
-      const start = await Promise.race([
-        this.nextCaptureStart.promise,
-        new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(() => reject(new VoiceError('Microphone capture did not start in time.', 'VOICE_TIMEOUT_ERROR')), 5000);
-        }),
-      ]);
-      await start.readiness;
-    } catch (error) {
-      if (error instanceof VoiceError && error.code === 'VOICE_TIMEOUT_ERROR') {
-        await this.activeStop?.('failed');
-      }
-      throw error;
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
+    const currentReadiness = this.readiness;
+    if (currentReadiness) return currentReadiness;
+    const start = await this.nextCaptureStart.promise;
+    return start.readiness;
   }
 
   private clearReadiness(): void {

@@ -122,7 +122,12 @@ export class PersonalityCompiler implements PersonalityCompilerContract {
     instructions.push({ id: 'style.response', layer: 'style', priority: 25, text: styleInstruction(resolved) });
     instructions.push(...resolved.profile.behavioralRules.filter((rule) => rule.enabled).map(behavioralInstruction));
     instructions.push(...resolved.profile.boundaries.filter((rule) => rule.enabled).map(boundaryInstruction));
-    if (resolved.locale) instructions.push({ id: 'locale.default', layer: 'locale', priority: 70, text: 'Use locale ' + resolved.locale + ' when compatible with the user request.' });
+    if (resolved.locale) instructions.push({
+      id: 'locale.default',
+      layer: 'locale',
+      priority: 70,
+      text: 'Respond in the configured locale ' + resolved.locale + ' by default, regardless of the input language. Preserve names, titles, code, and quotations in their original language; change response language only when explicitly requested.',
+    });
     instructions.sort((left, right) => left.priority - right.priority || left.id.localeCompare(right.id));
     const unique = new Map<string, PersonalityInstruction>();
     for (const instruction of instructions) unique.set(instruction.id, instruction);

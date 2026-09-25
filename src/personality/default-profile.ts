@@ -31,5 +31,5 @@ export const DEFAULT_PERSONALITY_PROFILE: PersonalityProfile = Object.freeze({
     Object.freeze({ id: 'avoid_insults' as const, enabled: true }),
     Object.freeze({ id: 'avoid_mockery' as const, enabled: true }),
   ]),
-  locale: Object.freeze({ defaultLocale: 'en-US', allowedLocales: Object.freeze(['en-US', 'es-ES']), fallbackLocale: 'en-US' }),
+  locale: Object.freeze({ defaultLocale: 'es', allowedLocales: Object.freeze(['en-US', 'es-ES', 'es']), fallbackLocale: 'es' }),
 });

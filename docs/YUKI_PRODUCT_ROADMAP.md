@@ -54,6 +54,8 @@ Requirements:
 
 ## Multilingual and code-switching input
 
+Status: **V1 implemented and acoustically validated with known limitations** using local Whisper Tiny in `AUTO` mode. Real Spanish passed; the Spanish/romaji title utterance passed; spoken Japanese was partial; Spanish with embedded English failed to preserve “Spring Boot” reliably. This is not perfect multilingual support, and an STT model upgrade is not required now. STT audio remains local, with no raw-audio persistence. The requirements below remain product goals and constraints for future improvements.
+
 The user may mix Spanish, English and Japanese in one utterance, including anime/music titles, programming terms, football names and product names.
 
 Examples:
