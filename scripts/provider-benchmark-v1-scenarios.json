@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "suite": "provider-latency-quality-v1",
+  "iterations": 3,
+  "timeoutMs": 30000,
+  "systemPrompt": "Eres Yuki, una asistente personal cercana y respetuosa. Responde principalmente en español, de forma clara y sin exagerar el tono. Conserva literalmente los nombres propios y términos técnicos. No afirmes haber realizado acciones externas ni consultado datos actuales.",
+  "singleTurnScenarios": [
+    {
+      "id": "spanish-yuki-short",
+      "category": "spanish_personality",
+      "prompt": "Responde en una sola frase: ¿qué puedes hacer como asistente personal?",
+      "checks": ["spanish", "oneSentence", "nonEmpty"]
+    },
+    {
+      "id": "strict-three-points",
+      "category": "instruction_following",
+      "prompt": "Responde exactamente con tres puntos breves y numerados sobre cómo organizar una mañana de trabajo. No añadas introducción ni conclusión.",
+      "checks": ["threeNumberedLines"]
+    },
+    {
+      "id": "typescript-code",
+      "category": "code",
+      "prompt": "Escribe una función TypeScript `isEven(n: number): boolean` que indique si un entero es par. Devuelve código y una frase breve de explicación.",
+      "checks": ["codeIsEven"]
+    },
+    {
+      "id": "debugging-reduce",
+      "category": "debugging_reasoning",
+      "prompt": "Explica brevemente el bug y una corrección: `const total = prices.reduce((sum, price) => sum + price, \"0\");` donde `prices` contiene números.",
+      "checks": ["debugStringAccumulator"]
+    },
+    {
+      "id": "small-json",
+      "category": "structured_format",
+      "prompt": "Devuelve únicamente este JSON válido, sin Markdown ni texto extra, con los mismos valores y tipos: `{\"status\":\"ok\",\"count\":3}`.",
+      "checks": ["exactJson"]
+    },
+    {
+      "id": "technical-code-switch",
+      "category": "code_switching",
+      "prompt": "Escribe una frase en español que incluya exactamente estos nombres técnicos sin traducirlos: Spring Boot, QueryDSL, GitHub, VS Code y streaming.",
+      "checks": ["preserveTechnicalTerms", "spanish"]
+    },
+    {
+      "id": "clarify-missing-time",
+      "category": "ambiguity_clarification",
+      "prompt": "No ejecutes ninguna acción ni inventes datos. Para guardar el recordatorio «llamar a Alex mañana» con una hora concreta, formula una sola pregunta de aclaración.",
+      "checks": ["asksForTime", "noActionClaim"]
+    },
+    {
+      "id": "sustained-stream",
+      "category": "longer_response_streaming",
+      "prompt": "En español, escribe dos párrafos breves y concretos sobre cómo dividir una tarea grande en pasos pequeños. No uses listas.",
+      "checks": ["twoParagraphs", "nonEmpty"]
+    }
+  ],
+  "multiTurn": {
+    "id": "same-session-context",
+    "category": "multi_turn_context",
+    "sessions": [
+      { "code": "SATURNO-418" },
+      { "code": "LUNA-742" },
+      { "code": "NUBE-263" }
+    ],
+    "firstTurnTemplate": "Recuerda solo durante esta conversación el código de prueba {code}. Confirma brevemente.",
+    "secondTurn": "¿Cuál fue el código de prueba que te di en el mensaje anterior?",
+    "checks": ["recallsSessionCode"]
+  }
+}
