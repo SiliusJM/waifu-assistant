@@ -48,6 +48,8 @@ export interface ConversationRunResult {
 
 export interface ConversationRunOptions {
   readonly signal?: AbortSignal;
+  /** One-turn context supplied by voice turn-taking; never stored in Session. */
+  readonly ephemeralContext?: string;
   readonly exitCommand?: string;
   readonly personality?: PersonalitySnapshot;
   readonly onResponse?: (response: Response) => void | Promise<void>;
@@ -166,6 +168,7 @@ export class ConversationRunner {
             signal: controller.signal,
             personality: options.personality,
             memory: await options.memory?.(),
+            ephemeralContext: options.ephemeralContext,
             isCurrent: () => active?.generation === turnGeneration && !turn.cancelRequested,
           })) {
             const streamEvent = event as AssistantStreamEvent;

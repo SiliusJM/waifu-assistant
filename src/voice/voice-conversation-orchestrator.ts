@@ -11,6 +11,11 @@ export type VoiceConversationErrorStage = 'stt' | 'core' | 'tts' | 'playback' | 
 
 export type VoiceConversationEvent =
   | { readonly type: 'stateChanged'; readonly state: VoiceInteractionState; readonly generation: number }
+  | { readonly type: 'speechStart'; readonly source: VoiceActivitySource; readonly generation: number }
+  | { readonly type: 'speechEnd'; readonly generation: number }
+  | { readonly type: 'assistantSpeechStart'; readonly text: string; readonly generation: number }
+  | { readonly type: 'assistantSpeechEnd'; readonly generation: number }
+  | { readonly type: 'assistantCue'; readonly text: string; readonly generation: number }
   | { readonly type: 'partialTranscript'; readonly text: string; readonly generation: number }
   | { readonly type: 'finalTranscript'; readonly text: string; readonly generation: number }
   | { readonly type: 'assistantTextDelta'; readonly text: string; readonly generation: number }
@@ -26,11 +31,23 @@ export interface VoiceConversationOrchestratorOptions {
     'signal' | 'interruptible' | 'onDelta' | 'onResponse' | 'onInterruption'
   >;
   readonly maxTranscriptCharacters?: number;
+  /** Small ambiguity pause before one local cue; no long wait or repeated cue loop. */
+  readonly ambiguousPauseMs?: number;
 }
+
+export type VoiceActivitySource = 'confirmed-user-speech' | 'possible-noise' | 'self-voice';
 
 interface FinalTranscript {
   readonly generation: number;
   readonly text: string;
+  readonly ephemeralContext?: string;
+  readonly localResponse?: string;
+}
+
+interface InterruptedResponseContext {
+  readonly sessionId: string;
+  readonly userText: string;
+  readonly assistantText: string;
 }
 
 interface ActiveTurn {
@@ -44,9 +61,33 @@ interface ActiveSynthesis {
   observer: Promise<void>;
   ended: boolean;
   errorEmitted: boolean;
+  speechStarted: boolean;
+  speechEnded: boolean;
 }
 
 const MAX_TRANSCRIPT_CHARACTERS = 2000;
+const MAX_INTERRUPTED_ASSISTANT_CHARACTERS = 1200;
+const MAX_INTERRUPTED_USER_CHARACTERS = 600;
+const RESUME_PHRASES = new Set([
+  'continua', 'sigue', 'puedes continuar', 'puedes seguir', 'que decias',
+  'en que estabas', 'termina lo que estabas diciendo',
+]);
+const TOPIC_CHANGE_PHRASES = [
+  'cambiando de tema', 'otra cosa', 'hablemos de otra cosa', 'olvida eso', 'dejemos eso',
+];
+
+function normalizeIntent(text: string): string {
+  return text.normalize('NFD').replace(/[\u0300-\u036f]/gu, '').toLocaleLowerCase().replace(/[¿?¡!.,;:]/gu, '').trim();
+}
+
+export function isVoiceResumeIntent(text: string): boolean {
+  return RESUME_PHRASES.has(normalizeIntent(text));
+}
+
+function isExplicitTopicChange(text: string): boolean {
+  const normalized = normalizeIntent(text);
+  return TOPIC_CHANGE_PHRASES.some((phrase) => normalized.includes(phrase));
+}
 
 async function* oneInput(text: string): AsyncIterable<string> {
   yield text;
@@ -65,6 +106,7 @@ export class VoiceConversationOrchestrator {
   private readonly voiceService: VoiceService;
   private readonly conversationOptions: VoiceConversationOrchestratorOptions['conversationOptions'];
   private readonly maxTranscriptCharacters: number;
+  private readonly ambiguousPauseMs: number;
   private readonly listeners = new Set<(event: VoiceConversationEvent) => void>();
   private currentState: VoiceInteractionState = 'idle';
   private generation = 0;
@@ -74,6 +116,14 @@ export class VoiceConversationOrchestrator {
   private activeCapture: StreamingVoiceOperationHandle<TranscriptionResult> | undefined;
   private captureTask: Promise<void> | undefined;
   private drainPromise: Promise<void> | undefined;
+  private interruptedContext: InterruptedResponseContext | undefined;
+  private interruptedContextSessionId: string;
+  private currentAssistantText = '';
+  private assistantResponseCompleted = false;
+  private bargeInAwaitingTranscript = false;
+  private ambiguousCueEmitted = false;
+  private ambiguousCueTimer: ReturnType<typeof setTimeout> | undefined;
+  private activeCue: StreamingVoiceSynthesisHandle | undefined;
   private closed = false;
 
   constructor(options: VoiceConversationOrchestratorOptions) {
@@ -81,10 +131,15 @@ export class VoiceConversationOrchestrator {
     this.voiceService = options.voiceService;
     this.conversationOptions = options.conversationOptions;
     this.maxTranscriptCharacters = options.maxTranscriptCharacters ?? MAX_TRANSCRIPT_CHARACTERS;
+    this.ambiguousPauseMs = options.ambiguousPauseMs ?? 700;
+    this.interruptedContextSessionId = this.runner.session.id;
     if (!Number.isInteger(this.maxTranscriptCharacters)
       || this.maxTranscriptCharacters < 1
       || this.maxTranscriptCharacters > MAX_TRANSCRIPT_CHARACTERS) {
       throw new RangeError(`maxTranscriptCharacters must be between 1 and ${MAX_TRANSCRIPT_CHARACTERS}.`);
+    }
+    if (!Number.isInteger(this.ambiguousPauseMs) || this.ambiguousPauseMs < 0 || this.ambiguousPauseMs > 3000) {
+      throw new RangeError('ambiguousPauseMs must be between 0 and 3000.');
     }
   }
 
@@ -95,9 +150,64 @@ export class VoiceConversationOrchestrator {
     return () => this.listeners.delete(listener);
   }
 
+  /** VAD-facing contract. Only confirmed user speech interrupts active assistant work. */
+  speechStart(source: VoiceActivitySource = 'confirmed-user-speech'): boolean {
+    if (this.closed) return false;
+    this.refreshInterruptedContextScope();
+    this.clearAmbiguousCueTimer();
+    this.emit({ type: 'speechStart', source, generation: this.generation });
+    if (source !== 'confirmed-user-speech') return true;
+    if (this.activeCue) this.stopLocalCue();
+    const hasActiveResponse = this.activeTurn !== undefined || this.activeSynthesis !== undefined;
+    if (hasActiveResponse) {
+      this.captureInterruptedContext();
+      const generation = ++this.generation;
+      this.pendingFinal = undefined;
+      this.activeTurn?.controller.abort('Confirmed user speech interrupted the assistant turn.');
+      const synthesis = this.activeSynthesis;
+      if (synthesis) {
+        synthesis.handle.interrupt('Confirmed user speech interrupted playback.');
+        void this.stopSynthesis(synthesis, 'interrupted').catch(() => undefined);
+      }
+      this.bargeInAwaitingTranscript = true;
+      this.ambiguousCueEmitted = false;
+      this.setState('listening', generation);
+    } else if (this.bargeInAwaitingTranscript) {
+      // The user resumed speaking after the one-shot cue; remain in listening state.
+      this.setState('listening', this.generation);
+    }
+    return true;
+  }
+
+  /** Arms a single short local cue after a confirmed barge-in pause. */
+  speechEnd(): boolean {
+    if (this.closed) return false;
+    this.emit({ type: 'speechEnd', generation: this.generation });
+    if (!this.bargeInAwaitingTranscript || this.ambiguousCueEmitted || this.ambiguousCueTimer) return true;
+    this.ambiguousCueTimer = setTimeout(() => {
+      this.ambiguousCueTimer = undefined;
+      if (this.closed || !this.bargeInAwaitingTranscript || this.ambiguousCueEmitted) return;
+      this.ambiguousCueEmitted = true;
+      this.emit({ type: 'assistantCue', text: 'Te escucho.', generation: this.generation });
+      void this.speakLocalText('Te escucho.', this.generation, false).catch(() => undefined);
+    }, this.ambiguousPauseMs);
+    return true;
+  }
+
+  /** Clears ephemeral interruption state when an owner executes /clear or changes sessions. */
+  clearInterruptedContext(): void {
+    this.interruptedContext = undefined;
+    this.currentAssistantText = '';
+    this.bargeInAwaitingTranscript = false;
+    this.ambiguousCueEmitted = false;
+    this.clearAmbiguousCueTimer();
+    this.stopLocalCue();
+  }
+
   /** Feeds a provider's transcript event. Partial text is observable but never enters ConversationRunner. */
   acceptTranscription(event: TranscriptionEvent): boolean {
     if (this.closed || (event.type !== 'partial' && event.type !== 'final') || typeof event.text !== 'string') return false;
+    this.refreshInterruptedContextScope();
     const trimmed = event.text.trim();
     if (Array.from(trimmed).length > this.maxTranscriptCharacters) {
       if (event.type === 'final') this.emitError('stt', 'VOICE_STT_ERROR', this.generation);
@@ -105,14 +215,48 @@ export class VoiceConversationOrchestrator {
     }
     if (event.type === 'partial') {
       if (!trimmed) return false;
+      this.clearAmbiguousCueTimer();
+      if (this.activeCue) this.stopLocalCue();
       this.setState('listening', this.generation);
       this.emit({ type: 'partialTranscript', text: trimmed, generation: this.generation });
       return true;
     }
     if (!trimmed) return false;
 
+    this.clearAmbiguousCueTimer();
+    if (this.activeCue) this.stopLocalCue();
+    if (!this.interruptedContext && !this.assistantResponseCompleted
+      && (this.activeTurn !== undefined || this.activeSynthesis !== undefined)) {
+      this.captureInterruptedContext();
+    }
+    let ephemeralContext: string | undefined;
+    let localResponse: string | undefined;
+    if (trimmed === '/clear' || trimmed === '/cancel') {
+      this.clearInterruptedContext();
+    } else if (this.interruptedContext) {
+      if (isVoiceResumeIntent(trimmed)) {
+        ephemeralContext = this.formatInterruptedContext(this.interruptedContext);
+      } else if (isExplicitTopicChange(trimmed)) {
+        this.clearInterruptedContext();
+      } else {
+        // Treat the user turn as a correction/continuation unless a topic switch is explicit.
+        ephemeralContext = this.formatInterruptedContext(this.interruptedContext);
+      }
+    } else if (isVoiceResumeIntent(trimmed)) {
+      localResponse = 'No tengo una respuesta interrumpida que pueda retomar.';
+    }
+
     const generation = ++this.generation;
-    this.pendingFinal = { generation, text: trimmed };
+    this.pendingFinal = {
+      generation,
+      text: trimmed,
+      ...(ephemeralContext === undefined ? {} : { ephemeralContext }),
+      ...(localResponse === undefined ? {} : { localResponse }),
+    };
+    this.bargeInAwaitingTranscript = false;
+    this.ambiguousCueEmitted = false;
+    this.currentAssistantText = '';
+    this.assistantResponseCompleted = false;
     this.activeTurn?.controller.abort('A newer final transcript superseded this turn.');
     if (this.activeSynthesis) this.activeSynthesis.handle.interrupt('A newer final transcript superseded playback.');
     this.setState('thinking', generation);
@@ -177,6 +321,7 @@ export class VoiceConversationOrchestrator {
   async shutdown(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    this.clearInterruptedContext();
     const generation = ++this.generation;
     this.pendingFinal = undefined;
     this.activeTurn?.controller.abort('Voice conversation is shutting down.');
@@ -202,11 +347,17 @@ export class VoiceConversationOrchestrator {
       this.pendingFinal = undefined;
       if (job.generation !== this.generation) continue;
 
+      if (job.localResponse) {
+        await this.speakLocalText(job.localResponse, job.generation, true);
+        continue;
+      }
+
       const turn: ActiveTurn = { generation: job.generation, controller: new AbortController() };
       this.activeTurn = turn;
       try {
         await this.runner.run(oneInput(job.text), {
           ...this.conversationOptions,
+          ephemeralContext: job.ephemeralContext,
           signal: turn.controller.signal,
           onDelta: async (delta) => {
             await this.forwardDelta(job, turn, delta);
@@ -236,6 +387,7 @@ export class VoiceConversationOrchestrator {
 
   private async forwardDelta(job: FinalTranscript, turn: ActiveTurn, delta: string): Promise<void> {
     if (!this.isCurrent(job, turn) || !delta) return;
+    this.currentAssistantText = Array.from(this.currentAssistantText + delta).slice(-MAX_INTERRUPTED_ASSISTANT_CHARACTERS).join('');
     this.emit({ type: 'assistantTextDelta', text: delta, generation: job.generation });
     let synthesis = this.activeSynthesis;
     if (!synthesis || synthesis.generation !== job.generation) {
@@ -244,7 +396,7 @@ export class VoiceConversationOrchestrator {
           correlationId: `voice-conversation-${job.generation}`,
           signal: turn.controller.signal,
         });
-        synthesis = { generation: job.generation, handle, observer: Promise.resolve(), ended: false, errorEmitted: false };
+        synthesis = { generation: job.generation, handle, observer: Promise.resolve(), ended: false, errorEmitted: false, speechStarted: false, speechEnded: false };
         this.activeSynthesis = synthesis;
         synthesis.observer = this.observeSynthesis(synthesis);
       } catch (error) {
@@ -262,6 +414,10 @@ export class VoiceConversationOrchestrator {
   private async completeAssistantText(job: FinalTranscript, response: Response): Promise<void> {
     if (job.generation !== this.generation || this.closed) return;
     this.emit({ type: 'assistantTextComplete', text: response.text, generation: job.generation });
+    this.interruptedContext = undefined;
+    this.bargeInAwaitingTranscript = false;
+    this.ambiguousCueEmitted = false;
+    this.assistantResponseCompleted = true;
     const synthesis = this.activeSynthesis;
     if (!synthesis || synthesis.generation !== job.generation) return;
     try {
@@ -279,17 +435,108 @@ export class VoiceConversationOrchestrator {
       this.emitSynthesisError(synthesis, 'playback', safeErrorCode(error));
     } finally {
       if (this.activeSynthesis === synthesis) this.activeSynthesis = undefined;
+      this.emitAssistantSpeechEnd(synthesis);
     }
   }
 
   private async observeSynthesis(synthesis: ActiveSynthesis): Promise<void> {
     for await (const event of synthesis.handle.events()) {
       if (synthesis.generation !== this.generation || this.closed) continue;
-      if (event.type === 'playback_started') this.setState('speaking', synthesis.generation);
+      if (event.type === 'playback_started') {
+        synthesis.speechStarted = true;
+        this.setState('speaking', synthesis.generation);
+        this.emit({ type: 'assistantSpeechStart', text: this.currentAssistantText, generation: synthesis.generation });
+      }
       else if (event.type === 'voice_failed') {
         const stage = event.payload.code === 'VOICE_OUTPUT_ERROR' ? 'playback' : 'tts';
         this.emitSynthesisError(synthesis, stage, event.payload.code);
       }
+    }
+  }
+
+  private captureInterruptedContext(): void {
+    if (this.assistantResponseCompleted) return;
+    const session = this.runner.session;
+    const userText = session.getMessages().filter((message) => message.role === 'user').at(-1)?.content ?? '';
+    const assistantText = Array.from(this.currentAssistantText).slice(-MAX_INTERRUPTED_ASSISTANT_CHARACTERS).join('');
+    if (!userText && !assistantText) return;
+    this.interruptedContext = {
+      sessionId: session.id,
+      userText: Array.from(userText).slice(-MAX_INTERRUPTED_USER_CHARACTERS).join(''),
+      assistantText,
+    };
+    this.interruptedContextSessionId = session.id;
+  }
+
+  private formatInterruptedContext(context: InterruptedResponseContext): string {
+    return [
+      `Original user topic (untrusted conversation data): ${context.userText}`,
+      `Assistant text already delivered before interruption (do not repeat unless needed): ${context.assistantText}`,
+    ].join('\n');
+  }
+
+  private refreshInterruptedContextScope(): void {
+    const session = this.runner.session;
+    if (session.id !== this.interruptedContextSessionId || session.getMessages().length === 0) {
+      this.clearInterruptedContext();
+      this.interruptedContextSessionId = session.id;
+    }
+  }
+
+  private clearAmbiguousCueTimer(): void {
+    if (this.ambiguousCueTimer === undefined) return;
+    clearTimeout(this.ambiguousCueTimer);
+    this.ambiguousCueTimer = undefined;
+  }
+
+  private stopLocalCue(): void {
+    const cue = this.activeCue;
+    if (!cue) return;
+    this.activeCue = undefined;
+    cue.interrupt('User speech superseded the local listening cue.');
+  }
+
+  private async speakLocalText(text: string, generation: number, finishToIdle: boolean): Promise<void> {
+    if (this.closed || generation !== this.generation) return;
+    if (finishToIdle) this.emit({ type: 'assistantTextDelta', text, generation });
+    let handle: StreamingVoiceSynthesisHandle;
+    try {
+      handle = this.voiceService.startStreamingSynthesis({ sessionId: this.runner.session.id }, {
+        correlationId: `voice-local-cue-${generation}`,
+      });
+    } catch (error) {
+      this.emitError('tts', safeErrorCode(error), generation);
+      if (finishToIdle) this.emit({ type: 'assistantTextComplete', text, generation });
+      return;
+    }
+    this.activeCue = handle;
+    let speechStarted = false;
+    const observer = (async (): Promise<void> => {
+      for await (const event of handle.events()) {
+        if (generation !== this.generation || this.closed) continue;
+        if (event.type === 'playback_started') {
+          speechStarted = true;
+          this.setState('speaking', generation);
+          this.emit({ type: 'assistantSpeechStart', text, generation });
+        }
+      }
+    })();
+    try {
+      await handle.pushText(text);
+      await handle.endInput();
+      const result = await handle.result();
+      await observer;
+      if (result.status === 'failed' && generation === this.generation) this.emitError('playback', result.code, generation);
+    } catch (error) {
+      if (generation === this.generation) this.emitError('playback', safeErrorCode(error), generation);
+    } finally {
+      if (this.activeCue === handle) this.activeCue = undefined;
+      if (generation === this.generation && !this.closed) {
+        if (speechStarted) this.emit({ type: 'assistantSpeechEnd', generation });
+        if (finishToIdle) this.setState('idle', generation);
+        else this.setState('listening', generation);
+      }
+      if (finishToIdle) this.emit({ type: 'assistantTextComplete', text, generation });
     }
   }
 
@@ -303,7 +550,14 @@ export class VoiceConversationOrchestrator {
     }
     await synthesis.handle.result();
     await synthesis.observer;
+    this.emitAssistantSpeechEnd(synthesis);
     if (this.activeSynthesis === synthesis) this.activeSynthesis = undefined;
+  }
+
+  private emitAssistantSpeechEnd(synthesis: ActiveSynthesis): void {
+    if (!synthesis.speechStarted || synthesis.speechEnded) return;
+    synthesis.speechEnded = true;
+    this.emit({ type: 'assistantSpeechEnd', generation: synthesis.generation });
   }
 
   private isCurrent(job: FinalTranscript, turn: ActiveTurn): boolean {
