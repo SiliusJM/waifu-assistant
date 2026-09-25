@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { BoundedAsyncQueue } from '../bounded-async-queue.js';
 import { VoiceError } from '../voice-errors.js';
+import { normalizeTextForSpeech } from '../speech-text-normalizer.js';
 import type { AudioFormat, VoiceProviderOptions } from '../voice-types.js';
 import type { AudioStreamChunk, AudioStreamResult, StreamingSynthesisRequest, StreamingTTSOperation, StreamingTTSProvider } from '../streaming-types.js';
 import type { PiperSpanishTtsModelPaths } from './piper-spanish-tts-model.js';
@@ -76,9 +77,14 @@ function nextPhraseEnd(text: string, ending: boolean): number {
   if (text.length >= MAX_PHRASE_CHARACTERS) {
     const boundary = text.lastIndexOf(' ', MAX_PHRASE_CHARACTERS);
     const end = boundary >= Math.floor(MAX_PHRASE_CHARACTERS * 0.65) ? boundary : MAX_PHRASE_CHARACTERS;
-    const before = text.charCodeAt(end - 1);
-    const after = text.charCodeAt(end);
-    return before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff ? end - 1 : end;
+    if (end === boundary) return end;
+    let graphemeBoundary = 0;
+    for (const item of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)) {
+      const nextBoundary = item.index + item.segment.length;
+      if (nextBoundary > end) break;
+      graphemeBoundary = nextBoundary;
+    }
+    return graphemeBoundary || end;
   }
   return ending ? text.length : 0;
 }
@@ -165,10 +171,12 @@ class SherpaVitsTtsOperation implements StreamingTTSOperation {
 
   private async synthesizePhrase(text: string): Promise<void> {
     if (this.signal.aborted) throw new VoiceError('Local speech synthesis was cancelled.', 'VOICE_CANCELLATION_ERROR');
-    if (Array.from(text).length > MAX_PHRASE_CHARACTERS) throw new VoiceError('A TTS phrase exceeded its safe size limit.', 'VOICE_BACKPRESSURE_ERROR');
+    const spokenText = normalizeTextForSpeech(text);
+    if (!spokenText) return;
+    if (Array.from(spokenText).length > MAX_PHRASE_CHARACTERS) throw new VoiceError('A TTS phrase exceeded its safe size limit.', 'VOICE_BACKPRESSURE_ERROR');
     let generated: GeneratedAudio;
     try {
-      generated = await this.engine.generateAsync({ text, sid: 0, speed: 1, onProgress: () => !this.signal.aborted });
+      generated = await this.engine.generateAsync({ text: spokenText, sid: 0, speed: 1, onProgress: () => !this.signal.aborted });
     } catch {
       if (this.signal.aborted) throw new VoiceError('Local speech synthesis was cancelled.', 'VOICE_CANCELLATION_ERROR');
       throw new VoiceError('Local speech synthesis failed.', 'VOICE_TTS_ERROR');

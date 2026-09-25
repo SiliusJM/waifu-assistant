@@ -14,6 +14,7 @@ import {
 } from '../../src/voice/local/windows-cpal-audio-output-provider.js';
 import type { AudioStreamChunk } from '../../src/voice/streaming-types.js';
 import { VoiceError } from '../../src/voice/voice-errors.js';
+import { normalizeTextForSpeech } from '../../src/voice/speech-text-normalizer.js';
 
 async function temporaryModel(): Promise<{ readonly root: string; readonly repositoryRoot: string; readonly paths: { readonly model: string; readonly tokens: string; readonly dataDir: string } }> {
   const root = await mkdtemp(join(tmpdir(), 'waifu-local-tts-test-'));
@@ -129,8 +130,76 @@ test('TTS phrases are split on punctuation and bounded by the configured charact
   assert.equal(getNextTtsPhraseEnd('a'.repeat(321), false), 320);
   assert.equal(getNextTtsPhraseEnd('c'.repeat(200) + ' ' + 'd'.repeat(130), false), 320);
   assert.equal(getNextTtsPhraseEnd('a'.repeat(319) + '😀' + 'b', false), 319);
+  assert.equal(getNextTtsPhraseEnd('a'.repeat(319) + '👩‍💻' + 'b', false), 319);
   assert.equal(getNextTtsPhraseEnd('Hola', true), 4);
   assert.equal(getNextTtsPhraseEnd('Hola', false), 0);
+});
+
+test('speech text normalization omits emoji while preserving language, code, and natural punctuation', () => {
+  assert.equal(normalizeTextForSpeech('¡Hola! 👋 Espero que estés bien.'), '¡Hola! Espero que estés bien.');
+  assert.equal(normalizeTextForSpeech('Hola 👋🌟 mundo 👍🏽.'), 'Hola mundo.');
+  assert.equal(normalizeTextForSpeech('Hola 👩🏽‍💻, ¿cómo estás?'), 'Hola, ¿cómo estás?');
+  assert.equal(normalizeTextForSpeech('Hola👋, ¿cómo estás?'), 'Hola, ¿cómo estás?');
+  assert.equal(normalizeTextForSpeech('Español: acción y corazón.'), 'Español: acción y corazón.');
+  assert.equal(normalizeTextForSpeech('The SpringBootClient is ready.'), 'The SpringBootClient is ready.');
+  assert.equal(normalizeTextForSpeech('日本語の会話です。'), '日本語の会話です。');
+  assert.equal(normalizeTextForSpeech('const yukiResponse = "ready";'), 'const yukiResponse = "ready";');
+  assert.equal(normalizeTextForSpeech('👋'), '');
+  assert.equal(normalizeTextForSpeech('👋!'), '');
+});
+
+test('local TTS normalizes complete phrase units across split emoji deltas and suppresses emoji-only speech', async () => {
+  const temporary = await temporaryModel();
+  const runtime = fakeTtsRuntime(new Float32Array(1000).fill(0.25));
+  try {
+    const provider = new SherpaVitsTTSProvider(temporary.paths, { runtime, repositoryRoot: temporary.repositoryRoot });
+    const operation = await provider.startSynthesis({ sessionId: 'speech-normalization' }, {
+      signal: new AbortController().signal,
+      correlationId: 'speech-normalization',
+    });
+    await operation.pushText('¡Hola! 👩');
+    await operation.pushText('‍💻, espero que estés bien. ');
+    await operation.pushText('日本語と SpringBootClient.');
+    await operation.endInput();
+    const chunks = [];
+    for await (const chunk of operation.chunks()) chunks.push(chunk);
+    assert.deepEqual(runtime.calls, ['¡Hola!', 'espero que estés bien.', '日本語と SpringBootClient.']);
+    assert.ok(chunks.length > 0);
+    await operation.close();
+
+    const emojiOnlyRuntime = fakeTtsRuntime();
+    const emojiOnlyProvider = new SherpaVitsTTSProvider(temporary.paths, { runtime: emojiOnlyRuntime, repositoryRoot: temporary.repositoryRoot });
+    const emojiOnly = await emojiOnlyProvider.startSynthesis({ sessionId: 'emoji-only' }, {
+      signal: new AbortController().signal,
+      correlationId: 'emoji-only',
+    });
+    await emojiOnly.pushText('👋');
+    await emojiOnly.pushText(' Sigue con texto normal.');
+    await emojiOnly.endInput();
+    const emojiChunks = [];
+    for await (const chunk of emojiOnly.chunks()) emojiChunks.push(chunk);
+    assert.deepEqual(emojiOnlyRuntime.calls, ['Sigue con texto normal.']);
+    assert.ok(emojiChunks.length > 0);
+    assert.equal((await emojiOnly.completed()).chunkCount, emojiChunks.length);
+    await emojiOnly.close();
+
+    const onlyEmojiRuntime = fakeTtsRuntime();
+    const onlyEmojiProvider = new SherpaVitsTTSProvider(temporary.paths, { runtime: onlyEmojiRuntime, repositoryRoot: temporary.repositoryRoot });
+    const onlyEmoji = await onlyEmojiProvider.startSynthesis({ sessionId: 'only-emoji' }, {
+      signal: new AbortController().signal,
+      correlationId: 'only-emoji',
+    });
+    await onlyEmoji.pushText('👋');
+    await onlyEmoji.endInput();
+    const onlyEmojiChunks = [];
+    for await (const chunk of onlyEmoji.chunks()) onlyEmojiChunks.push(chunk);
+    assert.deepEqual(onlyEmojiRuntime.calls, []);
+    assert.deepEqual(onlyEmojiChunks, []);
+    assert.equal((await onlyEmoji.completed()).chunkCount, 0);
+    await onlyEmoji.close();
+  } finally {
+    await rm(temporary.root, { recursive: true, force: true });
+  }
 });
 
 interface FakeCpalState {

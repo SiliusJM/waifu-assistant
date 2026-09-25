@@ -511,6 +511,23 @@ test('confirmed speech stops playback immediately, ignores noise, and resumes wi
   assert.equal(orchestrator.state, 'idle');
 });
 
+test('assistant display and Session keep original emoji while speech normalization stays at local TTS boundary', async () => {
+  const original = '¡Hola! 👋 Espero que estés bien.';
+  const provider = new ScriptedProvider(async function* () {
+    yield { type: 'text_delta', delta: '¡Hola! ' };
+    yield { type: 'text_delta', delta: '👋 Espero que estés bien.' };
+    yield { type: 'completed', response: response(original) };
+  });
+  const { runner, orchestrator, events } = setup(provider);
+  orchestrator.acceptTranscription({ type: 'final', text: 'Hola Yuki.' });
+  await orchestrator.whenIdle();
+
+  assert.equal(events.filter((event) => event.type === 'assistantTextDelta').map((event) => event.text).join(''), original);
+  assert.equal(events.find((event) => event.type === 'assistantTextComplete')?.text, original);
+  assert.equal(runner.session.getMessages().find((message) => message.role === 'assistant')?.content, original);
+  assert.equal(provider.requests.length, 1);
+});
+
 test('accepted multilingual final transcript reaches the same Session without translation or entity normalization', async () => {
   const { runner, orchestrator } = setup(fixedProvider('Entendido.'));
   const transcript = 'Yuki revisa Spring Boot and QueryDSL: 愛より確かなものなんてない — Ai yori tashikana mono nante nai.';
