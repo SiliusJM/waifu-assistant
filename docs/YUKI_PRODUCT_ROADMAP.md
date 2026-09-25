@@ -169,3 +169,38 @@ After natural voice is stable:
 - For human-required acceptance, surface the action prominently before anything else.
 - Real hardware acceptance must never be reported from mocks.
 - Keep provider credentials, local personal configuration and large model files out of Git.
+
+
+## Provider / model priority and automatic fallback
+
+Yuki should support a locally configurable preferred provider/model with an ordered fallback list instead of depending permanently on one provider.
+
+Requirements:
+- preserve current provider compatibility, streaming, cancellation and latest-input-wins behavior;
+- allow changing the preferred provider/model without redesigning Yuki;
+- fall back only on explicitly classified recoverable failures such as availability, timeout, quota/rate-limit, lost authorization or missing configuration;
+- do not hide programming errors, invalid payloads, security failures or serious configuration errors by silently changing provider;
+- avoid running multiple providers concurrently for the same turn unless a future design explicitly justifies it;
+- record safely which provider/model actually served a turn without exposing credentials;
+- notify the user briefly when a meaningful provider switch occurs, without noisy per-turn messages;
+- support cooldown/backoff and later return to the preferred provider without oscillation;
+- allow a basic/free fallback when configured;
+- keep API keys and personal provider configuration out of Git.
+
+## Crash recovery / pending action journal
+
+Yuki should survive crashes, power loss, terminal closure and Windows restart without losing the state of actions that were waiting for confirmation or were in progress.
+
+Requirements:
+- keep a local, versioned and bounded action journal outside Git;
+- a restart must never convert an unconfirmed action into an authorized one;
+- on startup, surface recoverable pending actions briefly and allow inspect, confirm, discard or defer;
+- persist only the minimum data necessary to explain and recover the action, without unnecessary secrets;
+- use atomic writes and handle missing/corrupt files, schema evolution, cleanup and expiration;
+- distinguish states equivalent to prepared, awaiting confirmation, confirmed, executing, completed, cancelled/discarded and failed;
+- use action/operation IDs plus idempotency or reconciliation where supported to reduce duplicate remote actions after a crash;
+- never claim exactly-once delivery where an external service cannot guarantee it;
+- an action that may have completed remotely but not locally must be reconciled before retrying when possible;
+- completed actions must not reappear as pending forever.
+
+These two capabilities should be implemented as separate bounded milestones rather than one large redesign.
