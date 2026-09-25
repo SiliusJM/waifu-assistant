@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { VoiceError } from '../voice-errors.js';
-import type { VoiceProviderOptions, VoiceTerminationReason } from '../voice-types.js';
+import type { AudioChunk, VoiceProviderOptions, VoiceTerminationReason } from '../voice-types.js';
 import { CANONICAL_AUDIO_FORMAT } from '../voice-types.js';
 import type { AudioInputStream, StreamingAudioInputProvider } from '../streaming-types.js';
 import { CaptureQueue } from './capture-queue.js';
@@ -37,14 +37,14 @@ interface CpalDevice {
     config: CpalConfig,
     sampleFormat: 'f32',
     onData: (samples: Float32Array) => void,
-    onError: (error: { code?: string }) => void,
-  ): { play(): void; close(): void };
-  close(): void;
+    onError: (error: { code?: string; operation?: string }) => void,
+  ): { play(): void; close(): void | Promise<void> };
+  close(): void | Promise<void>;
 }
 
 interface CpalHost {
   defaultInputDevice(): CpalDevice | null;
-  close(): void;
+  close(): void | Promise<void>;
 }
 
 export interface CpalRuntime {
@@ -53,10 +53,38 @@ export interface CpalRuntime {
 }
 
 function loadCpal(): CpalRuntime {
+  return createRequire(import.meta.url)('node-cpal') as CpalRuntime;
+}
+
+export type MicrophoneDiagnosticStage =
+  | 'backend-load'
+  | 'host-open'
+  | 'device-select'
+  | 'config-select'
+  | 'config-negotiate'
+  | 'stream-build'
+  | 'stream-start'
+  | 'stream-callback'
+  | 'stream-close'
+  | 'device-close'
+  | 'host-close';
+
+export interface MicrophoneDiagnosticEvent {
+  readonly stage: MicrophoneDiagnosticStage;
+  /** Native CPAL code only; raw messages, paths and device identifiers are intentionally omitted. */
+  readonly code?: string;
+  readonly operation?: string;
+}
+
+function safeNativeField(error: unknown, field: 'code' | 'operation'): string | undefined {
   try {
-    return createRequire(import.meta.url)('node-cpal') as CpalRuntime;
+    if (typeof error !== 'object' || error === null || !(field in error)) return undefined;
+    const value: unknown = (error as Record<string, unknown>)[field];
+    if (typeof value !== 'string') return undefined;
+    const pattern = field === 'code' ? /^[A-Z][A-Z0-9_]{0,63}$/u : /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u;
+    return pattern.test(value) ? value : undefined;
   } catch {
-    throw new VoiceError('The local microphone backend is unavailable.', 'VOICE_CAPTURE_ERROR');
+    return undefined;
   }
 }
 
@@ -93,6 +121,8 @@ export interface WindowsMicrophoneInputOptions {
   readonly maxDurationSeconds?: number;
   readonly queueCapacity?: number;
   readonly runtime?: CpalRuntime;
+  /** Opt-in, metadata-only diagnostics. The callback never receives native messages or audio. */
+  readonly onDiagnostic?: (event: MicrophoneDiagnosticEvent) => void;
 }
 
 export class WindowsMicrophoneInputProvider implements StreamingAudioInputProvider {
@@ -100,6 +130,7 @@ export class WindowsMicrophoneInputProvider implements StreamingAudioInputProvid
   private readonly maxDurationSamples: number;
   private readonly queueCapacity: number;
   private readonly runtime?: CpalRuntime;
+  private readonly onDiagnostic?: (event: MicrophoneDiagnosticEvent) => void;
   private activeStop: ((reason: VoiceTerminationReason) => Promise<void>) | undefined;
   private readiness: Promise<void> | undefined;
   private resolveReadiness: (() => void) | undefined;
@@ -116,6 +147,18 @@ export class WindowsMicrophoneInputProvider implements StreamingAudioInputProvid
     this.maxDurationSamples = duration * TARGET_RATE;
     this.queueCapacity = capacity;
     this.runtime = options.runtime;
+    this.onDiagnostic = options.onDiagnostic;
+  }
+
+  private reportDiagnostic(stage: MicrophoneDiagnosticStage, error?: unknown): void {
+    if (!this.onDiagnostic) return;
+    const code = safeNativeField(error, 'code');
+    const operation = safeNativeField(error, 'operation');
+    try {
+      this.onDiagnostic({ stage, ...(code ? { code } : {}), ...(operation ? { operation } : {}) });
+    } catch {
+      // Diagnostics are observational only and must never alter capture behavior.
+    }
   }
 
   async startCapture(options: VoiceProviderOptions): Promise<AudioInputStream> {
@@ -129,24 +172,42 @@ export class WindowsMicrophoneInputProvider implements StreamingAudioInputProvid
     const startSignal = this.nextCaptureStart;
     this.nextCaptureStart = deferred<{ readonly readiness: Promise<void> }>();
     startSignal.resolve({ readiness: this.readiness });
-    const cpal = this.runtime ?? loadCpal();
-    let host: CpalHost;
-    let device: CpalDevice;
+    let cpal: CpalRuntime;
+    try {
+      cpal = this.runtime ?? loadCpal();
+    } catch (error) {
+      this.reportDiagnostic('backend-load', error);
+      const publicError = new VoiceError('The local microphone backend is unavailable.', 'VOICE_CAPTURE_ERROR');
+      this.rejectReadiness?.(publicError);
+      throw publicError;
+    }
+    let host: CpalHost | undefined;
+    let device: CpalDevice | undefined;
+    let setupStage: 'host-open' | 'device-select' = 'host-open';
     try {
       host = cpal.defaultHost();
+      setupStage = 'device-select';
       const selected = host.defaultInputDevice();
       if (!selected) {
-        host.close();
         throw new VoiceError('No default microphone is available.', 'VOICE_CAPTURE_ERROR');
       }
       device = selected;
     } catch (error) {
-      this.rejectReadiness?.(error instanceof Error ? error : new VoiceError('The microphone could not start capture.', 'VOICE_CAPTURE_ERROR'));
-      if (error instanceof VoiceError) throw error;
-      throw new VoiceError('The default microphone could not be opened.', 'VOICE_CAPTURE_ERROR');
+      this.reportDiagnostic(setupStage, error);
+      try { host?.close(); } catch (closeError) { this.reportDiagnostic('host-close', closeError); }
+      const publicError = error instanceof VoiceError
+        ? error
+        : new VoiceError('The default microphone could not be opened.', 'VOICE_CAPTURE_ERROR');
+      this.rejectReadiness?.(publicError);
+      throw publicError;
     }
 
-    const queue = new CaptureQueue(this.queueCapacity);
+    // The setup block above either assigns both native handles or throws.
+    const captureHost = host as CpalHost;
+    const captureDevice = device as CpalDevice;
+
+    const rawQueue = new CaptureQueue<Float32Array>(this.queueCapacity);
+    const queue = new CaptureQueue<AudioChunk>(this.queueCapacity);
     let stream: ReturnType<CpalDevice['buildInputStream']> | undefined;
     let sequence = 0;
     let outputSamples = 0;
@@ -155,21 +216,40 @@ export class WindowsMicrophoneInputProvider implements StreamingAudioInputProvid
     let pendingLength = 0;
     let stopped = false;
     let stopping = false;
+    let discarding = false;
+    let rawPump: Promise<void> | undefined;
+    let selectedConfig: CpalConfig | undefined;
+    let releasePromise: Promise<void> | undefined;
     const release = async (reason: VoiceTerminationReason): Promise<void> => {
-      if (stopped || stopping) return;
+      if (releasePromise) return releasePromise;
+      if (stopped) return;
       stopping = true;
       options.signal.removeEventListener('abort', onAbort);
-      if (reason === 'completed') {
-        if (pendingLength > 0) emitPending();
-        queue.finish();
-      } else queue.discard();
-      try { stream?.close(); } catch { /* Native stream close is best-effort; queue is already terminal. */ }
-      try { device.close(); } catch { /* Native device release is best-effort. */ }
-      try { host.close(); } catch { /* Native host release is best-effort. */ }
-      stopped = true;
-      stopping = false;
-      if (this.activeStop === stop) this.activeStop = undefined;
-      if (reason !== 'completed') this.rejectReadiness?.(new VoiceError('Microphone capture ended before it became ready.', 'VOICE_CAPTURE_ERROR'));
+      let resolveRelease!: () => void;
+      releasePromise = new Promise<void>((resolve) => { resolveRelease = resolve; });
+      if (reason === 'completed') rawQueue.finish();
+      else {
+        discarding = true;
+        rawQueue.discard();
+        queue.discard();
+      }
+      queueMicrotask(() => {
+        void (async () => {
+          if (reason === 'completed') {
+            try { await rawPump; } catch { /* The pump reports failures through the output queue. */ }
+            queue.finish();
+          }
+          try { await stream?.close(); } catch (error) { this.reportDiagnostic('stream-close', error); }
+          try { await captureDevice.close(); } catch (error) { this.reportDiagnostic('device-close', error); }
+          try { await captureHost.close(); } catch (error) { this.reportDiagnostic('host-close', error); }
+          stopped = true;
+          stopping = false;
+          if (this.activeStop === stop) this.activeStop = undefined;
+          if (reason !== 'completed') this.rejectReadiness?.(new VoiceError('Microphone capture ended before it became ready.', 'VOICE_CAPTURE_ERROR'));
+          resolveRelease();
+        })();
+      });
+      return releasePromise;
     };
     const stop = release;
     const onAbort = (): void => { void release('cancelled'); };
@@ -191,49 +271,79 @@ export class WindowsMicrophoneInputProvider implements StreamingAudioInputProvid
       pendingLength = 0;
     };
 
+    const pumpRaw = async (): Promise<void> => {
+      try {
+        for await (const input of rawQueue) {
+          if (!selectedConfig) throw new VoiceError('The microphone configuration is unavailable.', 'VOICE_CAPTURE_ERROR');
+          const converted = convertFloatInputToPcm16Mono(input, selectedConfig.channels(), selectedConfig.sampleRate(), resamplePhase);
+          resamplePhase = converted.phase;
+          const source = new DataView(converted.data.buffer, converted.data.byteOffset, converted.data.byteLength);
+          for (let offset = 0; offset < converted.data.byteLength; offset += 2) {
+            if (outputSamples >= this.maxDurationSamples) {
+              fail(new VoiceError('Microphone capture reached its configured duration limit.', 'VOICE_TIMEOUT_ERROR'));
+              return;
+            }
+            pending[pendingLength++] = source.getInt16(offset, true);
+            outputSamples += 1;
+            if (pendingLength === CHUNK_SAMPLES) emitPending();
+            if (discarding || stopped) return;
+          }
+        }
+        if (!discarding && !stopped && pendingLength > 0) emitPending();
+      } catch (error) {
+        fail(error instanceof Error ? error : new VoiceError('The microphone returned invalid audio.', 'VOICE_AUDIO_FORMAT_ERROR'));
+        throw error;
+      }
+    };
+
+    let stage: MicrophoneDiagnosticStage = 'config-select';
     try {
-      let config = device.defaultInputConfig();
-      if (config.sampleFormat().value !== cpal.SampleFormat.F32.value) {
-        const floatConfig = [...device.supportedInputConfigs()].find((candidate) => (
+      selectedConfig = captureDevice.defaultInputConfig();
+      const defaultConfig = selectedConfig;
+      if (defaultConfig.sampleFormat().value !== cpal.SampleFormat.F32.value) {
+        stage = 'config-negotiate';
+        const floatConfig = [...captureDevice.supportedInputConfigs()].find((candidate) => (
           candidate.sampleFormat().value === cpal.SampleFormat.F32.value
-          && candidate.channels() === config.channels()
-          && candidate.containsRate(config.sampleRate())
-        )) ?? [...device.supportedInputConfigs()].find((candidate) => (
+          && candidate.channels() === defaultConfig.channels()
+          && candidate.containsRate(defaultConfig.sampleRate())
+        )) ?? [...captureDevice.supportedInputConfigs()].find((candidate) => (
           candidate.sampleFormat().value === cpal.SampleFormat.F32.value
         ));
         if (!floatConfig) throw new VoiceError('The microphone has no supported float input format.', 'VOICE_AUDIO_FORMAT_ERROR');
-        config = floatConfig.tryWithSampleRate(config.sampleRate())
+        selectedConfig = floatConfig.tryWithSampleRate(defaultConfig.sampleRate())
           ?? floatConfig.tryWithStandardSampleRate()
           ?? floatConfig.withMaxSampleRate();
       }
-      stream = device.buildInputStream(config, 'f32', (input) => {
-        if (stopped) return;
-        const converted = convertFloatInputToPcm16Mono(input, config.channels(), config.sampleRate(), resamplePhase);
-        resamplePhase = converted.phase;
-        const source = new DataView(converted.data.buffer, converted.data.byteOffset, converted.data.byteLength);
-        for (let offset = 0; offset < converted.data.byteLength; offset += 2) {
-          if (outputSamples >= this.maxDurationSamples) {
-            fail(new VoiceError('Microphone capture reached its configured duration limit.', 'VOICE_TIMEOUT_ERROR'));
-            return;
-          }
-          pending[pendingLength++] = source.getInt16(offset, true);
-          outputSamples += 1;
-          if (pendingLength === CHUNK_SAMPLES) emitPending();
-          if (stopped) return;
+      const config = selectedConfig;
+      stage = 'stream-build';
+      stream = captureDevice.buildInputStream(config, 'f32', (input) => {
+        if (stopping || stopped) return;
+        if (input.length > 0) this.resolveReadiness?.();
+        if (!rawQueue.push(new Float32Array(input))) {
+          fail(new VoiceError('Microphone capture exceeded its in-memory buffer limit.', 'VOICE_BACKPRESSURE_ERROR'));
         }
-      }, () => fail(new VoiceError('The microphone capture stream failed.', 'VOICE_CAPTURE_ERROR')));
+      }, (error) => {
+        if (stopping || stopped) return;
+        this.reportDiagnostic('stream-callback', error);
+        fail(new VoiceError('The microphone capture stream failed.', 'VOICE_CAPTURE_ERROR'));
+      });
       this.activeStop = stop;
+      rawPump = pumpRaw();
+      void rawPump.catch(() => undefined);
       options.signal.addEventListener('abort', onAbort, { once: true });
       if (options.signal.aborted) onAbort();
       else {
+        stage = 'stream-start';
         stream.play();
-        this.resolveReadiness?.();
       }
     } catch (error) {
+      this.reportDiagnostic(stage, error);
       await release('failed');
-      this.rejectReadiness?.(error instanceof Error ? error : new VoiceError('The microphone could not start capture.', 'VOICE_CAPTURE_ERROR'));
-      if (error instanceof VoiceError) throw error;
-      throw new VoiceError('The microphone could not start capture.', 'VOICE_CAPTURE_ERROR');
+      const publicError = error instanceof VoiceError
+        ? error
+        : new VoiceError('The microphone could not start capture.', 'VOICE_CAPTURE_ERROR');
+      this.rejectReadiness?.(publicError);
+      throw publicError;
     }
 
     return {
@@ -257,6 +367,11 @@ export class WindowsMicrophoneInputProvider implements StreamingAudioInputProvid
         }),
       ]);
       await start.readiness;
+    } catch (error) {
+      if (error instanceof VoiceError && error.code === 'VOICE_TIMEOUT_ERROR') {
+        await this.activeStop?.('failed');
+      }
+      throw error;
     } finally {
       if (timer) clearTimeout(timer);
     }

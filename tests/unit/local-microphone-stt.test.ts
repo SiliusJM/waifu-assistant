@@ -39,6 +39,81 @@ function fakeCpal(samples = new Float32Array(6400).fill(0.25)): CpalRuntime & { 
   return { defaultHost: () => host, SampleFormat: { F32: { value: 'f32' } }, counts } as unknown as CpalRuntime & { readonly counts: { closed: number; started: number } };
 }
 
+interface FakeInputCallbacks {
+  readonly onData: (data: Float32Array) => void;
+  readonly onError: (error: { code?: string; operation?: string }) => void;
+}
+
+interface LifecycleCpalOptions {
+  readonly emitOnPlay?: boolean;
+  readonly throwDeviceSelectionOnce?: boolean;
+  readonly throwOnFirstPlay?: boolean;
+  readonly errorDuringClose?: boolean;
+  readonly deferClose?: boolean;
+}
+
+function lifecycleCpal(options: LifecycleCpalOptions = {}): CpalRuntime & {
+  readonly state: {
+    readonly callbacks: FakeInputCallbacks[];
+    readonly closeResolvers: Array<() => void>;
+    readonly counts: { hostsOpened: number; hostsClosed: number; devicesClosed: number; streamsBuilt: number; streamsClosed: number; started: number };
+  };
+} {
+  const counts = { hostsOpened: 0, hostsClosed: 0, devicesClosed: 0, streamsBuilt: 0, streamsClosed: 0, started: 0 };
+  const callbacks: FakeInputCallbacks[] = [];
+  const closeResolvers: Array<() => void> = [];
+  const samples = new Float32Array(19200).fill(0.25);
+  const config = {
+    channels: () => 2,
+    sampleRate: () => 32000,
+    sampleFormat: () => ({ value: 'f32' }),
+    containsRate: (rate: number) => rate === 32000,
+    tryWithSampleRate: (rate: number) => rate === 32000 ? config : null,
+    tryWithStandardSampleRate: () => config,
+    withMaxSampleRate: () => config,
+  };
+  const runtime = {
+    defaultHost: () => {
+      const hostNumber = ++counts.hostsOpened;
+      return {
+        defaultInputDevice: () => {
+          if (options.throwDeviceSelectionOnce && hostNumber === 1) {
+            throw Object.assign(new Error('native detail must not escape'), { code: 'DEVICE_BUSY', operation: 'defaultInputDevice' });
+          }
+          return {
+            defaultInputConfig: () => config,
+            supportedInputConfigs: () => [config],
+            buildInputStream: (_inputConfig: unknown, _format: string, onData: FakeInputCallbacks['onData'], onError: FakeInputCallbacks['onError']) => {
+              counts.streamsBuilt += 1;
+              callbacks.push({ onData, onError });
+              const streamNumber = counts.streamsBuilt;
+              return {
+                play: () => {
+                  counts.started += 1;
+                  if (options.throwOnFirstPlay && streamNumber === 1) {
+                    throw Object.assign(new Error('native detail must not escape'), { code: 'DEVICE_BUSY', operation: 'play' });
+                  }
+                  if (options.emitOnPlay ?? true) onData(samples);
+                },
+                close: () => {
+                  counts.streamsClosed += 1;
+                  if (options.errorDuringClose) onError({ code: 'XRUN', operation: 'inputStream' });
+                  if (options.deferClose) return new Promise<void>((resolve) => closeResolvers.push(resolve));
+                },
+              };
+            },
+            close: () => { counts.devicesClosed += 1; },
+          };
+        },
+        close: () => { counts.hostsClosed += 1; },
+      };
+    },
+    SampleFormat: { F32: { value: 'f32' } },
+    state: { callbacks, closeResolvers, counts },
+  };
+  return runtime as unknown as CpalRuntime & typeof runtime;
+}
+
 async function temporaryModelFiles(): Promise<{ readonly directory: string; readonly paths: { encoder: string; decoder: string; tokens: string } }> {
   const directory = await mkdtemp(join(tmpdir(), 'waifu-local-stt-test-'));
   const paths = { encoder: join(directory, 'encoder.onnx'), decoder: join(directory, 'decoder.onnx'), tokens: join(directory, 'tokens.txt') };
@@ -97,6 +172,172 @@ test('aborting microphone capture discards queued audio and releases the native 
   const iterator = stream.chunks()[Symbol.asyncIterator]();
   assert.equal((await iterator.next()).done, true);
   assert.equal(runtime.counts.closed, 1);
+});
+
+test('a normal stop drains the final partial PCM chunk already received from CPAL', async () => {
+  const runtime = fakeCpal(new Float32Array(800).fill(0.25));
+  const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
+  const microphone = new WindowsMicrophoneInputProvider({ runtime, queueCapacity: 2 });
+  const stream = await microphone.startCapture({ signal: new AbortController().signal, correlationId: 'partial-stop' });
+  await microphone.stopCapture();
+  const iterator = stream.chunks()[Symbol.asyncIterator]();
+  const finalChunk = await iterator.next();
+  assert.equal(finalChunk.done, false);
+  assert.equal(finalChunk.value?.data.byteLength, 400);
+  assert.equal((await iterator.next()).done, true);
+});
+
+test('microphone readiness waits for real input and the same provider can stop and reopen', async () => {
+  const runtime = lifecycleCpal({ emitOnPlay: false });
+  const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
+  const microphone = new WindowsMicrophoneInputProvider({ runtime });
+
+  for (let capture = 0; capture < 2; capture += 1) {
+    let ready = false;
+    const readiness = microphone.waitUntilReady().then(() => { ready = true; });
+    const stream = await microphone.startCapture({ signal: new AbortController().signal, correlationId: `reopen-${capture}` });
+    assert.equal(ready, false, 'play() alone must not report input readiness');
+    runtime.state.callbacks[capture]?.onData(new Float32Array(19200).fill(0.25));
+    await readiness;
+    assert.equal(ready, true);
+    const iterator = stream.chunks()[Symbol.asyncIterator]();
+    for (let chunk = 0; chunk < 3; chunk += 1) assert.equal((await iterator.next()).done, false);
+    await stream.stop();
+    runtime.state.callbacks[capture]?.onData(new Float32Array(19200).fill(0.25));
+    runtime.state.callbacks[capture]?.onError({ code: 'XRUN', operation: 'staleCallback' });
+    assert.equal((await iterator.next()).done, true, 'callbacks arriving after stop must not revive the queue');
+  }
+
+  assert.deepEqual(runtime.state.counts, {
+    hostsOpened: 2, hostsClosed: 2, devicesClosed: 2, streamsBuilt: 2, streamsClosed: 2, started: 2,
+  });
+});
+
+test('device-selection failure preserves only safe native diagnostics and closes the host before retry', async () => {
+  const runtime = lifecycleCpal({ throwDeviceSelectionOnce: true });
+  const diagnostics: unknown[] = [];
+  const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
+  const microphone = new WindowsMicrophoneInputProvider({ runtime, onDiagnostic: (event) => diagnostics.push(event) });
+
+  await assert.rejects(
+    microphone.startCapture({ signal: new AbortController().signal, correlationId: 'native-device-error' }),
+    (error: unknown) => error instanceof VoiceError && error.code === 'VOICE_CAPTURE_ERROR',
+  );
+  assert.deepEqual(diagnostics, [{ stage: 'device-select', code: 'DEVICE_BUSY', operation: 'defaultInputDevice' }]);
+  assert.equal(JSON.stringify(diagnostics).includes('native detail'), false);
+  assert.equal(runtime.state.counts.hostsClosed, 1, 'host must close when device selection throws');
+
+  await microphone.startCapture({ signal: new AbortController().signal, correlationId: 'retry-device-error' });
+  await microphone.stopCapture();
+  assert.equal(runtime.state.counts.hostsOpened, 2);
+  assert.equal(runtime.state.counts.hostsClosed, 2);
+});
+
+test('stream-start native errors remain opt-in diagnostics and cleanup permits a retry', async () => {
+  const runtime = lifecycleCpal({ throwOnFirstPlay: true });
+  const diagnostics: unknown[] = [];
+  const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
+  const microphone = new WindowsMicrophoneInputProvider({ runtime, onDiagnostic: (event) => diagnostics.push(event) });
+
+  await assert.rejects(
+    microphone.startCapture({ signal: new AbortController().signal, correlationId: 'native-play-error' }),
+    (error: unknown) => error instanceof VoiceError && error.code === 'VOICE_CAPTURE_ERROR',
+  );
+  assert.deepEqual(diagnostics, [{ stage: 'stream-start', code: 'DEVICE_BUSY', operation: 'play' }]);
+  await microphone.startCapture({ signal: new AbortController().signal, correlationId: 'retry-play-error' });
+  await microphone.stopCapture();
+  assert.equal(runtime.state.counts.streamsClosed, 2);
+  assert.equal(runtime.state.counts.hostsClosed, 2);
+});
+
+test('asynchronous CPAL stream errors expose native code and operation without changing the public capture error', async () => {
+  const runtime = lifecycleCpal({ emitOnPlay: false });
+  const diagnostics: unknown[] = [];
+  const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
+  const microphone = new WindowsMicrophoneInputProvider({ runtime, onDiagnostic: (event) => diagnostics.push(event) });
+  const stream = await microphone.startCapture({ signal: new AbortController().signal, correlationId: 'native-callback-error' });
+  const pendingChunk = stream.chunks()[Symbol.asyncIterator]().next();
+  runtime.state.callbacks[0]?.onError({ code: 'XRUN', operation: 'inputStream' });
+  await assert.rejects(
+    pendingChunk,
+    (error: unknown) => error instanceof VoiceError && error.code === 'VOICE_CAPTURE_ERROR',
+  );
+  await microphone.stopCapture();
+  assert.deepEqual(diagnostics, [{ stage: 'stream-callback', code: 'XRUN', operation: 'inputStream' }]);
+
+  await microphone.startCapture({ signal: new AbortController().signal, correlationId: 'retry-callback-error' });
+  await microphone.stopCapture();
+  assert.equal(runtime.state.counts.hostsOpened, 2);
+  assert.equal(runtime.state.counts.hostsClosed, 2);
+});
+
+test('aborted capture can be reopened and concurrent opens are rejected without a second native stream', async () => {
+  const runtime = lifecycleCpal({ emitOnPlay: false });
+  const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
+  const microphone = new WindowsMicrophoneInputProvider({ runtime });
+  const controller = new AbortController();
+  const first = microphone.startCapture({ signal: controller.signal, correlationId: 'cancel-reopen' });
+  await first;
+  await assert.rejects(
+    microphone.startCapture({ signal: new AbortController().signal, correlationId: 'concurrent-open' }),
+    (error: unknown) => error instanceof VoiceError && error.code === 'VOICE_CONCURRENCY_ERROR',
+  );
+  controller.abort();
+  await microphone.stopCapture();
+  await microphone.startCapture({ signal: new AbortController().signal, correlationId: 'after-cancel' });
+  await Promise.all([microphone.stopCapture(), microphone.stopCapture()]);
+  assert.equal(runtime.state.counts.streamsBuilt, 2);
+  assert.equal(runtime.state.counts.streamsClosed, 2);
+  assert.equal(runtime.state.counts.hostsClosed, 2);
+});
+
+test('native errors delivered during close are ignored as stale callbacks', async () => {
+  const runtime = lifecycleCpal({ emitOnPlay: false, errorDuringClose: true });
+  const diagnostics: unknown[] = [];
+  const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
+  const microphone = new WindowsMicrophoneInputProvider({ runtime, onDiagnostic: (event) => diagnostics.push(event) });
+  await microphone.startCapture({ signal: new AbortController().signal, correlationId: 'close-callback' });
+  await Promise.all([microphone.stopCapture(), microphone.stopCapture()]);
+  assert.deepEqual(diagnostics, []);
+  assert.equal(runtime.state.counts.streamsClosed, 1);
+});
+
+test('stop awaits native stream closure before allowing a reopen', async () => {
+  const runtime = lifecycleCpal({ emitOnPlay: false, deferClose: true });
+  const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
+  const microphone = new WindowsMicrophoneInputProvider({ runtime });
+  await microphone.startCapture({ signal: new AbortController().signal, correlationId: 'deferred-close' });
+  const stopping = microphone.stopCapture();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await assert.rejects(
+    microphone.startCapture({ signal: new AbortController().signal, correlationId: 'while-closing' }),
+    (error: unknown) => error instanceof VoiceError && error.code === 'VOICE_CONCURRENCY_ERROR',
+  );
+  runtime.state.closeResolvers[0]?.();
+  await stopping;
+  await microphone.startCapture({ signal: new AbortController().signal, correlationId: 'after-closing' });
+  const secondStopping = microphone.stopCapture();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  runtime.state.closeResolvers[1]?.();
+  await secondStopping;
+  assert.equal(runtime.state.counts.hostsClosed, 2);
+});
+
+test('a bounded raw callback queue fails safely when the consumer cannot keep up', async () => {
+  const runtime = lifecycleCpal({ emitOnPlay: false });
+  const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
+  const microphone = new WindowsMicrophoneInputProvider({ runtime, queueCapacity: 1 });
+  const stream = await microphone.startCapture({ signal: new AbortController().signal, correlationId: 'raw-backpressure' });
+  const callback = runtime.state.callbacks[0];
+  callback?.onData(new Float32Array(19200).fill(0.25));
+  callback?.onData(new Float32Array(19200).fill(0.25));
+  callback?.onData(new Float32Array(19200).fill(0.25));
+  await assert.rejects(
+    stream.chunks()[Symbol.asyncIterator]().next(),
+    (error: unknown) => error instanceof VoiceError && error.code === 'VOICE_BACKPRESSURE_ERROR',
+  );
+  await microphone.stopCapture();
+  assert.equal(runtime.state.counts.streamsClosed, 1);
 });
 
 test('microphone provider returns a controlled typed error when no device exists', async () => {

@@ -1,14 +1,12 @@
-import type { AudioChunk } from '../voice-types.js';
-
-interface Consumer {
-  readonly resolve: (value: IteratorResult<AudioChunk>) => void;
+interface Consumer<T> {
+  readonly resolve: (value: IteratorResult<T>) => void;
   readonly reject: (error: Error) => void;
 }
 
 /** Small synchronous producer queue for native audio callbacks; it never waits in the callback. */
-export class CaptureQueue implements AsyncIterable<AudioChunk> {
-  private readonly items: AudioChunk[] = [];
-  private readonly consumers: Consumer[] = [];
+export class CaptureQueue<T> implements AsyncIterable<T> {
+  private readonly items: T[] = [];
+  private readonly consumers: Consumer<T>[] = [];
   private ended = false;
   private failure: Error | undefined;
 
@@ -16,11 +14,11 @@ export class CaptureQueue implements AsyncIterable<AudioChunk> {
     if (!Number.isInteger(capacity) || capacity < 1) throw new RangeError('Capture queue capacity must be positive.');
   }
 
-  push(chunk: AudioChunk): boolean {
+  push(item: T): boolean {
     if (this.ended) return false;
     const consumer = this.consumers.shift();
-    if (consumer) consumer.resolve({ done: false, value: chunk });
-    else if (this.items.length < this.capacity) this.items.push(chunk);
+    if (consumer) consumer.resolve({ done: false, value: item });
+    else if (this.items.length < this.capacity) this.items.push(item);
     else return false;
     return true;
   }
@@ -46,13 +44,13 @@ export class CaptureQueue implements AsyncIterable<AudioChunk> {
     this.flush();
   }
 
-  [Symbol.asyncIterator](): AsyncIterator<AudioChunk> {
+  [Symbol.asyncIterator](): AsyncIterator<T> {
     return {
       next: async () => {
-        if (this.items.length > 0) return { done: false, value: this.items.shift() as AudioChunk };
+        if (this.items.length > 0) return { done: false, value: this.items.shift() as T };
         if (this.failure) throw this.failure;
         if (this.ended) return { done: true, value: undefined };
-        return new Promise<IteratorResult<AudioChunk>>((resolve, reject) => this.consumers.push({ resolve, reject }));
+        return new Promise<IteratorResult<T>>((resolve, reject) => this.consumers.push({ resolve, reject }));
       },
       return: async () => {
         this.items.length = 0;
@@ -64,7 +62,7 @@ export class CaptureQueue implements AsyncIterable<AudioChunk> {
 
   private flush(): void {
     while (this.consumers.length > 0 && this.items.length > 0) {
-      (this.consumers.shift() as Consumer).resolve({ done: false, value: this.items.shift() as AudioChunk });
+      (this.consumers.shift() as Consumer<T>).resolve({ done: false, value: this.items.shift() as T });
     }
     if (!this.ended || this.items.length > 0) return;
     for (const consumer of this.consumers.splice(0)) {
