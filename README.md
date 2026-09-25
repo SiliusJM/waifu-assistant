@@ -117,7 +117,7 @@ $env:YUKI_STT_MODEL_DIR = $env:STT_MODEL_DIR
 node dist/main.js --interactive
 ```
 
-En la conversación usa `/listen` para empezar a hablar y `/listen-stop` para finalizar la captura. El audio se procesa localmente y solo el transcript final entra al flujo normal de conversación. La respuesta hablada se reproduce mediante el TTS local descrito abajo. No se habilitan wake word, escucha en segundo plano ni almacenamiento de audio.
+En la conversación usa `/listen` para empezar a hablar y `/listen-stop` para finalizar la captura. Whisper Tiny multilingüe usa autodetección local de idioma; Yuki responde normalmente en español y conserva nombres, títulos, código y citas en su idioma original. No se traduce la utterance completa ni se convierte automáticamente romaji a kana/kanji. Solo el transcript final entra al flujo normal de conversación. La respuesta hablada se reproduce mediante el TTS local descrito abajo. No se habilitan wake word, escucha en segundo plano ni almacenamiento de audio. La calidad de code-switching con voz real queda pendiente de aceptación acústica.
 
 VAD Silero es opcional. Prepara explícitamente el modelo ONNX oficial de
 Sherpa-ONNX fuera del repositorio (SHA-256 y tamaño fijados en el proyecto) y

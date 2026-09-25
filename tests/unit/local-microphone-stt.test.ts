@@ -122,7 +122,7 @@ async function temporaryModelFiles(): Promise<{ readonly directory: string; read
 }
 
 test('Whisper Tiny model is pinned to one multilingual offline revision with bounded external files', () => {
-  assert.equal(WHISPER_TINY_MODEL.language, 'es');
+  assert.equal(WHISPER_TINY_MODEL.language, 'auto');
   assert.match(WHISPER_TINY_MODEL.revision, /^[a-f0-9]{40}$/u);
   assert.deepEqual(WHISPER_TINY_MODEL.files.map(({ name }) => name), [
     'tiny-encoder.int8.onnx', 'tiny-decoder.int8.onnx', 'tiny-tokens.txt',
@@ -379,9 +379,84 @@ test('Sherpa provider validates local files and decodes a final Spanish transcri
     for await (const event of session.events()) events.push(event);
     assert.deepEqual(events, [{ type: 'final', text: 'Hola, Yuki.' }]);
     assert.equal(receivedSamples, 160);
-    assert.equal((receivedConfig as { modelConfig: { whisper: { language: string; task: string } } }).modelConfig.whisper.language, 'es');
+    assert.equal((receivedConfig as { modelConfig: { whisper: { language: string; task: string } } }).modelConfig.whisper.language, '');
     assert.equal(JSON.stringify(events).includes('1024'), false);
     await session.close();
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test('multilingual Whisper autodetection preserves Spanish, English, Japanese, romaji and technical entities verbatim', async () => {
+  const temporary = await temporaryModelFiles();
+  const transcripts = [
+    'Hola Yuki, esta es una prueba en español.',
+    'Yuki, check this error in Spring Boot.',
+    '愛より確かなものなんてない',
+    'Yuki revisa el QueryDSL y findByDocumentNumber.',
+    'Pon Ai yori tashikana mono nante nai.',
+    'Busca 愛より確かなものなんてない en YouTube.',
+    "Pon 'Burn It Down' de Linkin Park y revisa osu!.",
+  ];
+  let decoded = 0;
+  const configs: Array<{ modelConfig: { whisper: { language: string; task: string } } }> = [];
+  const runtime: SherpaRuntime = {
+    OfflineRecognizer: {
+      async createAsync(config) {
+        configs.push(config as typeof configs[number]);
+        return {
+          createStream: () => ({ acceptWaveform() {} }),
+          decodeAsync: async () => ({ text: transcripts[decoded++] }),
+        };
+      },
+    },
+  };
+  try {
+    const provider = new SherpaWhisperSTTProvider(temporary.paths, runtime);
+    for (const [index, expected] of transcripts.entries()) {
+      const session = await provider.start(
+        { sessionId: `multilingual-${index}` },
+        { signal: new AbortController().signal, correlationId: `multilingual-${index}` },
+      );
+      await session.pushAudio({
+        data: new Uint8Array([0, 4]),
+        format: CANONICAL_AUDIO_FORMAT,
+        sequence: 0,
+        capturedAt: new Date(0).toISOString(),
+      });
+      await session.endInput();
+      const events = [];
+      for await (const event of session.events()) events.push(event);
+      assert.deepEqual(events, [{ type: 'final', text: expected }]);
+      await session.close();
+    }
+    assert.equal(configs.length, 1, 'the shared autodetect recognizer is initialized once');
+    assert.equal(configs[0]?.modelConfig.whisper.language, '');
+    assert.equal(configs[0]?.modelConfig.whisper.task, 'transcribe');
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test('an explicit Whisper language hint remains isolated from the default auto recognizer', async () => {
+  const temporary = await temporaryModelFiles();
+  const languages: string[] = [];
+  const runtime: SherpaRuntime = {
+    OfflineRecognizer: {
+      async createAsync(config) {
+        languages.push(config.modelConfig.whisper.language);
+        return { createStream: () => ({ acceptWaveform() {} }), async decodeAsync() { return { text: '' }; } };
+      },
+    },
+  };
+  try {
+    const provider = new SherpaWhisperSTTProvider(temporary.paths, runtime);
+    await provider.prepare();
+    await provider.start({ sessionId: 'explicit-es', language: 'es' }, {
+      signal: new AbortController().signal,
+      correlationId: 'explicit-es',
+    });
+    assert.deepEqual(languages, ['', 'es']);
   } finally {
     await rm(temporary.directory, { recursive: true, force: true });
   }

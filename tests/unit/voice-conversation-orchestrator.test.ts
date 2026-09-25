@@ -511,6 +511,17 @@ test('confirmed speech stops playback immediately, ignores noise, and resumes wi
   assert.equal(orchestrator.state, 'idle');
 });
 
+test('accepted multilingual final transcript reaches the same Session without translation or entity normalization', async () => {
+  const { runner, orchestrator } = setup(fixedProvider('Entendido.'));
+  const transcript = 'Yuki revisa Spring Boot and QueryDSL: 愛より確かなものなんてない — Ai yori tashikana mono nante nai.';
+
+  assert.equal(orchestrator.acceptTranscription({ type: 'final', text: `  ${transcript}  ` }), true);
+  await orchestrator.whenIdle();
+
+  assert.equal(runner.session.getMessages()[0]?.role, 'user');
+  assert.equal(runner.session.getMessages()[0]?.content, transcript);
+});
+
 test('possible noise and self-voice alone do not interrupt an active response', async () => {
   const firstStarted = deferred();
   const finish = deferred();

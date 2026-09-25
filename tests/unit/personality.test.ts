@@ -31,6 +31,15 @@ test('default personality profile is valid and uses only controlled catalog valu
     DEFAULT_PERSONALITY_PROFILE.traits.map(({ id }) => id),
     ['warm', 'direct', 'empathetic'],
   );
+  assert.equal(DEFAULT_PERSONALITY_PROFILE.locale?.defaultLocale, 'es');
+});
+
+test('default response language is Spanish regardless of input language and preserves original-language entities', () => {
+  const snapshot = new PersonalityCompiler().compile({ profile: DEFAULT_PERSONALITY_PROFILE });
+  const localeInstruction = snapshot.instructions.find(({ id }) => id === 'locale.default')?.text ?? '';
+  assert.match(localeInstruction, /Respond in the configured locale es by default, regardless of the input language/u);
+  assert.match(localeInstruction, /Preserve names, titles, code, and quotations in their original language/u);
+  assert.match(localeInstruction, /only when explicitly requested/u);
 });
 
 test('validator rejects unknown fields, free system prompts, unknown traits, and invalid ranges', () => {
@@ -106,14 +115,14 @@ test('compiler applies transient preference overrides without mutating the profi
 
   assert.ok(snapshot.instructions.some(({ text }) => text.includes('Use concise response length.')));
   assert.ok(snapshot.instructions.some(({ text }) => text.includes('Use structured formatting.')));
-  assert.ok(snapshot.instructions.some(({ text }) => text.includes('locale es-ES')));
+  assert.ok(snapshot.instructions.some(({ text }) => text.includes('configured locale es-ES')));
   assert.equal(DEFAULT_PERSONALITY_PROFILE.speakingStyle.verbosity, 'balanced');
 
   const unsupportedLocale = compiler.compile({
     profile: DEFAULT_PERSONALITY_PROFILE,
     preferenceOverrides: { locale: 'fr-FR' },
   });
-  assert.ok(unsupportedLocale.instructions.some(({ text }) => text.includes('locale en-US')));
+  assert.ok(unsupportedLocale.instructions.some(({ text }) => text.includes('configured locale es')));
 });
 
 test('compiler normalizes invalid preference overrides to safe profile values', () => {
@@ -129,7 +138,7 @@ test('compiler normalizes invalid preference overrides to safe profile values', 
   assert.ok(snapshot.instructions.some(({ text }) => text.includes('Use balanced response length.')));
   assert.ok(snapshot.instructions.some(({ text }) => text.includes('Use light formatting.')));
   assert.ok(snapshot.instructions.some(({ text }) => text.includes('Address the user in a neutral manner.')));
-  assert.ok(snapshot.instructions.some(({ text }) => text.includes('locale en-US')));
+  assert.ok(snapshot.instructions.some(({ text }) => text.includes('configured locale es')));
 });
 
 test('identity description is preserved as metadata and never compiled as normative instructions', () => {
