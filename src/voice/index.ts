@@ -5,19 +5,31 @@ export { StreamingVoiceService } from './streaming-voice-service.js';
 export { VoiceConversationOrchestrator } from './voice-conversation-orchestrator.js';
 export {
   PushToTalkController,
+  PIPER_SPANISH_TTS_MODEL,
+  SherpaVitsTTSProvider,
   SherpaWhisperSTTProvider,
+  WindowsCpalStreamingAudioOutputProvider,
   WindowsMicrophoneInputProvider,
   WHISPER_TINY_MODEL,
   convertFloatInputToPcm16Mono,
+  convertPcm16MonoForDevice,
   createLocalMicrophoneVoiceService,
+  getNextTtsPhraseEnd,
+  LOCAL_TTS_AUDIO_FORMAT,
+  LOCAL_TTS_MAX_PHRASE_CHARACTERS,
+  resolvePiperSpanishTtsModelPaths,
   resolveWhisperTinyModelPaths,
 } from './local/index.js';
 export type {
   CpalRuntime,
+  CpalOutputRuntime,
+  PiperSpanishTtsModelPaths,
   SherpaRuntime,
+  SherpaVitsTtsProviderOptions,
   SherpaWhisperModelPaths,
   StoppableMicrophone,
   WindowsMicrophoneInputOptions,
+  WindowsCpalAudioOutputOptions,
 } from './local/index.js';
 export { VoiceSession } from './voice-session.js';
 export { VoiceConcurrencyCoordinator } from './voice-concurrency-coordinator.js';

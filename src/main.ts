@@ -76,6 +76,7 @@ import { VoiceConversationOrchestrator } from './voice/voice-conversation-orches
 import { createLocalMicrophoneVoiceService } from './voice/local/local-voice-service.js';
 import { PushToTalkController } from './voice/local/push-to-talk-controller.js';
 import { resolveWhisperTinyModelPaths } from './voice/local/whisper-tiny-model.js';
+import { resolvePiperSpanishTtsModelPaths } from './voice/local/piper-spanish-tts-model.js';
 import {
   formatResponseFormatConfirmation,
   formatResponseFormatStatus,
@@ -202,10 +203,16 @@ export async function main(
         process.stdout.write('Falta YUKI_STT_MODEL_DIR; prepara el modelo local con npm run setup:local-stt-model -- <ruta-absoluta-fuera-del-repo>.\n');
         return;
       }
+      const ttsModelDirectory = env.YUKI_TTS_MODEL_DIR?.trim();
+      if (!ttsModelDirectory) {
+        process.stdout.write('Falta YUKI_TTS_MODEL_DIR; instala el modelo TTS local siguiendo la sección de voz en README.md.\n');
+        return;
+      }
       try {
         const modelPaths = resolveWhisperTinyModelPaths(modelDirectory);
-        localVoiceService ??= createLocalMicrophoneVoiceService(modelPaths);
-        await localVoiceService.stt.prepare();
+        const ttsModelPaths = resolvePiperSpanishTtsModelPaths(ttsModelDirectory);
+        localVoiceService ??= createLocalMicrophoneVoiceService(modelPaths, { ttsModel: ttsModelPaths });
+        await Promise.all([localVoiceService.stt.prepare(), localVoiceService.tts?.prepare()]);
         voiceOrchestrator ??= new VoiceConversationOrchestrator({
           runner,
           voiceService: localVoiceService.service,
