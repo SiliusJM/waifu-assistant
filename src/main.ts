@@ -76,6 +76,7 @@ import { VoiceConversationOrchestrator } from './voice/voice-conversation-orches
 import { createLocalMicrophoneVoiceService } from './voice/local/local-voice-service.js';
 import { PushToTalkController } from './voice/local/push-to-talk-controller.js';
 import { resolveWhisperTinyModelPaths } from './voice/local/whisper-tiny-model.js';
+import { resolveSileroVadModelPath } from './voice/local/sherpa-silero-vad.js';
 import { resolvePiperSpanishTtsModelPaths } from './voice/local/piper-spanish-tts-model.js';
 import {
   formatResponseFormatConfirmation,
@@ -211,7 +212,18 @@ export async function main(
       try {
         const modelPaths = resolveWhisperTinyModelPaths(modelDirectory);
         const ttsModelPaths = resolvePiperSpanishTtsModelPaths(ttsModelDirectory);
-        localVoiceService ??= createLocalMicrophoneVoiceService(modelPaths, { ttsModel: ttsModelPaths });
+        const vadModelPath = env.YUKI_VAD_MODEL_PATH?.trim()
+          ? resolveSileroVadModelPath(env.YUKI_VAD_MODEL_PATH)
+          : undefined;
+        localVoiceService ??= createLocalMicrophoneVoiceService(modelPaths, {
+          ttsModel: ttsModelPaths,
+          ...(vadModelPath ? {
+            vadModelPath,
+            ...(env.YUKI_VAD_MIN_SILENCE_MS?.trim()
+              ? { vadMinSilenceMs: Number(env.YUKI_VAD_MIN_SILENCE_MS) }
+              : {}),
+          } : {}),
+        });
         await Promise.all([localVoiceService.stt.prepare(), localVoiceService.tts?.prepare()]);
         voiceOrchestrator ??= new VoiceConversationOrchestrator({
           runner,
@@ -230,7 +242,7 @@ export async function main(
         });
         pushToTalk ??= new PushToTalkController(localVoiceService.microphone, voiceOrchestrator);
         await pushToTalk.start();
-        process.stdout.write('Escuchando. Di la frase y escribe /listen-stop para finalizar.\n');
+        process.stdout.write(`${vadModelPath ? 'VAD local activo: habla y pausa para cerrar cada frase. ' : ''}Escuchando. Di la frase y escribe /listen-stop para finalizar.\n`);
       } catch (error) {
         const code = error instanceof AssistantError ? error.code : 'VOICE_CAPTURE_ERROR';
         process.stdout.write(`No se pudo preparar o iniciar la captura de voz (${code}).\n`);

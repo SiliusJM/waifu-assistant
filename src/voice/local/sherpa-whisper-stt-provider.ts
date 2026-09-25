@@ -1,10 +1,12 @@
 import { stat } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { BoundedAsyncQueue } from '../bounded-async-queue.js';
 import { VoiceError } from '../voice-errors.js';
-import type { AudioChunk, TranscriptionEvent, VoiceProviderOptions } from '../voice-types.js';
+import type { AudioChunk, VoiceProviderOptions } from '../voice-types.js';
 import { CANONICAL_AUDIO_FORMAT } from '../voice-types.js';
-import type { STTStartRequest, StreamingSTTProvider, StreamingSTTSession } from '../streaming-types.js';
+import type { STTStartRequest, StreamingSTTProvider, StreamingSTTSession, StreamingTranscriptionEvent } from '../streaming-types.js';
+import { SherpaSileroVad, type SherpaVadRuntime } from './sherpa-silero-vad.js';
 
 const MAX_SECONDS = 30;
 const MAX_SAMPLES = CANONICAL_AUDIO_FORMAT.sampleRateHz * MAX_SECONDS;
@@ -18,7 +20,7 @@ interface SherpaRecognizer {
   decodeAsync(stream: SherpaStream): Promise<{ readonly text?: string }>;
 }
 
-export interface SherpaRuntime {
+export interface SherpaRuntime extends SherpaVadRuntime {
   OfflineRecognizer: {
     createAsync(config: {
       readonly featConfig: { readonly sampleRate: number; readonly featureDim: number };
@@ -55,13 +57,22 @@ async function requireModelFile(file: string): Promise<void> {
 }
 
 class SherpaWhisperSession implements StreamingSTTSession {
-  private readonly output = new BoundedAsyncQueue<TranscriptionEvent>(2);
+  private readonly output = new BoundedAsyncQueue<StreamingTranscriptionEvent>(2);
   private chunks: Float32Array[] = [];
   private sampleCount = 0;
+  private vadDecodeQueue: Promise<void> = Promise.resolve();
+  private vadDecodeError: VoiceError | undefined;
+  private vadFinalCount = 0;
+  private vadSegmentSequence = 0;
+  private activeVadSegmentId: string | undefined;
   private ended = false;
   private closed = false;
 
-  constructor(private readonly recognizer: SherpaRecognizer, private readonly signal: AbortSignal) {}
+  constructor(
+    private readonly recognizer: SherpaRecognizer,
+    private readonly signal: AbortSignal,
+    private readonly vad?: SherpaSileroVad,
+  ) {}
 
   async pushAudio(chunk: AudioChunk): Promise<void> {
     if (this.closed || this.ended || this.signal.aborted) throw new VoiceError('Local transcription was cancelled.', 'VOICE_CANCELLATION_ERROR');
@@ -69,13 +80,29 @@ class SherpaWhisperSession implements StreamingSTTSession {
       || chunk.data.byteLength % 2 !== 0) throw new VoiceError('Local STT requires 16 kHz mono PCM audio.', 'VOICE_AUDIO_FORMAT_ERROR');
     const count = chunk.data.byteLength / 2;
     if (this.sampleCount + count > MAX_SAMPLES) throw new VoiceError('Local STT input exceeded its duration limit.', 'VOICE_BACKPRESSURE_ERROR');
+    this.sampleCount += count;
+    if (this.vad) {
+      for (const transition of this.vad.pushPcm16(chunk.data)) {
+        if (transition.speechStarted) {
+          this.activeVadSegmentId = `${randomUUID()}:${++this.vadSegmentSequence}`;
+          await this.output.enqueue({ type: 'speech_start', segmentId: this.activeVadSegmentId }, this.signal);
+        }
+        if (transition.possibleNoise) await this.output.enqueue({ type: 'possible_noise' }, this.signal);
+        if (transition.speechEnded) {
+          const segmentId = this.activeVadSegmentId ?? `${randomUUID()}:${++this.vadSegmentSequence}`;
+          this.activeVadSegmentId = undefined;
+          await this.output.enqueue({ type: 'speech_end', segmentId }, this.signal);
+          if (transition.segment) this.queueVadDecode(transition.segment, segmentId);
+        } else if (transition.segment) this.queueVadDecode(transition.segment, `${randomUUID()}:${++this.vadSegmentSequence}`);
+      }
+      return;
+    }
     const values = new Float32Array(count);
     const view = new DataView(chunk.data.buffer, chunk.data.byteOffset, chunk.data.byteLength);
     for (let index = 0; index < count; index += 1) {
       const value = view.getInt16(index * 2, true);
       values[index] = value < 0 ? value / 32768 : value / 32767;
     }
-    this.sampleCount += count;
     if (count) this.chunks.push(values);
   }
 
@@ -84,6 +111,26 @@ class SherpaWhisperSession implements StreamingSTTSession {
     this.ended = true;
     try {
       if (this.signal.aborted) throw new VoiceError('Local transcription was cancelled.', 'VOICE_CANCELLATION_ERROR');
+      if (this.vad) {
+        for (const transition of this.vad.flush()) {
+          if (transition.speechStarted) {
+            this.activeVadSegmentId = `${randomUUID()}:${++this.vadSegmentSequence}`;
+            await this.output.enqueue({ type: 'speech_start', segmentId: this.activeVadSegmentId }, this.signal);
+          }
+          if (transition.possibleNoise) await this.output.enqueue({ type: 'possible_noise' }, this.signal);
+          if (transition.speechEnded) {
+            const segmentId = this.activeVadSegmentId ?? `${randomUUID()}:${++this.vadSegmentSequence}`;
+            this.activeVadSegmentId = undefined;
+            await this.output.enqueue({ type: 'speech_end', segmentId }, this.signal);
+            if (transition.segment) this.queueVadDecode(transition.segment, segmentId);
+          } else if (transition.segment) this.queueVadDecode(transition.segment, `${randomUUID()}:${++this.vadSegmentSequence}`);
+        }
+        await this.vadDecodeQueue;
+        if (this.vadDecodeError) throw this.vadDecodeError;
+        if (this.vadFinalCount === 0) await this.output.enqueue({ type: 'no_speech' }, this.signal);
+        this.output.finish();
+        return;
+      }
       let text = '';
       if (this.sampleCount > 0) {
         const samples = new Float32Array(this.sampleCount);
@@ -105,14 +152,36 @@ class SherpaWhisperSession implements StreamingSTTSession {
       throw new VoiceError('Local speech recognition failed.', 'VOICE_STT_ERROR');
     } finally {
       this.clearAudio();
+      this.vad?.close();
     }
   }
 
-  events(): AsyncIterable<TranscriptionEvent> { return this.output; }
+  events(): AsyncIterable<StreamingTranscriptionEvent> { return this.output; }
 
-  async cancel(): Promise<void> { this.clearAudio(); this.output.close(); }
+  async cancel(): Promise<void> { this.clearAudio(); this.vad?.close(); this.output.close(); }
 
-  async close(): Promise<void> { this.closed = true; this.clearAudio(); this.output.close(); }
+  async close(): Promise<void> { this.closed = true; this.clearAudio(); this.vad?.close(); this.output.close(); }
+
+  private queueVadDecode(samples: Float32Array, segmentId: string): void {
+    this.vadDecodeQueue = this.vadDecodeQueue.then(async () => {
+      if (this.signal.aborted || this.closed || this.vadDecodeError) { samples.fill(0); return; }
+      try {
+        const stream = this.recognizer.createStream();
+        stream.acceptWaveform({ samples, sampleRate: CANONICAL_AUDIO_FORMAT.sampleRateHz });
+        const result = await this.recognizer.decodeAsync(stream);
+        const text = typeof result.text === 'string' ? result.text.trim() : '';
+        if (text && !this.signal.aborted && !this.closed) {
+          await this.output.enqueue({ type: 'final', text, segmentId }, this.signal);
+          this.vadFinalCount += 1;
+        }
+      } catch {
+        this.vadDecodeError = new VoiceError('Local speech recognition failed.', 'VOICE_STT_ERROR');
+        this.output.close();
+      } finally {
+        samples.fill(0);
+      }
+    });
+  }
 
   private clearAudio(): void {
     for (const chunk of this.chunks) chunk.fill(0);
@@ -124,12 +193,24 @@ class SherpaWhisperSession implements StreamingSTTSession {
 export class SherpaWhisperSTTProvider implements StreamingSTTProvider {
   readonly name = 'sherpa-onnx-whisper-local';
   private recognizerPromise: Promise<SherpaRecognizer> | undefined;
+  private preparedVad: SherpaSileroVad | undefined;
 
-  constructor(private readonly model: SherpaWhisperModelPaths, private readonly runtime?: SherpaRuntime) {}
+  constructor(
+    private readonly model: SherpaWhisperModelPaths,
+    private readonly runtime?: SherpaRuntime,
+    private readonly vad?: { readonly modelPath: string; readonly minSilenceMs?: number },
+  ) {}
 
   /** Explicitly invoked on /listen, before opening the microphone, never during app startup. */
   async prepare(language = 'es'): Promise<void> {
     await this.getRecognizer(language);
+    if (this.vad && !this.preparedVad) {
+      this.preparedVad = await SherpaSileroVad.create({
+        modelPath: this.vad.modelPath,
+        minSilenceMs: this.vad.minSilenceMs,
+        runtime: this.runtime,
+      });
+    }
   }
 
   async start(request: STTStartRequest, options: VoiceProviderOptions): Promise<StreamingSTTSession> {
@@ -137,7 +218,17 @@ export class SherpaWhisperSTTProvider implements StreamingSTTProvider {
     if (options.signal.aborted) throw new VoiceError('Local transcription was cancelled.', 'VOICE_CANCELLATION_ERROR');
     const recognizer = await this.getRecognizer(request.language ?? 'es');
     if (options.signal.aborted) throw new VoiceError('Local transcription was cancelled.', 'VOICE_CANCELLATION_ERROR');
-    return new SherpaWhisperSession(recognizer, options.signal);
+    const vad = this.preparedVad ?? (this.vad ? await SherpaSileroVad.create({
+      modelPath: this.vad.modelPath,
+      minSilenceMs: this.vad.minSilenceMs,
+      runtime: this.runtime,
+    }) : undefined);
+    this.preparedVad = undefined;
+    if (options.signal.aborted) {
+      vad?.close();
+      throw new VoiceError('Local transcription was cancelled.', 'VOICE_CANCELLATION_ERROR');
+    }
+    return new SherpaWhisperSession(recognizer, options.signal, vad);
   }
 
   private getRecognizer(language: string): Promise<SherpaRecognizer> {

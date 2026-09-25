@@ -119,6 +119,24 @@ node dist/main.js --interactive
 
 En la conversación usa `/listen` para empezar a hablar y `/listen-stop` para finalizar la captura. El audio se procesa localmente y solo el transcript final entra al flujo normal de conversación. La respuesta hablada se reproduce mediante el TTS local descrito abajo. No se habilitan wake word, escucha en segundo plano ni almacenamiento de audio.
 
+VAD Silero es opcional. Prepara explícitamente el modelo ONNX oficial de
+Sherpa-ONNX fuera del repositorio (SHA-256 y tamaño fijados en el proyecto) y
+configura `YUKI_VAD_MODEL_PATH`:
+
+```powershell
+$vadModelDir = "$env:LOCALAPPDATA\WaifuAssistant\models\vad"
+npm run setup:local-vad-model -- $vadModelDir
+$env:YUKI_VAD_MODEL_PATH = Join-Path $vadModelDir "silero_vad.onnx"
+```
+
+El setup escribe un `manifest.json` local con fuente, asset y hash. No descarga
+automáticamente al iniciar Yuki ni durante tests. El modelo Silero VAD se
+distribuye bajo MIT según la atribución upstream; conserva la referencia a
+[Silero VAD](https://github.com/snakers4/silero-vad). `YUKI_VAD_MIN_SILENCE_MS` controla la pausa de
+cierre (350–1500 ms; 650 por defecto). El modelo no se descarga automáticamente;
+sin esta variable, `/listen` conserva PTT y su flujo previo. El VAD procesa audio
+en memoria y el sistema solo pasa transcripciones finales a la conversación.
+
 ### TTS local y reproducción en Windows
 
 La respuesta del flujo `/listen` se sintetiza localmente con Sherpa-ONNX

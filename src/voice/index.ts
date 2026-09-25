@@ -80,6 +80,7 @@ export type {
   StreamingAudioOutputProvider,
   StreamingSTTProvider,
   StreamingSTTSession,
+  StreamingTranscriptionEvent,
   StreamingSynthesisRequest,
   StreamingTTSOperation,
   StreamingTTSProvider,

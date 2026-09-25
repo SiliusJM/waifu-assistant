@@ -10,5 +10,7 @@ export { WindowsCpalStreamingAudioOutputProvider, convertPcm16MonoForDevice } fr
 export type { CpalOutputRuntime, WindowsCpalAudioOutputOptions } from './windows-cpal-audio-output-provider.js';
 export { PushToTalkController } from './push-to-talk-controller.js';
 export type { StoppableMicrophone } from './push-to-talk-controller.js';
+export { DEFAULT_VAD_MIN_SILENCE_MS, resolveSileroVadModelPath, SherpaSileroVad, speechSegmentToPcm16 } from './sherpa-silero-vad.js';
+export type { SherpaVadRuntime, SherpaVadDetector, VadTransitions } from './sherpa-silero-vad.js';
 export { WHISPER_TINY_MODEL, resolveWhisperTinyModelPaths } from './whisper-tiny-model.js';
 export { createLocalMicrophoneVoiceService } from './local-voice-service.js';

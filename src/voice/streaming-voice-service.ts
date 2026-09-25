@@ -452,6 +452,22 @@ export class StreamingVoiceService {
     let finalText: string | undefined;
     for await (const event of stt.events()) {
       if (operation.signal.aborted) throw new VoiceError('The voice operation was cancelled.', 'VOICE_CANCELLATION_ERROR');
+      if (event.type === 'speech_start') {
+        await operation.emit('speech_activity_started', { source: 'confirmed-user-speech', segmentId: event.segmentId });
+        continue;
+      }
+      if (event.type === 'possible_noise') {
+        await operation.emit('speech_activity_started', { source: 'possible-noise' });
+        continue;
+      }
+      if (event.type === 'speech_end') {
+        await operation.emit('speech_activity_ended', { segmentId: event.segmentId });
+        continue;
+      }
+      if (event.type === 'no_speech') {
+        finalText ??= '';
+        continue;
+      }
       if (event.type !== 'partial' && event.type !== 'final') {
         throw new VoiceError('The STT provider returned an invalid event.', 'VOICE_STT_ERROR');
       }
@@ -459,10 +475,12 @@ export class StreamingVoiceService {
         operation.mark('first_STT_partial');
         await operation.emit('transcription_partial', { text: event.text });
       } else {
-        finalText = event.text;
+        finalText = finalText ? `${finalText} ${event.text}` : event.text;
         operation.mark('STT_final');
-        await operation.emit('transcription_final', { text: finalText });
-        break;
+        await operation.emit('transcription_final', {
+          text: event.text,
+          ...('segmentId' in event && event.segmentId ? { segmentId: event.segmentId } : {}),
+        });
       }
     }
     if (finalText === undefined) throw new VoiceError('The STT provider did not return a final result.', 'VOICE_STT_ERROR');

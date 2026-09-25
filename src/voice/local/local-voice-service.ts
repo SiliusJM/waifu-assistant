@@ -17,6 +17,8 @@ export function createLocalMicrophoneVoiceService(
     readonly sherpaRuntime?: SherpaRuntime;
     readonly defaultTimeoutMs?: number;
     readonly ttsModel?: PiperSpanishTtsModelPaths;
+    readonly vadModelPath?: string;
+    readonly vadMinSilenceMs?: number;
   } = {},
 ): {
   readonly service: VoiceService;
@@ -25,7 +27,10 @@ export function createLocalMicrophoneVoiceService(
   readonly tts: SherpaVitsTTSProvider | undefined;
 } {
   const microphone = new WindowsMicrophoneInputProvider({ runtime: options.cpalRuntime });
-  const stt = new SherpaWhisperSTTProvider(model, options.sherpaRuntime);
+  const stt = new SherpaWhisperSTTProvider(model, options.sherpaRuntime, options.vadModelPath ? {
+    modelPath: options.vadModelPath,
+    minSilenceMs: options.vadMinSilenceMs,
+  } : undefined);
   const tts = options.ttsModel ? new SherpaVitsTTSProvider(options.ttsModel) : undefined;
   const service = new VoiceService({
     input: new MockAudioInputProvider(),
