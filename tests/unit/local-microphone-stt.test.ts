@@ -46,6 +46,7 @@ interface FakeInputCallbacks {
 
 interface LifecycleCpalOptions {
   readonly emitOnPlay?: boolean;
+  readonly duringBuild?: () => void;
   readonly throwDeviceSelectionOnce?: boolean;
   readonly throwOnFirstPlay?: boolean;
   readonly errorDuringClose?: boolean;
@@ -85,6 +86,7 @@ function lifecycleCpal(options: LifecycleCpalOptions = {}): CpalRuntime & {
             supportedInputConfigs: () => [config],
             buildInputStream: (_inputConfig: unknown, _format: string, onData: FakeInputCallbacks['onData'], onError: FakeInputCallbacks['onError']) => {
               counts.streamsBuilt += 1;
+              options.duringBuild?.();
               callbacks.push({ onData, onError });
               const streamNumber = counts.streamsBuilt;
               return {
@@ -190,12 +192,13 @@ test('a normal stop drains the final partial PCM chunk already received from CPA
 test('microphone readiness waits for real input and the same provider can stop and reopen', async () => {
   const runtime = lifecycleCpal({ emitOnPlay: false });
   const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
-  const microphone = new WindowsMicrophoneInputProvider({ runtime });
+  const lifecycle: Array<{ stage: string; elapsedMs: number }> = [];
+  const microphone = new WindowsMicrophoneInputProvider({ runtime, onLifecycle: (event) => lifecycle.push(event) });
 
   for (let capture = 0; capture < 2; capture += 1) {
     let ready = false;
-    const readiness = microphone.waitUntilReady().then(() => { ready = true; });
     const stream = await microphone.startCapture({ signal: new AbortController().signal, correlationId: `reopen-${capture}` });
+    const readiness = microphone.waitUntilReady().then(() => { ready = true; });
     assert.equal(ready, false, 'play() alone must not report input readiness');
     runtime.state.callbacks[capture]?.onData(new Float32Array(19200).fill(0.25));
     await readiness;
@@ -211,6 +214,100 @@ test('microphone readiness waits for real input and the same provider can stop a
   assert.deepEqual(runtime.state.counts, {
     hostsOpened: 2, hostsClosed: 2, devicesClosed: 2, streamsBuilt: 2, streamsClosed: 2, started: 2,
   });
+  assert.deepEqual(lifecycle.slice(0, 6).map(({ stage }) => stage), [
+    'host-created', 'device-selected', 'stream-created', 'play-called', 'first-callback', 'readiness-resolved',
+  ]);
+  assert.ok(lifecycle.every(({ elapsedMs }) => Number.isFinite(elapsedMs) && elapsedMs >= 0));
+});
+
+test('microphone readiness waiters registered before and after start resolve on real input', async () => {
+  const runtime = lifecycleCpal({ emitOnPlay: false });
+  const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
+  const microphone = new WindowsMicrophoneInputProvider({ runtime });
+  let readyBefore = false;
+  const beforeStart = microphone.waitUntilReady().then(() => { readyBefore = true; });
+  const stream = await microphone.startCapture({ signal: new AbortController().signal, correlationId: 'await-before-start' });
+  let readyAfter = false;
+  const afterStart = microphone.waitUntilReady().then(() => { readyAfter = true; });
+  assert.equal(readyBefore, false);
+  assert.equal(readyAfter, false);
+  runtime.state.callbacks[0]?.onData(new Float32Array(19200).fill(0.25));
+  await Promise.all([beforeStart, afterStart]);
+  assert.equal(readyBefore, true);
+  assert.equal(readyAfter, true);
+  await stream.stop();
+  assert.equal(runtime.state.counts.streamsClosed, 1);
+});
+
+test('readiness timeout starts only after play and not while native setup is in progress', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const runtime = lifecycleCpal({ emitOnPlay: false, duringBuild: () => t.mock.timers.tick(6000) });
+    const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
+    const lifecycle: string[] = [];
+    const microphone = new WindowsMicrophoneInputProvider({
+      runtime,
+      readinessTimeoutMs: 5000,
+      onLifecycle: (event) => lifecycle.push(event.stage),
+    });
+    const readiness = microphone.waitUntilReady();
+    const stream = await microphone.startCapture({ signal: new AbortController().signal, correlationId: 'deadline-after-play' });
+    runtime.state.callbacks[0]?.onData(new Float32Array(19200).fill(0.25));
+    await readiness;
+    await stream.stop();
+    assert.deepEqual(lifecycle.slice(0, 6), [
+      'host-created', 'device-selected', 'stream-created', 'play-called', 'first-callback', 'readiness-resolved',
+    ]);
+    assert.equal(runtime.state.counts.streamsClosed, 1);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
+test('readiness timeout is bounded, cleans up once, and ignores late callbacks', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const runtime = lifecycleCpal({ emitOnPlay: false });
+    const diagnostics: unknown[] = [];
+    const lifecycle: string[] = [];
+    const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
+    const microphone = new WindowsMicrophoneInputProvider({
+      runtime,
+      readinessTimeoutMs: 5000,
+      onDiagnostic: (event) => diagnostics.push(event),
+      onLifecycle: (event) => lifecycle.push(event.stage),
+    });
+    const stream = await microphone.startCapture({ signal: new AbortController().signal, correlationId: 'readiness-timeout' });
+    const readiness = microphone.waitUntilReady().then(() => undefined, (error: unknown) => error);
+    t.mock.timers.tick(5000);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const result = await readiness;
+    assert.ok(result instanceof VoiceError && result.code === 'VOICE_TIMEOUT_ERROR');
+    runtime.state.callbacks[0]?.onData(new Float32Array(19200).fill(0.25));
+    runtime.state.callbacks[0]?.onError({ code: 'XRUN', operation: 'lateCallback' });
+    await Promise.all([stream.stop(), microphone.stopCapture()]);
+    const iterator = stream.chunks()[Symbol.asyncIterator]();
+    await assert.rejects(iterator.next(), (error: unknown) => error instanceof VoiceError && error.code === 'VOICE_TIMEOUT_ERROR');
+    assert.equal(runtime.state.counts.streamsClosed, 1);
+    assert.equal(runtime.state.counts.hostsClosed, 1);
+    assert.deepEqual(diagnostics, []);
+    assert.deepEqual(lifecycle, ['host-created', 'device-selected', 'stream-created', 'play-called']);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
+test('readiness timeout configuration is bounded to 5–15 seconds', async () => {
+  const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
+  const runtime = lifecycleCpal();
+  for (const timeout of [4999, 15001]) {
+    assert.throws(
+      () => new WindowsMicrophoneInputProvider({ runtime, readinessTimeoutMs: timeout }),
+      (error: unknown) => error instanceof VoiceError && error.code === 'VOICE_CONFIGURATION_ERROR',
+    );
+  }
+  assert.doesNotThrow(() => new WindowsMicrophoneInputProvider({ runtime, readinessTimeoutMs: 5000 }));
+  assert.doesNotThrow(() => new WindowsMicrophoneInputProvider({ runtime, readinessTimeoutMs: 15000 }));
 });
 
 test('device-selection failure preserves only safe native diagnostics and closes the host before retry', async () => {
