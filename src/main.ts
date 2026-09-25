@@ -72,6 +72,10 @@ import {
   parseToneCommand,
 } from './personality/conversation-tone-preferences.js';
 import { ResponseFormatStore, resolveResponseFormatPath } from './personality/response-format-store.js';
+import { VoiceConversationOrchestrator } from './voice/voice-conversation-orchestrator.js';
+import { createLocalMicrophoneVoiceService } from './voice/local/local-voice-service.js';
+import { PushToTalkController } from './voice/local/push-to-talk-controller.js';
+import { resolveWhisperTinyModelPaths } from './voice/local/whisper-tiny-model.js';
 import {
   formatResponseFormatConfirmation,
   formatResponseFormatStatus,
@@ -178,6 +182,10 @@ export async function main(
   const reminderScheduler = new ReminderScheduler(reminderStore, new ConsoleReminderNotifier(), {
     onError: () => { process.stdout.write('No se pudo mostrar una notificación de recordatorio.\n'); },
   });
+  let localVoiceService: ReturnType<typeof createLocalMicrophoneVoiceService> | undefined;
+  let voiceOrchestrator: VoiceConversationOrchestrator | undefined;
+  let pushToTalk: PushToTalkController | undefined;
+  let unsubscribeVoice: (() => void) | undefined;
   try {
     const runner = new ConversationRunner(core);
     const clarification = new SafeClarificationFlow({
@@ -188,6 +196,39 @@ export async function main(
       onReminderCreated: () => reminderScheduler.refresh(),
     });
     const conversationExporter = new MarkdownConversationExporter();
+    const startVoiceCapture = async (): Promise<void> => {
+      const modelDirectory = env.YUKI_STT_MODEL_DIR?.trim();
+      if (!modelDirectory) {
+        process.stdout.write('Falta YUKI_STT_MODEL_DIR; prepara el modelo local con npm run setup:local-stt-model -- <ruta-absoluta-fuera-del-repo>.\n');
+        return;
+      }
+      try {
+        const modelPaths = resolveWhisperTinyModelPaths(modelDirectory);
+        localVoiceService ??= createLocalMicrophoneVoiceService(modelPaths);
+        await localVoiceService.stt.prepare();
+        voiceOrchestrator ??= new VoiceConversationOrchestrator({
+          runner,
+          voiceService: localVoiceService.service,
+          conversationOptions: {
+            personality,
+            memory: () => memoryStore.snapshot(),
+            clarification,
+          },
+        });
+        unsubscribeVoice ??= voiceOrchestrator.subscribe((event) => {
+          if (event.type === 'finalTranscript') process.stdout.write(`\nTú (voz): ${event.text}\n`);
+          else if (event.type === 'assistantTextDelta') process.stdout.write(event.text);
+          else if (event.type === 'assistantTextComplete') process.stdout.write('\n');
+          else if (event.type === 'error') process.stdout.write(`\nNo se pudo completar la interacción de voz (${event.code}).\n`);
+        });
+        pushToTalk ??= new PushToTalkController(localVoiceService.microphone, voiceOrchestrator);
+        await pushToTalk.start();
+        process.stdout.write('Escuchando. Di la frase y escribe /listen-stop para finalizar.\n');
+      } catch (error) {
+        const code = error instanceof AssistantError ? error.code : 'VOICE_CAPTURE_ERROR';
+        process.stdout.write(`No se pudo preparar o iniciar la captura de voz (${code}).\n`);
+      }
+    };
     await reminderScheduler.start();
     await runner.run(terminal, {
       signal: controller.signal,
@@ -201,6 +242,24 @@ export async function main(
       onResponse: (): void => { process.stdout.write('\n'); },
       onInterruption: (): void => { process.stdout.write('\n[Respuesta interrumpida]\n'); },
       onCommand: async (command, context): Promise<void> => {
+        if (command === '/listen') {
+          await startVoiceCapture();
+          return;
+        }
+        if (command === '/listen-stop') {
+          if (!pushToTalk) {
+            process.stdout.write('No hay una captura de voz configurada.\n');
+            return;
+          }
+          try {
+            await pushToTalk.stop();
+            process.stdout.write('Captura de voz finalizada.\n');
+          } catch (error) {
+            const code = error instanceof AssistantError ? error.code : 'VOICE_CAPTURE_ERROR';
+            process.stdout.write(`No se pudo finalizar la captura de voz (${code}).\n`);
+          }
+          return;
+        }
         if (command === CONVERSATION_CANCEL_COMMAND) {
           process.stdout.write(context.active
             ? 'Respuesta cancelada.\n'
@@ -208,7 +267,7 @@ export async function main(
           return;
         }
         if (command === CONVERSATION_HELP_COMMAND) {
-          process.stdout.write(LOCAL_COMMAND_HELP + '\n');
+          process.stdout.write(`${LOCAL_COMMAND_HELP}\nVoz local: /listen inicia PTT y /listen-stop envía la frase reconocida al flujo normal.\n`);
           return;
         }
         if (command === CONVERSATION_SUMMARY_COMMAND) {
@@ -684,6 +743,9 @@ export async function main(
       },
     });
   } finally {
+    await voiceOrchestrator?.shutdown();
+    await localVoiceService?.service.shutdownStreaming();
+    unsubscribeVoice?.();
     reminderScheduler.stop();
     terminal.close();
     process.removeListener('SIGINT', onInterrupt);

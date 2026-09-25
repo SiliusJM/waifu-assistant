@@ -106,6 +106,19 @@ seguros usados por `/load-session` y `/delete-session`.
 
 Las respuestas interactivas pueden mostrarse progresivamente mediante streaming; la respuesta completa se guarda como un único mensaje de `Session`.
 
+### Micrófono local (STT experimental)
+
+En Windows, prepara explícitamente el modelo local fuera del repositorio y configura `YUKI_STT_MODEL_DIR` antes de iniciar el CLI:
+
+```text
+$env:STT_MODEL_DIR = "$env:LOCALAPPDATA\WaifuAssistant\models\whisper-tiny"
+npm run setup:local-stt-model -- $env:STT_MODEL_DIR
+$env:YUKI_STT_MODEL_DIR = $env:STT_MODEL_DIR
+node dist/main.js --interactive
+```
+
+En la conversación usa `/listen` para empezar a hablar y `/listen-stop` para finalizar la captura. El audio se procesa localmente y solo el transcript final entra al flujo normal de conversación. No se habilitan wake word, escucha en segundo plano ni almacenamiento de audio; la respuesta hablada/TTS no está incluida en este milestone.
+
 ## Comandos locales
 
 `/help` es la fuente actualizada de comandos y capacidades locales; las preguntas
