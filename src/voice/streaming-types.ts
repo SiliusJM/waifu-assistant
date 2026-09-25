@@ -42,10 +42,17 @@ export interface STTStartRequest {
 export interface StreamingSTTSession {
   pushAudio(chunk: AudioChunk): Promise<void>;
   endInput(): Promise<void>;
-  events(): AsyncIterable<TranscriptionEvent>;
+  events(): AsyncIterable<StreamingTranscriptionEvent>;
   cancel(reason?: VoiceTerminationReason): Promise<void>;
   close(): Promise<void>;
 }
+
+export type StreamingTranscriptionEvent = Exclude<TranscriptionEvent, { readonly type: 'final' }>
+  | { readonly type: 'final'; readonly text: string; readonly segmentId?: string }
+  | { readonly type: 'speech_start'; readonly segmentId: string }
+  | { readonly type: 'possible_noise' }
+  | { readonly type: 'speech_end'; readonly segmentId: string }
+  | { readonly type: 'no_speech' };
 
 export interface StreamingSTTProvider {
   readonly name: string;

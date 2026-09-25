@@ -121,6 +121,7 @@ export class VoiceConversationOrchestrator {
   private currentAssistantText = '';
   private assistantResponseCompleted = false;
   private bargeInAwaitingTranscript = false;
+  private readonly ambiguousVadSegmentIds = new Set<string>();
   private ambiguousCueEmitted = false;
   private ambiguousCueTimer: ReturnType<typeof setTimeout> | undefined;
   private activeCue: StreamingVoiceSynthesisHandle | undefined;
@@ -175,6 +176,8 @@ export class VoiceConversationOrchestrator {
     } else if (this.bargeInAwaitingTranscript) {
       // The user resumed speaking after the one-shot cue; remain in listening state.
       this.setState('listening', this.generation);
+    } else {
+      this.setState('listening', this.generation);
     }
     return true;
   }
@@ -199,6 +202,7 @@ export class VoiceConversationOrchestrator {
     this.interruptedContext = undefined;
     this.currentAssistantText = '';
     this.bargeInAwaitingTranscript = false;
+    this.ambiguousVadSegmentIds.clear();
     this.ambiguousCueEmitted = false;
     this.clearAmbiguousCueTimer();
     this.stopLocalCue();
@@ -288,7 +292,22 @@ export class VoiceConversationOrchestrator {
   async consumeTranscription(handle: StreamingVoiceOperationHandle<TranscriptionResult>): Promise<void> {
     try {
       for await (const event of handle.events()) {
-        if (event.type === 'transcription_partial' || event.type === 'transcription_final') {
+        if (event.type === 'speech_activity_started') {
+          const source = event.payload.source === 'possible-noise' || this.currentState === 'speaking'
+            ? 'possible-noise'
+            : 'confirmed-user-speech';
+          if (event.payload.segmentId) {
+            if (source === 'possible-noise') this.ambiguousVadSegmentIds.add(event.payload.segmentId);
+            else this.ambiguousVadSegmentIds.delete(event.payload.segmentId);
+          }
+          this.speechStart(source);
+        } else if (event.type === 'speech_activity_ended') {
+          this.speechEnd();
+        } else if (event.type === 'transcription_partial' || event.type === 'transcription_final') {
+          if (event.type === 'transcription_final' && event.payload.segmentId
+            && this.ambiguousVadSegmentIds.delete(event.payload.segmentId)) {
+            continue;
+          }
           this.acceptTranscription({
             type: event.type === 'transcription_partial' ? 'partial' : 'final',
             text: event.payload.text,
@@ -299,6 +318,8 @@ export class VoiceConversationOrchestrator {
       if (result.status === 'failed') this.reportTranscriptionFailure();
     } catch {
       this.reportTranscriptionFailure();
+    } finally {
+      this.ambiguousVadSegmentIds.clear();
     }
   }
 

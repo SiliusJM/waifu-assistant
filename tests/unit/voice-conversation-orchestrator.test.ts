@@ -532,6 +532,49 @@ test('possible noise and self-voice alone do not interrupt an active response', 
   assert.equal(runner.session.getMessages().at(-1)?.content, 'Respuesta en curso.');
 });
 
+test('VAD activity during assistant playback is treated as ambiguous and its transcript is not a turn', async () => {
+  const provider = fixedProvider('respuesta que sigue');
+  const output = new MockStreamingAudioOutputProvider({ delayMs: 250 });
+  const baseService = voiceService({ output });
+  const fakeCaptureHandle = {
+    async *events() {
+      yield { eventId: '1', voiceSessionId: 'capture', correlationId: 'capture', sequence: 1, occurredAt: new Date(0).toISOString(), monotonicMs: 1, type: 'speech_activity_started', payload: { source: 'confirmed-user-speech', segmentId: 'vad-segment-1' } };
+      yield { eventId: '2', voiceSessionId: 'capture', correlationId: 'capture', sequence: 2, occurredAt: new Date(0).toISOString(), monotonicMs: 2, type: 'speech_activity_ended', payload: { segmentId: 'vad-segment-1' } };
+      yield { eventId: '3', voiceSessionId: 'capture', correlationId: 'capture', sequence: 3, occurredAt: new Date(0).toISOString(), monotonicMs: 3, type: 'transcription_final', payload: { text: 'posible eco de Yuki', segmentId: 'vad-segment-1' } };
+    },
+    async result() { return { status: 'completed', value: { text: 'posible eco de Yuki' } }; },
+    shutdown() { return true; },
+    cancel() { return true; },
+  };
+  const service = {
+    startStreamingTranscription: () => fakeCaptureHandle,
+    startStreamingSynthesis: baseService.startStreamingSynthesis.bind(baseService),
+    shutdownStreaming: baseService.shutdownStreaming.bind(baseService),
+  } as unknown as VoiceService;
+  const runner = new ConversationRunner(new AssistantCore({ provider, logger: silentLogger }));
+  const orchestrator = new VoiceConversationOrchestrator({ runner, voiceService: service });
+  try {
+    orchestrator.acceptTranscription({ type: 'final', text: 'primera pregunta' });
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Assistant did not enter speaking state.')), 1000);
+      const unsubscribe = orchestrator.subscribe((event) => {
+        if (event.type === 'stateChanged' && event.state === 'speaking') {
+          clearTimeout(timer);
+          unsubscribe();
+          resolve();
+        }
+      });
+    });
+    await orchestrator.startTranscriptionCapture();
+    await orchestrator.whenIdle();
+    assert.equal(provider.requests.length, 1);
+    assert.equal(runner.session.getMessages().some(({ content }) => content.includes('posible eco de Yuki')), false);
+  } finally {
+    await orchestrator.shutdown();
+    await baseService.shutdownStreaming();
+  }
+});
+
 test('ambiguous pause plays at most one local cue, remains listening, and does not call Core or persist cue', async () => {
   const entered = deferred();
   const provider = new ScriptedProvider(async function* (_request, signal) {

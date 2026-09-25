@@ -114,6 +114,8 @@ export interface VoiceEventPayloadMap {
   readonly audio_input_stopped: { readonly chunkCount: number; readonly byteLength: number };
   readonly transcription_started: { readonly provider: string };
   readonly transcription_partial: { readonly text: string };
+  readonly speech_activity_started: { readonly source: 'confirmed-user-speech' | 'possible-noise'; readonly segmentId?: string };
+  readonly speech_activity_ended: { readonly segmentId?: string };
   readonly transcription_completed: { readonly text: string };
   readonly synthesis_started: { readonly provider: string; readonly textLength: number };
   readonly synthesis_completed: {
@@ -131,7 +133,7 @@ export interface VoiceEventPayloadMap {
     readonly format: AudioFormat;
     readonly timestampMs: number;
   };
-  readonly transcription_final: { readonly text: string };
+  readonly transcription_final: { readonly text: string; readonly segmentId?: string };
   readonly tts_chunk_ready: {
     readonly sequence: number;
     readonly byteLength: number;
