@@ -10,12 +10,26 @@ export function providerPacingDelayMs(nextRequestAt, now = Date.now()) {
 }
 
 export function providerPacingIntervalMs(profile, configuredValue) {
-  if (profile !== 'gemini' || configuredValue === undefined || configuredValue === '') return 0;
+  if (!['groq', 'gemini'].includes(profile) || configuredValue === undefined || configuredValue === '') return 0;
   const interval = Number(configuredValue);
   if (!Number.isSafeInteger(interval) || interval < 0) {
-    throw new Error('Gemini benchmark pacing interval must be a non-negative integer in milliseconds.');
+    throw new Error('Provider benchmark pacing interval must be a non-negative integer in milliseconds.');
   }
   return interval;
+}
+
+export function observeRateLimitOutcome(state, errorCategory) {
+  if (errorCategory === 'HTTP_429') {
+    state.rateLimitCount = (state.rateLimitCount ?? 0) + 1;
+    state.consecutiveRateLimits = (state.consecutiveRateLimits ?? 0) + 1;
+  } else state.consecutiveRateLimits = 0;
+  return { rateLimitCount: state.rateLimitCount ?? 0, consecutiveRateLimits: state.consecutiveRateLimits, shouldPause: state.consecutiveRateLimits >= 2 };
+}
+
+export function boundedRateLimitCooldownMs(retryAfterMs, fallbackCooldownMs, maximumMs = 900000) {
+  const cooldownMs = Number.isFinite(retryAfterMs) ? retryAfterMs : fallbackCooldownMs;
+  if (!Number.isSafeInteger(cooldownMs) || cooldownMs < 0) throw new Error('Rate-limit cooldown must be a non-negative integer in milliseconds.');
+  return cooldownMs <= maximumMs ? cooldownMs : undefined;
 }
 
 export function parseRetryAfterMs(value, now = Date.now()) {
@@ -30,7 +44,7 @@ export function parseBenchmarkArgs(argv) {
   const args = { profiles: ['omniroute', 'groq', 'gemini'], iterations: 3, timeoutMs: 30000 };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
-    if (value === '--profiles' || value === '--iterations' || value === '--scenario-set' || value === '--output' || value === '--timeout-ms' || value === '--model') {
+    if (value === '--profiles' || value === '--iterations' || value === '--scenario-set' || value === '--output' || value === '--timeout-ms' || value === '--model' || value === '--supplemental-from') {
       const next = argv[index + 1];
       if (!next || next.startsWith('--')) throw new Error(`Missing value for ${value}.`);
       if (value === '--profiles') args.profiles = next.split(',').map((profile) => profile.trim().toLowerCase()).filter(Boolean);
@@ -39,6 +53,7 @@ export function parseBenchmarkArgs(argv) {
       if (value === '--scenario-set') args.scenarioSet = next;
       if (value === '--output') args.output = next;
       if (value === '--model') args.model = next;
+      if (value === '--supplemental-from') args.supplementalFrom = next;
       index += 1;
     } else {
       throw new Error(`Unknown benchmark argument: ${value}`);
@@ -52,7 +67,62 @@ export function parseBenchmarkArgs(argv) {
   if (!Number.isInteger(args.timeoutMs) || args.timeoutMs < 5000 || args.timeoutMs > 60000) {
     throw new Error('Timeout must be between 5000 and 60000 milliseconds.');
   }
+  if (args.supplementalFrom && (!args.output || args.profiles.some((profile) => profile === 'omniroute'))) {
+    throw new Error('Supplemental mode requires --output and cannot include the omniroute profile.');
+  }
   return args;
+}
+
+export function allowedRateLimitHeaders(headers) {
+  const allowed = /^(?:retry-after|ratelimit-(?:limit|remaining|reset|policy)|x-ratelimit-(?:limit|remaining|reset|reset-requests|reset-tokens|resource|request-limit|request-remaining|request-reset))$/iu;
+  const output = {};
+  for (const [name, rawValue] of headers) {
+    const key = name.toLowerCase();
+    if (!allowed.test(key) || typeof rawValue !== 'string') continue;
+    const value = rawValue.replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, 160);
+    if (value) output[key] = value;
+  }
+  return output;
+}
+
+export function evaluationTaskKey(record) {
+  return `${record.profile}:${record.scenarioId}:iteration-${record.iteration}:turn-${record.turn ?? 1}`;
+}
+
+export function validEvaluationKeys(records, profile) {
+  return new Set(records
+    .filter((record) => record.profile === profile && record.kind === 'evaluation' && record.success === true && record.quality && typeof record.scenarioId === 'string' && Number.isInteger(record.iteration))
+    .map(evaluationTaskKey));
+}
+
+export function planMissingEvaluations(scenarioSet, records, profiles = ['groq', 'gemini']) {
+  const tasks = [];
+  for (const profile of profiles) {
+    const existing = validEvaluationKeys(records, profile);
+    for (let iteration = 1; iteration <= scenarioSet.iterations; iteration += 1) {
+      for (const scenario of scenarioSet.singleTurnScenarios) {
+        const task = { profile, kind: 'single', scenarioId: scenario.id, iteration };
+        if (!existing.has(evaluationTaskKey(task))) tasks.push(task);
+      }
+    }
+    for (let iteration = 1; iteration <= scenarioSet.multiTurn.sessions.length; iteration += 1) {
+      for (const turn of [1, 2]) {
+        const task = { profile, kind: 'multi', scenarioId: scenarioSet.multiTurn.id, iteration, turn };
+        if (!existing.has(evaluationTaskKey(task))) tasks.push(task);
+      }
+    }
+  }
+  const interleaved = [];
+  const queues = new Map(profiles.map((profile) => [profile, tasks.filter((task) => task.profile === profile)]));
+  let remaining = true;
+  while (remaining) {
+    remaining = false;
+    for (const profile of profiles) {
+      const task = queues.get(profile).shift();
+      if (task) { interleaved.push(task); remaining = true; }
+    }
+  }
+  return interleaved;
 }
 
 export async function loadScenarioSet(path) {

@@ -2,12 +2,17 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   evaluateScenario,
+  allowedRateLimitHeaders,
+  boundedRateLimitCooldownMs,
   loadScenarioSet,
+  planMissingEvaluations,
+  validEvaluationKeys,
   parseRetryAfterMs,
   parseBenchmarkArgs,
   providerPacingDelayMs,
   providerPacingIntervalMs,
   percentile,
+  observeRateLimitOutcome,
   redactRecord,
   resolveBenchmarkConfig,
   summarizeBenchmark,
@@ -53,14 +58,63 @@ test('quality checks are explicit and evaluate the fixed scenario contract', () 
   assert.equal(evaluateScenario(['answersCapabilityRequest'], 'Espero que estés bien.').pass, false);
 });
 
-test('Gemini pacing interval is optional/configurable and Retry-After supports seconds and HTTP dates', () => {
+test('Groq and Gemini pacing intervals are optional/configurable and Retry-After supports seconds and HTTP dates', () => {
   assert.equal(providerPacingDelayMs(7_000, 5_000), 2_000);
   assert.equal(providerPacingIntervalMs('gemini', '7000'), 7_000);
   assert.equal(providerPacingIntervalMs('gemini', undefined), 0);
-  assert.equal(providerPacingIntervalMs('groq', 'invalid'), 0);
+  assert.equal(providerPacingIntervalMs('groq', '9000'), 9_000);
+  assert.equal(providerPacingIntervalMs('omniroute', 'invalid'), 0);
+  assert.throws(() => providerPacingIntervalMs('groq', 'invalid'));
   assert.throws(() => providerPacingIntervalMs('gemini', 'invalid'));
   assert.equal(parseRetryAfterMs('2', 1_000), 2_000);
   assert.equal(parseRetryAfterMs(new Date(6_000).toUTCString(), 1_000), 5_000);
+});
+
+test('supplemental mode requires an output directory and excludes OmniRoute', () => {
+  const args = parseBenchmarkArgs(['--profiles', 'groq,gemini', '--output', 'D:\\temp\\supplement', '--supplemental-from', 'D:\\temp\\source\\raw-results.json']);
+  assert.equal(args.supplementalFrom, 'D:\\temp\\source\\raw-results.json');
+  assert.throws(() => parseBenchmarkArgs(['--profiles', 'omniroute,groq', '--output', 'D:\\temp\\supplement', '--supplemental-from', 'D:\\temp\\source\\raw-results.json']), /cannot include/u);
+  assert.throws(() => parseBenchmarkArgs(['--profiles', 'groq,gemini', '--supplemental-from', 'D:\\temp\\source\\raw-results.json']), /requires --output/u);
+});
+
+test('rate-limit header capture is allowlisted and excludes credentials/cookies', () => {
+  const captured = allowedRateLimitHeaders(new Headers({
+    'retry-after': '12',
+    'x-ratelimit-request-remaining': '3',
+    authorization: 'Bearer sentinel-secret',
+    'set-cookie': 'sid=secret',
+    'content-type': 'text/event-stream',
+  }).entries());
+  assert.deepEqual(captured, { 'retry-after': '12', 'x-ratelimit-request-remaining': '3' });
+  assert.equal(JSON.stringify(captured).includes('sentinel-secret'), false);
+});
+
+test('429 pauses only after two consecutive limits and cooldown honors a safe maximum', () => {
+  const state = { rateLimitCount: 0, consecutiveRateLimits: 0 };
+  assert.equal(observeRateLimitOutcome(state, 'HTTP_429').shouldPause, false);
+  assert.equal(observeRateLimitOutcome(state, 'HTTP_429').shouldPause, true);
+  assert.equal(observeRateLimitOutcome(state, 'HTTP_5XX').consecutiveRateLimits, 0);
+  assert.equal(observeRateLimitOutcome(state, 'HTTP_429').shouldPause, false);
+  assert.equal(boundedRateLimitCooldownMs(16000, 120000), 16000);
+  assert.equal(boundedRateLimitCooldownMs(undefined, 120000), 120000);
+  assert.equal(boundedRateLimitCooldownMs(900001, 120000), undefined);
+});
+
+test('supplement planner reuses valid tasks and schedules only the missing 28 Groq and 14 Gemini evaluations', async () => {
+  const scenarios = await loadScenarioSet(scenariosPath);
+  const allGroq = planMissingEvaluations(scenarios, [], ['groq']);
+  const allGemini = planMissingEvaluations(scenarios, [], ['gemini']);
+  const existing = [
+    ...allGroq.slice(0, 2).map((task) => ({ ...task, kind: 'evaluation', success: true, quality: { pass: true } })),
+    ...allGemini.slice(0, 16).map((task) => ({ ...task, kind: 'evaluation', success: true, quality: { pass: true } })),
+  ];
+  assert.equal(validEvaluationKeys(existing, 'groq').size, 2);
+  assert.equal(validEvaluationKeys(existing, 'gemini').size, 16);
+  const pending = planMissingEvaluations(scenarios, existing, ['groq', 'gemini']);
+  assert.equal(pending.filter(({ profile }) => profile === 'groq').length, 28);
+  assert.equal(pending.filter(({ profile }) => profile === 'gemini').length, 14);
+  assert.equal(pending.some(({ profile }) => profile === 'omniroute'), false);
+  assert.deepEqual(pending.slice(0, 4).map(({ profile }) => profile), ['groq', 'gemini', 'groq', 'gemini']);
 });
 
 test('percentiles use nearest-rank and summaries retain all failed-call latency samples', () => {
