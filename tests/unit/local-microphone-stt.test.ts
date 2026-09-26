@@ -149,6 +149,37 @@ test('microphone conversion downmixes, resamples and emits canonical little-endi
   assert.equal(downsampled.data.byteLength / 2, 32000);
 });
 
+test('microphone conversion averages interleaved channels without losing a single active channel', () => {
+  const pcm16 = (input: Float32Array): number => new DataView(
+    convertFloatInputToPcm16Mono(input, 2, 16000).data.buffer,
+  ).getInt16(0, true);
+
+  assert.equal(pcm16(new Float32Array([0.5, 0])), 8192, 'left-only signal is retained at the standard downmix level');
+  assert.equal(pcm16(new Float32Array([0, 0.5])), 8192, 'right-only signal is retained at the standard downmix level');
+  assert.equal(pcm16(new Float32Array([0.5, 0.5])), 16384, 'matching channels retain their original amplitude');
+  assert.equal(pcm16(new Float32Array([0.5, -0.5])), 0, 'opposite-polarity channels cancel during an averaging downmix');
+});
+
+test('microphone conversion preserves Float32 amplitude and the 48 kHz to 16 kHz sample ratio', () => {
+  const values = new Float32Array([
+    0, 0,
+    0.25, 0.25,
+    0.5, 0.5,
+    -0.5, -0.5,
+    0.9999, 0.9999,
+    -1, -1,
+  ]);
+  const direct = convertFloatInputToPcm16Mono(values, 2, 16000);
+  const directView = new DataView(direct.data.buffer);
+  assert.deepEqual(Array.from({ length: direct.data.byteLength / 2 }, (_, index) => directView.getInt16(index * 2, true)), [
+    0, 8192, 16384, -16384, 32764, -32768,
+  ]);
+
+  const resampled = convertFloatInputToPcm16Mono(new Float32Array(48_000 * 2).fill(0.5), 2, 48_000);
+  assert.equal(resampled.data.byteLength / 2, 16_000, '48 kHz source frames are decimated at the expected 3:1 ratio');
+  assert.equal(new DataView(resampled.data.buffer).getInt16(0, true), 16384, 'resampling does not apply an additional amplitude scale');
+});
+
 test('Windows microphone provider exposes bounded capture and a graceful explicit stop', async () => {
   const runtime = fakeCpal();
   const { WindowsMicrophoneInputProvider } = await import('../../src/voice/local/windows-microphone-input-provider.js');
