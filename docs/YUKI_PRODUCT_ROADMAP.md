@@ -189,6 +189,18 @@ Requirements:
 - allow a basic/free fallback when configured;
 - keep API keys and personal provider configuration out of Git.
 
+### Rate-limit-aware routing
+
+Routing must treat provider/model quotas as dynamic health signals rather than fixed guarantees:
+
+- Track provider/model usage locally when practical, including RPM, RPD, TPM, TPD and equivalent quotas; local counters are estimates, not authoritative remaining-quota values.
+- Consume provider rate-limit metadata and `Retry-After` when exposed. Provider responses and headers (especially HTTP 429) are authoritative; never invent an exact remaining quota when it is not provided.
+- Distinguish health states equivalent to `HEALTHY`, `NEAR_LIMIT`, `RATE_LIMITED` and `COOLDOWN`.
+- When an authorized healthy fallback exists, avoid deliberately exhausting a known short limit. A model-level limit must not automatically disable every model from that provider.
+- Permit configured model-level fallback before provider-level fallback. Treat OmniRoute as one routed provider when its internal combo manages model priority; use provider-level fallback only when the OmniRoute route itself fails or is rate-limited.
+- Apply bounded cooldown/backoff, hysteresis to prevent rapid oscillation, and return to the preferred provider when it is healthy again.
+- Never switch automatically to a paid option. Free-only remains the default; any future `allow-paid` behavior requires explicit configuration/authorization.
+
 ## Crash recovery / pending action journal
 
 Yuki should survive crashes, power loss, terminal closure and Windows restart without losing the state of actions that were waiting for confirmation or were in progress.
