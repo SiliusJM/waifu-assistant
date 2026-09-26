@@ -690,6 +690,33 @@ test('push-to-talk controller requires explicit start before stop and rejects du
   assert.equal(controller.isCapturing, false);
 });
 
+test('push-to-talk stop remains safe after a failed capture already completed cleanup', async () => {
+  let rejectCapture!: (error: Error) => void;
+  let stops = 0;
+  let idleWaits = 0;
+  const capture = new Promise<void>((_resolve, reject) => { rejectCapture = reject; });
+  const fake = {
+    startTranscriptionCapture: () => capture,
+    whenIdle: async () => { idleWaits += 1; },
+  } as unknown as VoiceConversationOrchestrator;
+  const controller = new PushToTalkController({
+    waitUntilReady: async () => {},
+    stopCapture: async () => { stops += 1; },
+  }, fake);
+
+  await controller.start();
+  rejectCapture(new VoiceError('synthetic STT failure', 'VOICE_STT_ERROR'));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.equal(controller.isCapturing, false);
+  await assert.doesNotReject(controller.stop());
+  assert.equal(stops, 1);
+  assert.equal(idleWaits, 1);
+  await assert.rejects(controller.stop(), (error: unknown) => (
+    error instanceof VoiceError && error.code === 'VOICE_STATE_ERROR'
+  ));
+});
+
 test('STT rejects non-canonical audio and bounds utterances to 30 seconds', async () => {
   const temporary = await temporaryModelFiles();
   const runtime: SherpaRuntime = {

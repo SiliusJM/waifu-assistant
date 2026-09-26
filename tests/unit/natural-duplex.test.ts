@@ -172,6 +172,7 @@ test('short pause resets endpoint grace and aggregated utterance dispatches one 
   emitSpeechEnd(orchestrator, 'part-1');
   orchestrator.emit({ type: 'transcriptionSegment', text: 'Hola', generation: 1, segmentId: 'part-1' });
   scheduler.advance(400);
+  assert.deepEqual(orchestrator.accepted, [], 'a sub-grace pause must not dispatch the first fragment');
   emitSpeechStart(orchestrator, 'part-2');
   assert.equal(controller.state, 'user_speaking');
   emitSpeechEnd(orchestrator, 'part-2');

@@ -76,6 +76,21 @@ const RESUME_PHRASES = new Set([
 const TOPIC_CHANGE_PHRASES = [
   'cambiando de tema', 'otra cosa', 'hablemos de otra cosa', 'olvida eso', 'dejemos eso',
 ];
+const MAX_NON_SPEECH_ANNOTATION_CHARACTERS = 80;
+
+/**
+ * Whisper can represent detected music or other non-verbal audio as a short
+ * caption-like annotation. This recognizes notation, not particular words, so
+ * ordinary short utterances such as "sí", "no" or "Yuki" remain valid.
+ */
+function isNonSpeechAnnotation(text: string): boolean {
+  const value = text.normalize('NFKC').trim();
+  const length = Array.from(value).length;
+  if (length < 2 || length > MAX_NON_SPEECH_ANNOTATION_CHARACTERS) return false;
+  return /^\[[^\]\r\n]{1,78}\]?$/u.test(value)
+    || /^\([^\r\n)]{1,78}\)$/u.test(value)
+    || /^\*[^*\r\n]{1,78}\*$/u.test(value);
+}
 
 function normalizeIntent(text: string): string {
   return text.normalize('NFD').replace(/[\u0300-\u036f]/gu, '').toLocaleLowerCase().replace(/[¿?¡!.,;:]/gu, '').trim();
@@ -306,6 +321,17 @@ export class VoiceConversationOrchestrator {
         } else if (event.type === 'transcription_partial' || event.type === 'transcription_final') {
           if (event.type === 'transcription_final' && event.payload.segmentId
             && this.ambiguousVadSegmentIds.delete(event.payload.segmentId)) {
+            continue;
+          }
+          if (event.type === 'transcription_final' && isNonSpeechAnnotation(event.payload.text)) {
+            if (this.deferFinalTranscripts) {
+              this.emit({
+                type: 'transcriptionSegment',
+                text: '',
+                generation: this.generation,
+                ...('segmentId' in event.payload && event.payload.segmentId ? { segmentId: event.payload.segmentId } : {}),
+              });
+            }
             continue;
           }
           if (event.type === 'transcription_final' && this.deferFinalTranscripts) {

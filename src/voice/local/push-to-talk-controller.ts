@@ -9,6 +9,7 @@ export interface StoppableMicrophone {
 /** Explicit single-utterance PTT boundary; transcript still flows through the existing orchestrator. */
 export class PushToTalkController {
   private captureTask: Promise<void> | undefined;
+  private stopPending = false;
 
   constructor(
     private readonly microphone: StoppableMicrophone,
@@ -22,6 +23,7 @@ export class PushToTalkController {
     const ready = this.microphone.waitUntilReady?.();
     const task = this.orchestrator.startTranscriptionCapture();
     this.captureTask = task;
+    this.stopPending = true;
     const clearCapture = (): void => { if (this.captureTask === task) this.captureTask = undefined; };
     void task.then(clearCapture, clearCapture);
     await ready;
@@ -29,9 +31,10 @@ export class PushToTalkController {
 
   async stop(): Promise<void> {
     const task = this.captureTask;
-    if (!task) throw new VoiceError('Push-to-talk capture is not active.', 'VOICE_STATE_ERROR');
+    if (!task && !this.stopPending) throw new VoiceError('Push-to-talk capture is not active.', 'VOICE_STATE_ERROR');
+    this.stopPending = false;
     await this.microphone.stopCapture();
-    await task;
+    await task?.catch(() => undefined);
     await this.orchestrator.whenIdle();
   }
 }

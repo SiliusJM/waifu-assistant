@@ -438,6 +438,79 @@ test('streaming VoiceService capture feeds partial/final events through the orch
   assert.equal(runner.session.getMessages().some(({ content }) => content.startsWith('partial-')), false);
 });
 
+test('caption-shaped non-speech transcripts do not create Session turns or provider calls', async (t) => {
+  const cases = [['[music', false], ['*sad*', true]] as const;
+  for (const [index, [transcript, deferredFinals]] of cases.entries()) {
+    await t.test(transcript, async () => {
+      const provider = fixedProvider();
+      const baseService = voiceService();
+      const segmentId = `noise-${index}`;
+      const captureHandle = {
+        async *events() {
+          yield { eventId: '1', voiceSessionId: 'capture', correlationId: 'capture', sequence: 1, occurredAt: new Date(0).toISOString(), monotonicMs: 1, type: 'speech_activity_started', payload: { source: 'confirmed-user-speech', segmentId } };
+          yield { eventId: '2', voiceSessionId: 'capture', correlationId: 'capture', sequence: 2, occurredAt: new Date(0).toISOString(), monotonicMs: 2, type: 'speech_activity_ended', payload: { segmentId } };
+          yield { eventId: '3', voiceSessionId: 'capture', correlationId: 'capture', sequence: 3, occurredAt: new Date(0).toISOString(), monotonicMs: 3, type: 'transcription_final', payload: { text: transcript, segmentId } };
+        },
+        async result() { return { status: 'completed', value: { text: transcript } }; },
+        shutdown() { return true; },
+        cancel() { return true; },
+      };
+      const service = {
+        startStreamingTranscription: () => captureHandle,
+        startStreamingSynthesis: baseService.startStreamingSynthesis.bind(baseService),
+        shutdownStreaming: baseService.shutdownStreaming.bind(baseService),
+      } as unknown as VoiceService;
+      const runner = new ConversationRunner(new AssistantCore({ provider, logger: silentLogger }));
+      const orchestrator = new VoiceConversationOrchestrator({ runner, voiceService: service });
+      const events: VoiceConversationEvent[] = [];
+      orchestrator.subscribe((event) => events.push(event));
+      try {
+        orchestrator.setDeferredFinalTranscripts(deferredFinals);
+        await orchestrator.startTranscriptionCapture();
+        await orchestrator.whenIdle();
+        assert.equal(provider.requests.length, 0);
+        assert.deepEqual(runner.session.getMessages(), []);
+        assert.equal(events.some((event) => event.type === 'transcriptionSegment'
+          && event.segmentId === segmentId && event.text === ''), deferredFinals);
+      } finally {
+        await orchestrator.shutdown();
+        await baseService.shutdownStreaming();
+      }
+    });
+  }
+});
+
+test('valid short speech remains accepted by the voice transcription boundary', async () => {
+  const provider = fixedProvider('Entendido.');
+  const baseService = voiceService();
+  const captureHandle = {
+    async *events() {
+      yield { eventId: '1', voiceSessionId: 'capture', correlationId: 'capture', sequence: 1, occurredAt: new Date(0).toISOString(), monotonicMs: 1, type: 'speech_activity_started', payload: { source: 'confirmed-user-speech', segmentId: 'short-speech' } };
+      yield { eventId: '2', voiceSessionId: 'capture', correlationId: 'capture', sequence: 2, occurredAt: new Date(0).toISOString(), monotonicMs: 2, type: 'speech_activity_ended', payload: { segmentId: 'short-speech' } };
+      yield { eventId: '3', voiceSessionId: 'capture', correlationId: 'capture', sequence: 3, occurredAt: new Date(0).toISOString(), monotonicMs: 3, type: 'transcription_final', payload: { text: 'sí', segmentId: 'short-speech' } };
+    },
+    async result() { return { status: 'completed', value: { text: 'sí' } }; },
+    shutdown() { return true; },
+    cancel() { return true; },
+  };
+  const service = {
+    startStreamingTranscription: () => captureHandle,
+    startStreamingSynthesis: baseService.startStreamingSynthesis.bind(baseService),
+    shutdownStreaming: baseService.shutdownStreaming.bind(baseService),
+  } as unknown as VoiceService;
+  const runner = new ConversationRunner(new AssistantCore({ provider, logger: silentLogger }));
+  const orchestrator = new VoiceConversationOrchestrator({ runner, voiceService: service });
+  try {
+    await orchestrator.startTranscriptionCapture();
+    await orchestrator.whenIdle();
+    assert.equal(provider.requests.length, 1);
+    assert.equal(runner.session.getMessages().some(({ role, content }) => role === 'user' && content === 'sí'), true);
+  } finally {
+    await orchestrator.shutdown();
+    await baseService.shutdownStreaming();
+  }
+});
+
 test('duplex defers finalized STT payload outside Session until the endpoint controller accepts it', async () => {
   const provider = fixedProvider('respuesta a la pregunta');
   const baseService = voiceService();
