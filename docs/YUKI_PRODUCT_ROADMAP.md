@@ -201,6 +201,23 @@ Routing must treat provider/model quotas as dynamic health signals rather than f
 - Apply bounded cooldown/backoff, hysteresis to prevent rapid oscillation, and return to the preferred provider when it is healthy again.
 - Never switch automatically to a paid option. Free-only remains the default; any future `allow-paid` behavior requires explicit configuration/authorization.
 
+### Provider latency and quality benchmark — pending completion
+
+The current benchmark is incomplete because Groq and Gemini encountered consecutive HTTP 429 responses despite pacing and cooldown. This is a temporary operational pause of approximately two days, **not** a verified provider quota-reset interval.
+
+Accumulated progress must be preserved and resumed rather than restarted:
+
+- OmniRoute: 30/30 evaluations complete; closed for this benchmark. Do not spend additional OmniRoute calls.
+- Groq: 22/30 valid evaluations; up to 8 remain.
+- Gemini: 16/30 valid evaluations; up to 14 remain.
+- Groq and Gemini each encountered two consecutive HTTP 429 responses. The limiting quota dimension is unknown; do not infer RPM, TPM, RPD, TPD or a reset time without authoritative evidence.
+
+Before resuming, inspect any already-captured retry headers, provider-console usage, free-tier documentation and other authoritative quota metadata available to the existing accounts. Record the applicable limit dimension (RPM, TPM, RPD, TPD, another documented limit, or `UNKNOWN`) and any explicitly stated reset interval. Do not change accounts, keys, models or tiers to evade limits. Do not enable billing, purchase access or use paid models.
+
+When permitted by the providers' observed limits, continue only the remaining Groq/Gemini scenarios with the same benchmark scenarios, model selections and provider configuration so results remain comparable. Complete the pending multi-turn checks for those providers and Gemini cancellation only if quota allows. Consolidate the existing and new samples; do not discard prior results. Only after the accumulated evidence is sufficient should the Provider / Model Priority and Automatic Fallback capability move from design/evidence toward implementation. This benchmark does not itself authorize routing/fallback implementation.
+
+On resumption, read this roadmap and the existing benchmark artifacts first, preserve completed work, and continue from the remaining counts above. Do not rerun closed OmniRoute evaluations or restart any provider's benchmark from zero.
+
 ## Crash recovery / pending action journal
 
 Yuki should survive crashes, power loss, terminal closure and Windows restart without losing the state of actions that were waiting for confirmation or were in progress.
