@@ -433,6 +433,7 @@ export class StreamingVoiceService {
       if (!lateNativeCaptureError) throw error;
       operation.mark('late_capture_error_after_finalized_segment');
     }
+    if (operation.signal.aborted) throw new VoiceError('The voice operation was cancelled.', 'VOICE_CANCELLATION_ERROR');
     await stt.endInput();
   }
 

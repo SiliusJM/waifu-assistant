@@ -287,7 +287,7 @@ export class VoiceConversationOrchestrator {
   }
 
   /** Starts one streaming capture/STT operation; providers remain caller-configured and may still be mocks. */
-  startTranscriptionCapture(): Promise<void> {
+  startTranscriptionCapture(options: { readonly aggregateVadSegments?: boolean } = {}): Promise<void> {
     if (this.closed) return Promise.resolve();
     if (this.activeCapture) {
       throw new VoiceError('A voice capture is already active for this conversation.', 'VOICE_CONCURRENCY_ERROR');
@@ -296,6 +296,7 @@ export class VoiceConversationOrchestrator {
     const handle = this.voiceService.startStreamingTranscription({
       // Capture leases are operation-scoped so a new utterance can be recognized while TTS is speaking.
       sessionId: `${this.runner.session.id}:capture:${captureId}`,
+      ...(options.aggregateVadSegments ? { aggregateVadSegments: true } : {}),
     }, { correlationId: `${this.runner.session.id}:${captureId}` });
     this.activeCapture = handle;
     const task = this.consumeTranscription(handle).finally(() => {
@@ -304,6 +305,11 @@ export class VoiceConversationOrchestrator {
     });
     this.captureTask = task;
     return task;
+  }
+
+  /** Cancels only the active capture; Natural Duplex uses this to discard pending audio on stop. */
+  cancelTranscriptionCapture(reason = 'The active transcription capture was discarded.'): void {
+    this.activeCapture?.shutdown(reason);
   }
 
   async consumeTranscription(handle: StreamingVoiceOperationHandle<TranscriptionResult>): Promise<void> {

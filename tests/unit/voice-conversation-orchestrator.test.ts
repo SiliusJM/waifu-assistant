@@ -553,6 +553,38 @@ test('duplex defers finalized STT payload outside Session until the endpoint con
   }
 });
 
+test('duplex opts into aggregate STT and can cancel only its active capture', async () => {
+  let receivedRequest: { readonly sessionId: string; readonly aggregateVadSegments?: boolean } | undefined;
+  let shutdownCount = 0;
+  const baseService = voiceService();
+  const captureHandle = {
+    async *events() {},
+    async result() { return { status: 'cancelled' as const }; },
+    shutdown() { shutdownCount += 1; return true; },
+    cancel() { return true; },
+  };
+  const service = {
+    startStreamingTranscription: (request: typeof receivedRequest) => {
+      receivedRequest = request;
+      return captureHandle;
+    },
+    startStreamingSynthesis: baseService.startStreamingSynthesis.bind(baseService),
+    shutdownStreaming: baseService.shutdownStreaming.bind(baseService),
+  } as unknown as VoiceService;
+  const runner = new ConversationRunner(new AssistantCore({ provider: fixedProvider('unused'), logger: silentLogger }));
+  const orchestrator = new VoiceConversationOrchestrator({ runner, voiceService: service });
+  try {
+    const captureTask = orchestrator.startTranscriptionCapture({ aggregateVadSegments: true });
+    assert.equal(receivedRequest?.aggregateVadSegments, true);
+    orchestrator.cancelTranscriptionCapture('discard pending test audio');
+    assert.equal(shutdownCount, 1);
+    await captureTask;
+  } finally {
+    await orchestrator.shutdown();
+    await baseService.shutdownStreaming();
+  }
+});
+
 test('voice conversation uses exactly one TTS endInput for a completed assistant turn', async () => {
   let endInputCount = 0;
   const baseTts = new MockStreamingTTSProvider();

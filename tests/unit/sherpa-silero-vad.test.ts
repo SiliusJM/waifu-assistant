@@ -241,6 +241,184 @@ test('Sherpa Whisper decodes sequential VAD segments only and keeps activity sep
   }
 });
 
+test('opt-in VAD aggregation decodes multiple bounded fragments once at endInput', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'waifu-vad-aggregate-test-'));
+  const vadPath = join(directory, 'silero_vad.onnx');
+  const whisperPath = join(directory, 'whisper-model.onnx');
+  await Promise.all([writeFile(vadPath, 'vad fixture'), writeFile(whisperPath, 'whisper fixture')]);
+  let decodeCalls = 0;
+  let accepted: Float32Array | undefined;
+  const runtime: SherpaRuntime = {
+    Vad: FakeDetector,
+    OfflineRecognizer: {
+      async createAsync() {
+        return {
+          createStream: () => ({ acceptWaveform: ({ samples }) => { accepted = samples.slice(); } }),
+          async decodeAsync() { decodeCalls += 1; return { text: 'una frase completa' }; },
+        };
+      },
+    },
+  };
+  try {
+    const provider = new SherpaWhisperSTTProvider(
+      { encoder: whisperPath, decoder: whisperPath, tokens: whisperPath }, runtime, { modelPath: vadPath },
+    );
+    const session = await provider.start({ sessionId: 'aggregate', aggregateVadSegments: true }, {
+      signal: new AbortController().signal, correlationId: 'aggregate',
+    });
+    const collecting = (async () => {
+      const events = [];
+      for await (const event of session.events()) events.push(event);
+      return events;
+    })();
+    const chunk = (sequence: number, sample: number) => ({
+      data: pcmFrame(sample), format: { encoding: 'pcm_s16le' as const, sampleRateHz: 16000, channels: 1 }, sequence, capturedAt: '',
+    });
+    await session.pushAudio(chunk(0, 8000));
+    await session.pushAudio(chunk(1, 0));
+    await session.pushAudio(chunk(2, 16000));
+    await session.pushAudio(chunk(3, 0));
+    await session.pushAudio(chunk(4, 24000));
+    await session.pushAudio(chunk(5, 0));
+    assert.equal(decodeCalls, 0, 'finalized pauses must remain buffered until capture end');
+    await session.endInput();
+    const events = await collecting;
+    assert.equal(decodeCalls, 1);
+    assert.equal(accepted?.length, 1536);
+    assert.ok(accepted?.slice(0, 512).every((sample) => Math.abs(sample - (8000 / 32767)) < 1e-6));
+    assert.ok(accepted?.slice(512, 1024).every((sample) => Math.abs(sample - (16000 / 32767)) < 1e-6));
+    assert.ok(accepted?.slice(1024).every((sample) => Math.abs(sample - (24000 / 32767)) < 1e-6));
+    const finals = events.filter((event) => event.type === 'final');
+    assert.equal(finals.length, 1);
+    assert.deepEqual(finals[0], { type: 'final', text: 'una frase completa' });
+    assert.equal(events.filter((event) => event.type === 'speech_start').length, 3);
+    assert.equal(events.filter((event) => event.type === 'speech_end').length, 3);
+    await session.close();
+    accepted?.fill(0);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('opt-in VAD aggregation preserves a short valid utterance', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'waifu-vad-aggregate-short-'));
+  const vadPath = join(directory, 'silero_vad.onnx');
+  const whisperPath = join(directory, 'whisper-model.onnx');
+  await Promise.all([writeFile(vadPath, 'vad fixture'), writeFile(whisperPath, 'whisper fixture')]);
+  let decodedSamples = 0;
+  const runtime: SherpaRuntime = {
+    Vad: FakeDetector,
+    OfflineRecognizer: {
+      async createAsync() {
+        return {
+          createStream: () => ({ acceptWaveform: ({ samples }) => { decodedSamples = samples.length; } }),
+          async decodeAsync() { return { text: 'sí' }; },
+        };
+      },
+    },
+  };
+  try {
+    const provider = new SherpaWhisperSTTProvider(
+      { encoder: whisperPath, decoder: whisperPath, tokens: whisperPath }, runtime, { modelPath: vadPath },
+    );
+    const session = await provider.start({ sessionId: 'short', aggregateVadSegments: true }, {
+      signal: new AbortController().signal, correlationId: 'short',
+    });
+    const collecting = (async () => {
+      const events = [];
+      for await (const event of session.events()) events.push(event);
+      return events;
+    })();
+    await session.pushAudio({ data: pcmFrame(8000), format: { encoding: 'pcm_s16le', sampleRateHz: 16000, channels: 1 }, sequence: 0, capturedAt: '' });
+    await session.pushAudio({ data: pcmFrame(0), format: { encoding: 'pcm_s16le', sampleRateHz: 16000, channels: 1 }, sequence: 1, capturedAt: '' });
+    await session.endInput();
+    const events = await collecting;
+    assert.equal(decodedSamples, 512);
+    assert.deepEqual(events.filter((event) => event.type === 'final'), [{ type: 'final', text: 'sí' }]);
+    await session.close();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('cancelling pending aggregate audio prevents a later decode', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'waifu-vad-aggregate-cancel-'));
+  const vadPath = join(directory, 'silero_vad.onnx');
+  const whisperPath = join(directory, 'whisper-model.onnx');
+  await Promise.all([writeFile(vadPath, 'vad fixture'), writeFile(whisperPath, 'whisper fixture')]);
+  let decodeCalls = 0;
+  const runtime: SherpaRuntime = {
+    Vad: FakeDetector,
+    OfflineRecognizer: {
+      async createAsync() {
+        return {
+          createStream: () => ({ acceptWaveform() {} }),
+          async decodeAsync() { decodeCalls += 1; return { text: 'stale' }; },
+        };
+      },
+    },
+  };
+  try {
+    const provider = new SherpaWhisperSTTProvider(
+      { encoder: whisperPath, decoder: whisperPath, tokens: whisperPath }, runtime, { modelPath: vadPath },
+    );
+    const session = await provider.start({ sessionId: 'cancel', aggregateVadSegments: true }, {
+      signal: new AbortController().signal, correlationId: 'cancel',
+    });
+    await session.pushAudio({ data: pcmFrame(8000), format: { encoding: 'pcm_s16le', sampleRateHz: 16000, channels: 1 }, sequence: 0, capturedAt: '' });
+    await session.pushAudio({ data: pcmFrame(0), format: { encoding: 'pcm_s16le', sampleRateHz: 16000, channels: 1 }, sequence: 1, capturedAt: '' });
+    await session.cancel();
+    await session.endInput();
+    assert.equal(decodeCalls, 0);
+    await session.close();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('aggregate decode failure releases buffered audio and does not schedule a stale retry', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'waifu-vad-aggregate-error-'));
+  const vadPath = join(directory, 'silero_vad.onnx');
+  const whisperPath = join(directory, 'whisper-model.onnx');
+  await Promise.all([writeFile(vadPath, 'vad fixture'), writeFile(whisperPath, 'whisper fixture')]);
+  let decodeCalls = 0;
+  const runtime: SherpaRuntime = {
+    Vad: FakeDetector,
+    OfflineRecognizer: {
+      async createAsync() {
+        return {
+          createStream: () => ({ acceptWaveform() {} }),
+          async decodeAsync() { decodeCalls += 1; throw new Error('synthetic decoder failure'); },
+        };
+      },
+    },
+  };
+  try {
+    const provider = new SherpaWhisperSTTProvider(
+      { encoder: whisperPath, decoder: whisperPath, tokens: whisperPath }, runtime, { modelPath: vadPath },
+    );
+    const session = await provider.start({ sessionId: 'aggregate-error', aggregateVadSegments: true }, {
+      signal: new AbortController().signal, correlationId: 'aggregate-error',
+    });
+    const collecting = (async () => {
+      const events = [];
+      for await (const event of session.events()) events.push(event);
+      return events;
+    })();
+    await session.pushAudio({ data: pcmFrame(8000), format: { encoding: 'pcm_s16le', sampleRateHz: 16000, channels: 1 }, sequence: 0, capturedAt: '' });
+    await session.pushAudio({ data: pcmFrame(0), format: { encoding: 'pcm_s16le', sampleRateHz: 16000, channels: 1 }, sequence: 1, capturedAt: '' });
+    await assert.rejects(session.endInput(), (error: unknown) => error instanceof VoiceError && error.code === 'VOICE_STT_ERROR');
+    const events = await collecting;
+    assert.equal(decodeCalls, 1);
+    assert.equal(events.some((event) => event.type === 'final'), false);
+    await session.cancel();
+    await session.close();
+    assert.equal(decodeCalls, 1);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('opt-in STT diagnostics trace a VAD segment through Whisper without exposing audio or transcript text', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'waifu-vad-stt-diagnostics-'));
   const vadPath = join(directory, 'silero_vad.onnx');

@@ -34,7 +34,6 @@ export const DEFAULT_DUPLEX_CAPTURE_ROTATION_MS = 20_000;
 const MAX_PAUSE_GRACE_MS = 2_000;
 const MAX_CAPTURE_ROTATION_MS = 25_000;
 const MIN_CAPTURE_ROTATION_MS = 5_000;
-const SEGMENT_FINALIZATION_TIMEOUT_MS = 5_000;
 const MAX_PENDING_TRANSCRIPT_CHARACTERS = 2_000;
 
 const nativeScheduler: NaturalDuplexTimerScheduler = {
@@ -74,7 +73,6 @@ export class NaturalDuplexController {
   private captureTask: Promise<void> | undefined;
   private stoppingCapture: Promise<void> | undefined;
   private endpointTimer: unknown;
-  private finalizationTimer: unknown;
   private rotationTimer: unknown;
   private cycle: Promise<void> | undefined;
   private endpointGeneration = 0;
@@ -84,7 +82,6 @@ export class NaturalDuplexController {
   private endpointGraceElapsed = false;
   private pendingTranscript = '';
   private readonly seenSegmentIds = new Set<string>();
-  private readonly pendingSegmentIds = new Set<string>();
 
   constructor(options: NaturalDuplexControllerOptions) {
     this.microphone = options.microphone;
@@ -130,16 +127,17 @@ export class NaturalDuplexController {
     this.active = false;
     this.endpointGeneration += 1;
     this.clearTimer('endpoint');
-    this.clearTimer('finalization');
     this.clearTimer('rotation');
     this.unsubscribeOrchestrator?.();
     this.unsubscribeOrchestrator = undefined;
     this.pendingTranscript = '';
     this.seenSegmentIds.clear();
-    this.pendingSegmentIds.clear();
     this.speechActive = false;
     this.endpointGraceElapsed = false;
-    try { await this.stopCaptureWindow(); } finally {
+    try {
+      this.orchestrator.cancelTranscriptionCapture('Natural duplex stopped; discard pending audio.');
+      await this.stopCaptureWindow();
+    } finally {
       await this.cycle?.catch(() => undefined);
       try { this.orchestrator.setDeferredFinalTranscripts(false); } finally { this.move('idle'); }
     }
@@ -151,9 +149,13 @@ export class NaturalDuplexController {
       if (event.source !== 'confirmed-user-speech') return;
       if (event.segmentId && this.seenSegmentIds.has(event.segmentId)) return;
       if (event.segmentId) this.seenSegmentIds.add(event.segmentId);
+      const supersedesPendingEndpoint = this.endpointGraceElapsed;
       this.endpointGeneration += 1;
+      if (supersedesPendingEndpoint) {
+        this.pendingTranscript = '';
+        this.orchestrator.cancelTranscriptionCapture('A newer utterance superseded pending duplex audio.');
+      }
       this.clearTimer('endpoint');
-      this.clearTimer('finalization');
       this.endpointGraceElapsed = false;
       this.speechActive = true;
       if (this.state === 'speaking' || this.state === 'thinking') this.move('interrupted');
@@ -161,22 +163,15 @@ export class NaturalDuplexController {
     } else if (event.type === 'speechEnd') {
       if (!this.speechActive) return;
       this.speechActive = false;
-      if (event.segmentId) this.pendingSegmentIds.add(event.segmentId);
       this.move('endpoint_pending');
       this.armEndpointTimer();
     } else if (event.type === 'transcriptionSegment') {
-      if (event.segmentId) this.pendingSegmentIds.delete(event.segmentId);
-      else this.pendingSegmentIds.clear();
       if (event.segmentId && this.seenSegmentIds.has(`final:${event.segmentId}`)) return;
       if (event.segmentId) this.seenSegmentIds.add(`final:${event.segmentId}`);
       const text = event.text.trim();
       if (text) {
         const combined = this.pendingTranscript ? `${this.pendingTranscript} ${text}` : text;
         this.pendingTranscript = Array.from(combined).slice(0, MAX_PENDING_TRANSCRIPT_CHARACTERS).join('');
-      }
-      if (this.endpointGraceElapsed && !this.speechActive && this.pendingSegmentIds.size === 0) {
-        this.clearTimer('finalization');
-        void this.runCycle('endpoint', this.endpointGeneration).catch(() => this.failClosed('VOICE_CAPTURE_ERROR'));
       }
     } else if (event.type === 'assistantSpeechStart') {
       this.move('speaking');
@@ -197,7 +192,7 @@ export class NaturalDuplexController {
     if (!this.active || this.captureTask) return;
     let task: Promise<void>;
     try {
-      task = this.orchestrator.startTranscriptionCapture();
+      task = this.orchestrator.startTranscriptionCapture({ aggregateVadSegments: true });
     } catch (error) {
       throw error instanceof VoiceError ? error : new VoiceError('Natural duplex capture could not start.', 'VOICE_CAPTURE_ERROR');
     }
@@ -249,15 +244,6 @@ export class NaturalDuplexController {
       this.endpointTimer = undefined;
       if (!this.active || this.speechActive || generation !== this.endpointGeneration) return;
       this.endpointGraceElapsed = true;
-      if (this.pendingSegmentIds.size > 0) {
-        this.finalizationTimer = this.scheduler.setTimeout(() => {
-          this.finalizationTimer = undefined;
-          if (!this.active || !this.endpointGraceElapsed || generation !== this.endpointGeneration) return;
-          if (this.pendingSegmentIds.size > 0) void this.failClosed('VOICE_STT_ERROR');
-          else void this.runCycle('endpoint', generation).catch(() => this.failClosed('VOICE_CAPTURE_ERROR'));
-        }, SEGMENT_FINALIZATION_TIMEOUT_MS);
-        return;
-      }
       void this.runCycle('endpoint', generation).catch(() => this.failClosed('VOICE_CAPTURE_ERROR'));
     }, this.pauseGraceMs);
   }
@@ -297,7 +283,6 @@ export class NaturalDuplexController {
     if (kind === 'endpoint') {
       this.pendingTranscript = '';
       this.seenSegmentIds.clear();
-      this.pendingSegmentIds.clear();
       this.speechActive = false;
       this.endpointGraceElapsed = false;
       if (text) this.move('thinking');
@@ -320,14 +305,13 @@ export class NaturalDuplexController {
     this.emit({ type: 'stateChanged', state });
   }
 
-  private clearTimer(which: 'endpoint' | 'finalization' | 'rotation'): void {
+  private clearTimer(which: 'endpoint' | 'rotation'): void {
     const timer = which === 'endpoint'
       ? this.endpointTimer
-      : which === 'finalization' ? this.finalizationTimer : this.rotationTimer;
+      : this.rotationTimer;
     if (timer === undefined) return;
     this.scheduler.clearTimeout(timer);
     if (which === 'endpoint') this.endpointTimer = undefined;
-    else if (which === 'finalization') this.finalizationTimer = undefined;
     else this.rotationTimer = undefined;
   }
 

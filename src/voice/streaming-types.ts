@@ -37,6 +37,8 @@ export interface StreamingAudioInputProvider {
 export interface STTStartRequest {
   readonly sessionId: string;
   readonly language?: string;
+  /** Opt-in utterance aggregation for Natural Duplex; disabled for PTT by default. */
+  readonly aggregateVadSegments?: boolean;
 }
 
 export interface StreamingSTTSession {

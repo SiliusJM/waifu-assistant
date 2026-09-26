@@ -112,6 +112,8 @@ async function requireModelFile(file: string): Promise<void> {
 class SherpaWhisperSession implements StreamingSTTSession {
   private readonly output = new BoundedAsyncQueue<StreamingTranscriptionEvent>(2);
   private chunks: Float32Array[] = [];
+  private aggregateVadSegments: Float32Array[] = [];
+  private aggregateVadSampleCount = 0;
   private sampleCount = 0;
   private vadDecodeQueue: Promise<void> = Promise.resolve();
   private vadDecodeError: VoiceError | undefined;
@@ -127,6 +129,7 @@ class SherpaWhisperSession implements StreamingSTTSession {
     private readonly recognizer: SherpaRecognizer,
     private readonly signal: AbortSignal,
     private readonly vad?: SherpaSileroVad,
+    private readonly aggregateVad = false,
     private readonly onDiagnostic?: (event: SherpaSttDiagnosticEvent) => void,
   ) {}
 
@@ -211,6 +214,8 @@ class SherpaWhisperSession implements StreamingSTTSession {
         }
         await this.vadDecodeQueue;
         if (this.vadDecodeError) throw this.vadDecodeError;
+        if (this.aggregateVad && this.aggregateVadSampleCount > 0) await this.decodeAggregateVadSegments();
+        if (this.vadDecodeError) throw this.vadDecodeError;
         if (this.vadFinalCount === 0) await this.output.enqueue({ type: 'no_speech' }, this.signal);
         this.output.finish();
         return;
@@ -256,7 +261,13 @@ class SherpaWhisperSession implements StreamingSTTSession {
 
   events(): AsyncIterable<StreamingTranscriptionEvent> { return this.output; }
 
-  async cancel(): Promise<void> { this.clearAudio(); this.vad?.close(); this.output.close(); }
+  async cancel(): Promise<void> {
+    this.ended = true;
+    this.closed = true;
+    this.clearAudio();
+    this.vad?.close();
+    this.output.close();
+  }
 
   async close(): Promise<void> { this.closed = true; this.clearAudio(); this.vad?.close(); this.output.close(); }
 
@@ -270,6 +281,17 @@ class SherpaWhisperSession implements StreamingSTTSession {
       sampleCount: samples.length,
       durationMs: Math.round((samples.length / CANONICAL_AUDIO_FORMAT.sampleRateHz) * 1000),
     });
+    if (this.aggregateVad) {
+      if (this.aggregateVadSampleCount + samples.length > MAX_SAMPLES) {
+        samples.fill(0);
+        this.vadDecodeError = new VoiceError('Local STT input exceeded its duration limit.', 'VOICE_BACKPRESSURE_ERROR');
+        this.output.close();
+        return;
+      }
+      this.aggregateVadSegments.push(samples);
+      this.aggregateVadSampleCount += samples.length;
+      return;
+    }
     this.vadDecodeQueue = this.vadDecodeQueue.then(async () => {
       if (this.signal.aborted || this.closed || this.vadDecodeError) { samples.fill(0); return; }
       try {
@@ -301,9 +323,54 @@ class SherpaWhisperSession implements StreamingSTTSession {
     });
   }
 
+  private async decodeAggregateVadSegments(): Promise<void> {
+    const samples = new Float32Array(this.aggregateVadSampleCount);
+    let offset = 0;
+    for (const segment of this.aggregateVadSegments) {
+      samples.set(segment, offset);
+      offset += segment.length;
+      segment.fill(0);
+    }
+    this.aggregateVadSegments = [];
+    this.aggregateVadSampleCount = 0;
+    try {
+      if (this.signal.aborted || this.closed) throw new VoiceError('Local transcription was cancelled.', 'VOICE_CANCELLATION_ERROR');
+      this.report('stt-input-prepared', {
+        sampleCount: samples.length,
+        durationMs: Math.round((samples.length / CANONICAL_AUDIO_FORMAT.sampleRateHz) * 1000),
+      });
+      const stream = this.recognizer.createStream();
+      this.report('stt-accept-waveform-started');
+      stream.acceptWaveform({ samples, sampleRate: CANONICAL_AUDIO_FORMAT.sampleRateHz });
+      this.report('stt-accept-waveform-completed');
+      this.report('stt-decode-started');
+      const result = await this.recognizer.decodeAsync(stream);
+      this.report('stt-decode-completed');
+      const text = typeof result.text === 'string' ? result.text.trim() : '';
+      this.report('stt-result-read');
+      if (text && !this.signal.aborted && !this.closed) {
+        this.report('final-transcript-available');
+        await this.output.enqueue({ type: 'final', text }, this.signal);
+        this.vadFinalCount += 1;
+      }
+    } catch (error) {
+      this.reportError('vad-aggregate-decode', error);
+      this.vadDecodeError = error instanceof VoiceError
+        ? error
+        : new VoiceError('Local speech recognition failed.', 'VOICE_STT_ERROR');
+      this.output.close();
+      throw this.vadDecodeError;
+    } finally {
+      samples.fill(0);
+    }
+  }
+
   private clearAudio(): void {
     for (const chunk of this.chunks) chunk.fill(0);
     this.chunks = [];
+    for (const segment of this.aggregateVadSegments) segment.fill(0);
+    this.aggregateVadSegments = [];
+    this.aggregateVadSampleCount = 0;
     this.sampleCount = 0;
   }
 }
@@ -348,7 +415,13 @@ export class SherpaWhisperSTTProvider implements StreamingSTTProvider {
       throw new VoiceError('Local transcription was cancelled.', 'VOICE_CANCELLATION_ERROR');
     }
     this.report({ stage: 'stt-recognizer-created' });
-    return new SherpaWhisperSession(recognizer, options.signal, vad, this.diagnostic.onDiagnostic);
+    return new SherpaWhisperSession(
+      recognizer,
+      options.signal,
+      vad,
+      request.aggregateVadSegments === true,
+      this.diagnostic.onDiagnostic,
+    );
   }
 
   private report(event: SherpaSttDiagnosticEvent): void {

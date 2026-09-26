@@ -45,9 +45,14 @@ function deferred(): { readonly promise: Promise<void>; resolve(): void } {
 class FakeOrchestrator {
   readonly accepted: string[] = [];
   readonly deferredModes: boolean[] = [];
+  readonly aggregateRequests: boolean[] = [];
+  readonly lifecycle: string[] = [];
   startCount = 0;
+  cancelCount = 0;
   private readonly listeners = new Set<(event: VoiceConversationEvent) => void>();
   private activeCapture: ReturnType<typeof deferred> | undefined;
+  private stopTranscripts: string[] = [];
+  private cancelled = false;
 
   subscribe(listener: (event: VoiceConversationEvent) => void): () => void {
     this.listeners.add(listener);
@@ -56,17 +61,31 @@ class FakeOrchestrator {
 
   setDeferredFinalTranscripts(value: boolean): void { this.deferredModes.push(value); }
 
-  startTranscriptionCapture(): Promise<void> {
+  startTranscriptionCapture(options: { readonly aggregateVadSegments?: boolean } = {}): Promise<void> {
     this.startCount += 1;
+    this.aggregateRequests.push(options.aggregateVadSegments === true);
+    this.lifecycle.push('start');
     if (this.activeCapture) throw new Error('capture already active');
+    this.cancelled = false;
     this.activeCapture = deferred();
     return this.activeCapture.promise;
   }
 
   stopCapture(): void {
+    this.lifecycle.push('stop');
     const capture = this.activeCapture;
     this.activeCapture = undefined;
+    const text = this.stopTranscripts.shift();
+    if (!this.cancelled && text) this.emit({ type: 'transcriptionSegment', text, generation: 1 });
     capture?.resolve();
+  }
+
+  queueStopTranscript(text: string): void { this.stopTranscripts.push(text); }
+
+  cancelTranscriptionCapture(): void {
+    this.cancelCount += 1;
+    this.cancelled = true;
+    this.lifecycle.push('cancel');
   }
 
   acceptTranscription(event: { readonly type: 'final'; readonly text: string }): boolean {
@@ -170,18 +189,18 @@ test('short pause resets endpoint grace and aggregated utterance dispatches one 
   await controller.start();
   emitSpeechStart(orchestrator, 'part-1');
   emitSpeechEnd(orchestrator, 'part-1');
-  orchestrator.emit({ type: 'transcriptionSegment', text: 'Hola', generation: 1, segmentId: 'part-1' });
   scheduler.advance(400);
   assert.deepEqual(orchestrator.accepted, [], 'a sub-grace pause must not dispatch the first fragment');
   emitSpeechStart(orchestrator, 'part-2');
   assert.equal(controller.state, 'user_speaking');
   emitSpeechEnd(orchestrator, 'part-2');
-  orchestrator.emit({ type: 'transcriptionSegment', text: 'Yuki', generation: 1, segmentId: 'part-2' });
+  orchestrator.queueStopTranscript('Hola Yuki');
   scheduler.advance(500);
   await flushMicrotasks();
 
   assert.deepEqual(orchestrator.accepted, ['Hola Yuki']);
   assert.equal(orchestrator.startCount, 2);
+  assert.deepEqual(orchestrator.aggregateRequests, [true, true]);
   assert.equal(controller.state, 'thinking');
   await controller.shutdown();
 });
@@ -206,40 +225,82 @@ test('duplicate speech end/final events and noise-only events do not duplicate o
   await controller.shutdown();
 });
 
-test('endpoint waits for the finalized STT segment before closing its capture window', async () => {
+test('endpoint closes the capture after grace so aggregate STT can finalize one result', async () => {
   const { controller, microphone, orchestrator, scheduler } = setup();
   await controller.start();
   emitSpeechStart(orchestrator, 'delayed-decode');
   emitSpeechEnd(orchestrator, 'delayed-decode');
+  orchestrator.queueStopTranscript('decode final');
   scheduler.advance(500);
-  await flushMicrotasks();
-  assert.equal(microphone.stopCount, 0);
-  assert.deepEqual(orchestrator.accepted, []);
-
-  orchestrator.emit({ type: 'transcriptionSegment', text: 'decode final', generation: 1, segmentId: 'delayed-decode' });
   await flushMicrotasks();
   assert.equal(microphone.stopCount, 1);
   assert.deepEqual(orchestrator.accepted, ['decode final']);
   await controller.shutdown();
 });
 
-test('missing final STT segment fails closed after a bounded completion deadline', async () => {
+test('a short valid utterance is dispatched without a minimum-duration rejection', async () => {
   const { controller, microphone, orchestrator, scheduler, events } = setup();
   await controller.start();
-  emitSpeechStart(orchestrator, 'stalled-decode');
-  emitSpeechEnd(orchestrator, 'stalled-decode');
+  emitSpeechStart(orchestrator, 'short');
+  emitSpeechEnd(orchestrator, 'short');
+  orchestrator.queueStopTranscript('sí');
   scheduler.advance(500);
   await flushMicrotasks();
   assert.equal(controller.isActive, true);
-  scheduler.advance(4_999);
+  assert.equal(microphone.stopCount, 1);
+  assert.deepEqual(orchestrator.accepted, ['sí']);
+  assert.equal(events.includes('error:VOICE_STT_ERROR'), false);
+  await controller.shutdown();
+});
+
+test('pause beyond grace dispatches separate utterances in separate captures', async () => {
+  const { controller, orchestrator, scheduler } = setup();
+  await controller.start();
+  emitSpeechStart(orchestrator, 'first');
+  emitSpeechEnd(orchestrator, 'first');
+  orchestrator.queueStopTranscript('primera');
+  scheduler.advance(500);
   await flushMicrotasks();
-  assert.equal(controller.isActive, true);
-  scheduler.advance(1);
+  assert.deepEqual(orchestrator.accepted, ['primera']);
+
+  emitSpeechStart(orchestrator, 'second');
+  emitSpeechEnd(orchestrator, 'second');
+  orchestrator.queueStopTranscript('segunda');
+  scheduler.advance(500);
+  await flushMicrotasks();
+  assert.deepEqual(orchestrator.accepted, ['primera', 'segunda']);
+  await controller.shutdown();
+});
+
+test('duplex stop cancels pending aggregate before microphone stop and clears timers', async () => {
+  const { controller, microphone, orchestrator, scheduler } = setup();
+  await controller.start();
+  emitSpeechStart(orchestrator, 'pending');
+  emitSpeechEnd(orchestrator, 'pending');
+  orchestrator.queueStopTranscript('must not dispatch');
+  await controller.shutdown();
+  assert.deepEqual(orchestrator.accepted, []);
+  assert.ok(orchestrator.lifecycle.indexOf('cancel') < orchestrator.lifecycle.lastIndexOf('stop'));
+  assert.equal(orchestrator.cancelCount, 1);
+  assert.equal(microphone.stopCount, 1);
+  assert.equal(scheduler.pendingCount, 0);
+});
+
+test('STT error during pending duplex audio cancels capture and prevents delayed dispatch', async () => {
+  const { controller, microphone, orchestrator, scheduler, events } = setup();
+  await controller.start();
+  emitSpeechStart(orchestrator, 'error-pending');
+  emitSpeechEnd(orchestrator, 'error-pending');
+  orchestrator.queueStopTranscript('stale result');
+  orchestrator.emit({ type: 'error', stage: 'stt', code: 'VOICE_STT_ERROR', generation: 1 });
   await flushMicrotasks();
   assert.equal(controller.isActive, false);
   assert.equal(microphone.stopCount, 1);
+  assert.deepEqual(orchestrator.accepted, []);
   assert.equal(events.includes('error:VOICE_STT_ERROR'), true);
-  assert.equal(events.some((event) => event.includes('native detail')), false);
+  assert.equal(scheduler.pendingCount, 0);
+  await flushMicrotasks();
+  assert.deepEqual(orchestrator.accepted, []);
 });
 
 test('confirmed speech during assistant playback enters barge-in path; possible noise is ignored', async () => {
@@ -344,6 +405,7 @@ test('a new utterance invalidates an endpoint already waiting for capture cleanu
   emitSpeechStart(orchestrator, 'second');
   microphone.stopGate.resolve();
   await flushMicrotasks();
+  assert.ok(orchestrator.cancelCount >= 1, 'superseding speech cancels the stale pending aggregate');
   assert.deepEqual(orchestrator.accepted, []);
   assert.equal(orchestrator.startCount, 2);
   assert.equal(controller.state, 'user_speaking');
