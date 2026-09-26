@@ -1,3 +1,16 @@
+## Natural Duplex Conversation V1
+
+### Added
+
+- Opt-in local duplex voice controller with bounded VAD endpoint grace, short-pause utterance aggregation, and bounded microphone capture rotation.
+- Explicit duplex lifecycle states and `/duplex` / `/duplex-stop` commands; push-to-talk remains the default path.
+- Confirmed VAD speech may interrupt assistant playback; possible-noise and self-voice events remain non-interrupting. No acoustic echo cancellation is claimed.
+
+### Security / limitations
+
+- Disabled by default with `YUKI_DUPLEX_ENABLED=false`; local STT/audio processing only, without raw audio persistence or provider/network changes.
+- Deterministic automated coverage does not establish acoustic acceptance. Hardware, echo, and false-barge-in behavior remain unverified; push-to-talk remains available.
+
 ## Crash Recovery / Pending Action Journal V1
 
 ### Added

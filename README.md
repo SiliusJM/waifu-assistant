@@ -131,7 +131,7 @@ $env:YUKI_STT_MODEL_DIR = $env:STT_MODEL_DIR
 node dist/main.js --interactive
 ```
 
-En la conversación usa `/listen` para empezar a hablar y `/listen-stop` para finalizar la captura. Whisper Tiny multilingüe usa autodetección local de idioma (`AUTO`). La aceptación acústica real dio español `PASS`, español con romaji `PASS`, japonés hablado `PARTIAL` y español con inglés embebido `FAIL` (el término “Spring Boot” solo se conservó parcialmente). Por tanto, el soporte funciona con limitaciones conocidas; no implica soporte multilingüe perfecto. Yuki responde normalmente en español y conserva nombres, títulos, código y citas en su idioma original. No hay traducción automática de la utterance completa, romanización automática del japonés ni conversión automática de romaji a kana/kanji. El audio STT se procesa localmente, no se envía por red ni se persiste como audio crudo. PTT sigue disponible como modo de captura. La respuesta hablada se reproduce mediante el TTS local descrito abajo; no se habilitan wake word ni escucha en segundo plano.
+En la conversación usa `/listen` para iniciar PTT y `/listen-stop` para finalizar manualmente. El modo duplex opt-in se activa con `/duplex`; `/duplex-stop` lo detiene. `YUKI_DUPLEX_ENABLED=true` lo inicia al arrancar el CLI interactivo, y el default es `false`. Whisper Tiny multilingüe usa autodetección local de idioma (`AUTO`). La aceptación acústica real dio español `PASS`, español con romaji `PASS`, japonés hablado `PARTIAL` y español con inglés embebido `FAIL` (el término “Spring Boot” solo se conservó parcialmente). Por tanto, el soporte funciona con limitaciones conocidas; no implica soporte multilingüe perfecto. Yuki responde normalmente en español y conserva nombres, títulos, código y citas en su idioma original. No hay traducción automática de la utterance completa, romanización automática del japonés ni conversión automática de romaji a kana/kanji. El audio STT se procesa localmente, no se envía por red ni se persiste como audio crudo. PTT permanece disponible como fallback; no se habilitan wake word ni escucha automática al iniciar, salvo opt-in duplex.
 
 VAD Silero es opcional. Prepara explícitamente el modelo ONNX oficial de
 Sherpa-ONNX fuera del repositorio (SHA-256 y tamaño fijados en el proyecto) y
@@ -148,12 +148,21 @@ automáticamente al iniciar Yuki ni durante tests. El modelo Silero VAD se
 distribuye bajo MIT según la atribución upstream; conserva la referencia a
 [Silero VAD](https://github.com/snakers4/silero-vad). `YUKI_VAD_MIN_SILENCE_MS` controla la pausa de
 cierre (350–1500 ms; 650 por defecto). El modelo no se descarga automáticamente;
-sin esta variable, `/listen` conserva PTT y su flujo previo. El VAD procesa audio
-en memoria y el sistema solo pasa transcripciones finales a la conversación.
+es obligatorio para `/duplex`. `YUKI_DUPLEX_PAUSE_GRACE_MS` (0–2000 ms; 500 por
+defecto) espera una continuación tras el endpoint VAD. Duplex rota la captura
+periódicamente para respetar los límites de buffers, vuelve a abrir el micrófono
+entre ventanas y agrega segmentos separados por pausas dentro de un único turno.
+Sin VAD, `/listen` conserva PTT y su flujo previo. El VAD procesa audio en memoria
+y solo las transcripciones finales llegan a la conversación.
+
+La cancelación de reproducción/TTS al detectar habla confirmada funciona como
+barge-in básico. No hay cancelación de eco acústico: si el micrófono capta la voz
+de Yuki, puede causar una interrupción falsa. El comportamiento duplex se cubre
+con providers deterministas; esta versión no declara aceptación acústica real.
 
 ### TTS local y reproducción en Windows
 
-La respuesta del flujo `/listen` se sintetiza localmente con Sherpa-ONNX
+La respuesta de `/listen` y `/duplex` se sintetiza localmente con Sherpa-ONNX
 (modelo Piper VITS español) y se reproduce por el dispositivo de salida
 predeterminado de Windows. El texto y el audio permanecen en memoria; no se
 envían a un servicio remoto ni se guardan como archivos. No se descargan modelos
@@ -182,8 +191,9 @@ Después de `npm run build`, se puede verificar TTS y reproducción reales sin
 micrófono ni provider de IA mediante `node scripts/voice-tts-smoke.mjs`. El
 smoke reproduce una frase breve por el dispositivo predeterminado y reporta
 solo metadatos de resultado. Para la conversación de voz, inicia el CLI
-interactivo, usa `/listen` y luego `/listen-stop`; la respuesta normal de Yuki
-se envía tanto al canal de texto como a síntesis/reproducción local.
+interactivo, usa `/listen` y luego `/listen-stop` para PTT, o `/duplex` para
+endpointing automático por VAD; la respuesta normal de Yuki se envía tanto al
+canal de texto como a síntesis/reproducción local.
 
 ## Comandos locales
 

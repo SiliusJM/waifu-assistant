@@ -5,6 +5,8 @@ import type { AIRequest, AIResponse, AIStreamEvent, ProviderCallOptions } from '
 import { MockAIProvider } from '../../src/ai/mock-ai-provider.js';
 import { AssistantCore } from '../../src/core/assistant-core.js';
 import {
+  CONVERSATION_DUPLEX_COMMAND,
+  CONVERSATION_DUPLEX_STOP_COMMAND,
   CONVERSATION_RENAME_COMMAND,
   CONVERSATION_SESSION_INFO_COMMAND,
   CONVERSATION_SUMMARY_COMMAND,
@@ -101,6 +103,25 @@ test('conversation runner reuses one session and preserves multi-turn order', as
     { role: 'user', content: 'two' },
     { role: 'assistant', content: 'messages=4' },
   ]);
+});
+
+test('duplex start/stop are explicit local commands and do not create conversational turns', async () => {
+  let providerCalls = 0;
+  const provider = new MockAIProvider({
+    responder: () => {
+      providerCalls += 1;
+      return { text: 'unexpected', provider: 'mock', model: 'mock-model', finishReason: 'stop' };
+    },
+  });
+  const runner = new ConversationRunner(new AssistantCore({ provider }));
+  const commands: string[] = [];
+  const result = await runner.run(inputs([CONVERSATION_DUPLEX_COMMAND, CONVERSATION_DUPLEX_STOP_COMMAND, '/exit']), {
+    onCommand: async (command) => { commands.push(command); },
+  });
+
+  assert.deepEqual(commands, [CONVERSATION_DUPLEX_COMMAND, CONVERSATION_DUPLEX_STOP_COMMAND]);
+  assert.equal(providerCalls, 0);
+  assert.deepEqual(result.session.getMessages(), []);
 });
 
 test('/summary is dispatched locally, summarizes only current visible turns, and does not alter later context', async () => {

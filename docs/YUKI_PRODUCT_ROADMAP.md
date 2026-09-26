@@ -17,6 +17,8 @@ This file preserves product requirements and sequencing decisions that must surv
 
 Move beyond explicit `/listen` and `/listen-stop` toward natural speech turns.
 
+Status: **implemented as opt-in V1; acoustic acceptance not yet performed**. `/duplex` uses the existing local VAD/STT and voice orchestrator; `/duplex-stop` returns to the existing push-to-talk path. A bounded pause grace aggregates short pauses, finalized STT segments are awaited before capture closes, and microphone capture rotates before the local STT window limit. Confirmed speech can interrupt TTS/playback through the existing latest-input-wins path. The mode is disabled by default. There is no acoustic echo cancellation; self-voice/noise protection depends on existing VAD source classification, and false barge-in/noise robustness remain unverified on hardware.
+
 Required behavior:
 - detect start/end of user speech without requiring Enter for normal conversation;
 - preserve explicit push-to-talk as a fallback;

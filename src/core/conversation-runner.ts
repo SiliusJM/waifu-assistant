@@ -40,6 +40,8 @@ export const CONVERSATION_PENDING_COMMAND = '/pending';
 export const CONVERSATION_CONFIRM_ACTION_COMMAND = '/confirm-action';
 export const CONVERSATION_DISCARD_ACTION_COMMAND = '/discard-action';
 export const CONVERSATION_DEFER_ACTION_COMMAND = '/defer-action';
+export const CONVERSATION_DUPLEX_COMMAND = '/duplex';
+export const CONVERSATION_DUPLEX_STOP_COMMAND = '/duplex-stop';
 export const LOCAL_COMMAND_HELP = formatCapabilityHelp();
 
 export type ConversationRunStatus = 'completed' | 'cancelled';
@@ -261,7 +263,9 @@ export class ConversationRunner {
       || input === CONVERSATION_DISCARD_ACTION_COMMAND
       || input.startsWith(`${CONVERSATION_DISCARD_ACTION_COMMAND} `)
       || input === CONVERSATION_DEFER_ACTION_COMMAND
-      || input.startsWith(`${CONVERSATION_DEFER_ACTION_COMMAND} `);
+      || input.startsWith(`${CONVERSATION_DEFER_ACTION_COMMAND} `)
+      || input === CONVERSATION_DUPLEX_COMMAND
+      || input === CONVERSATION_DUPLEX_STOP_COMMAND;
 
     const executeLocalCommand = async (input: string, activeAtArrival: boolean): Promise<void> => {
       options.clarification?.clear();

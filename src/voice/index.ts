@@ -3,6 +3,8 @@ export { VoiceError, type VoiceErrorCode } from './voice-errors.js';
 export { VoiceService } from './voice-service.js';
 export { StreamingVoiceService } from './streaming-voice-service.js';
 export { VoiceConversationOrchestrator, isVoiceResumeIntent } from './voice-conversation-orchestrator.js';
+export { NaturalDuplexController, resolveNaturalDuplexConfig } from './natural-duplex-controller.js';
+export { NaturalDuplexStateMachine, NATURAL_DUPLEX_STATES } from './natural-duplex-state-machine.js';
 export {
   PushToTalkController,
   PIPER_SPANISH_TTS_MODEL,
@@ -100,3 +102,11 @@ export type {
   VoiceInteractionState,
   VoiceActivitySource,
 } from './voice-conversation-orchestrator.js';
+export type {
+  NaturalDuplexConfig,
+  NaturalDuplexControllerOptions,
+  NaturalDuplexEvent,
+  NaturalDuplexMicrophone,
+  NaturalDuplexTimerScheduler,
+} from './natural-duplex-controller.js';
+export type { NaturalDuplexState } from './natural-duplex-state-machine.js';

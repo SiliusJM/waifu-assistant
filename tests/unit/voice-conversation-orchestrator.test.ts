@@ -192,6 +192,47 @@ test('final input interrupts old Core and TTS, ignores stale deltas, and lets th
   assert.equal(orchestrator.state, 'idle');
 });
 
+test('confirmed speech racing TTS startup prevents stale playback and stale text deltas', async () => {
+  const firstDelta = deferred();
+  const provider = new ScriptedProvider(async function* (_request, signal) {
+    if (provider.requests.length === 1) {
+      yield { type: 'text_delta', delta: 'OLD-ANSWER' };
+      firstDelta.resolve();
+      await new Promise<void>((resolve) => {
+        if (signal?.aborted) resolve();
+        else signal?.addEventListener('abort', () => resolve(), { once: true });
+      });
+      yield { type: 'text_delta', delta: 'STALE-TAIL' };
+      yield { type: 'completed', response: response('stale response') };
+      return;
+    }
+    yield { type: 'text_delta', delta: 'CURRENT-ANSWER' };
+    yield { type: 'completed', response: response('current response') };
+  });
+  const output = new MockStreamingAudioOutputProvider();
+  const service = voiceService({ tts: new MockStreamingTTSProvider({ delayMs: 100 }), output });
+  const runner = new ConversationRunner(new AssistantCore({ provider, logger: silentLogger }));
+  const orchestrator = new VoiceConversationOrchestrator({ runner, voiceService: service });
+  const events: VoiceConversationEvent[] = [];
+  orchestrator.subscribe((event) => events.push(event));
+  try {
+    orchestrator.acceptTranscription({ type: 'final', text: 'pregunta inicial' });
+    await firstDelta.promise;
+    assert.equal(events.some((event) => event.type === 'assistantSpeechStart' && event.generation === 1), false);
+    orchestrator.speechStart('confirmed-user-speech', 'startup-race');
+    orchestrator.acceptTranscription({ type: 'final', text: 'pregunta que reemplaza' });
+    await orchestrator.whenIdle();
+
+    assert.equal(provider.requests.length, 2);
+    assert.equal(events.some((event) => event.type === 'assistantTextDelta' && event.text === 'STALE-TAIL'), false);
+    assert.equal(events.some((event) => event.type === 'assistantSpeechStart' && event.generation === 1), false);
+    assert.equal(runner.session.getMessages().some(({ content }) => content === 'current response'), true);
+  } finally {
+    await orchestrator.shutdown();
+    await service.shutdownStreaming();
+  }
+});
+
 test('Core/provider failure returns to idle, surfaces only a safe error code, and persists no partial assistant', async () => {
   const provider = new ScriptedProvider(async function* () {
     yield { type: 'text_delta', delta: 'partial spoken text' };
@@ -397,6 +438,48 @@ test('streaming VoiceService capture feeds partial/final events through the orch
   assert.equal(runner.session.getMessages().some(({ content }) => content.startsWith('partial-')), false);
 });
 
+test('duplex defers finalized STT payload outside Session until the endpoint controller accepts it', async () => {
+  const provider = fixedProvider('respuesta a la pregunta');
+  const baseService = voiceService();
+  const captureHandle = {
+    async *events() {
+      yield { eventId: '1', voiceSessionId: 'capture', correlationId: 'capture', sequence: 1, occurredAt: new Date(0).toISOString(), monotonicMs: 1, type: 'speech_activity_started', payload: { source: 'confirmed-user-speech', segmentId: 'segment-1' } };
+      yield { eventId: '2', voiceSessionId: 'capture', correlationId: 'capture', sequence: 2, occurredAt: new Date(0).toISOString(), monotonicMs: 2, type: 'speech_activity_ended', payload: { segmentId: 'segment-1' } };
+      yield { eventId: '3', voiceSessionId: 'capture', correlationId: 'capture', sequence: 3, occurredAt: new Date(0).toISOString(), monotonicMs: 3, type: 'transcription_final', payload: { text: 'pregunta privada de voz', segmentId: 'segment-1' } };
+    },
+    async result() { return { status: 'completed', value: { text: 'pregunta privada de voz' } }; },
+    shutdown() { return true; },
+    cancel() { return true; },
+  };
+  const service = {
+    startStreamingTranscription: () => captureHandle,
+    startStreamingSynthesis: baseService.startStreamingSynthesis.bind(baseService),
+    shutdownStreaming: baseService.shutdownStreaming.bind(baseService),
+  } as unknown as VoiceService;
+  const runner = new ConversationRunner(new AssistantCore({ provider, logger: silentLogger }));
+  const orchestrator = new VoiceConversationOrchestrator({ runner, voiceService: service });
+  const events: VoiceConversationEvent[] = [];
+  orchestrator.subscribe((event) => events.push(event));
+  try {
+    orchestrator.setDeferredFinalTranscripts(true);
+    await orchestrator.startTranscriptionCapture();
+    assert.equal(provider.requests.length, 0);
+    assert.deepEqual(runner.session.getMessages(), []);
+    assert.equal(events.some((event) => event.type === 'transcriptionSegment'
+      && event.text === 'pregunta privada de voz'), true);
+
+    orchestrator.setDeferredFinalTranscripts(false);
+    assert.equal(orchestrator.acceptTranscription({ type: 'final', text: 'pregunta privada de voz' }), true);
+    await orchestrator.whenIdle();
+    assert.equal(provider.requests.length, 1);
+    assert.equal(runner.session.getMessages().some(({ role, content }) => role === 'user'
+      && content === 'pregunta privada de voz'), true);
+  } finally {
+    await orchestrator.shutdown();
+    await baseService.shutdownStreaming();
+  }
+});
+
 test('voice conversation uses exactly one TTS endInput for a completed assistant turn', async () => {
   let endInputCount = 0;
   const baseTts = new MockStreamingTTSProvider();
@@ -560,7 +643,7 @@ test('possible noise and self-voice alone do not interrupt an active response', 
   assert.equal(runner.session.getMessages().at(-1)?.content, 'Respuesta en curso.');
 });
 
-test('VAD activity during assistant playback is treated as ambiguous and its transcript is not a turn', async () => {
+test('confirmed VAD speech during assistant playback interrupts playback and becomes the latest turn', async () => {
   const provider = fixedProvider('respuesta que sigue');
   const output = new MockStreamingAudioOutputProvider({ delayMs: 250 });
   const baseService = voiceService({ output });
@@ -595,8 +678,10 @@ test('VAD activity during assistant playback is treated as ambiguous and its tra
     });
     await orchestrator.startTranscriptionCapture();
     await orchestrator.whenIdle();
-    assert.equal(provider.requests.length, 1);
-    assert.equal(runner.session.getMessages().some(({ content }) => content.includes('posible eco de Yuki')), false);
+    assert.equal(provider.requests.length, 2);
+    assert.equal(runner.session.getMessages().some(({ role, content }) => role === 'user'
+      && content === 'posible eco de Yuki'), true);
+    assert.equal(output.played.length > 0, true);
   } finally {
     await orchestrator.shutdown();
     await baseService.shutdownStreaming();

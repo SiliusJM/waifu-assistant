@@ -49,6 +49,8 @@ import {
   CONVERSATION_NOTES_COMMAND,
   CONVERSATION_NOTE_SHOW_COMMAND,
   CONVERSATION_NOTE_DELETE_COMMAND,
+  CONVERSATION_DUPLEX_COMMAND,
+  CONVERSATION_DUPLEX_STOP_COMMAND,
   LOCAL_COMMAND_HELP,
 } from './core/conversation-runner.js';
 import { PersistentMemoryStore, resolveMemoryPath } from './memory/memory-store.js';
@@ -80,6 +82,7 @@ import {
 } from './actions/pending-action-journal.js';
 import { handlePendingActionCommand } from './actions/pending-action-cli.js';
 import { VoiceConversationOrchestrator } from './voice/voice-conversation-orchestrator.js';
+import { NaturalDuplexController, resolveNaturalDuplexConfig } from './voice/natural-duplex-controller.js';
 import { createLocalMicrophoneVoiceService } from './voice/local/local-voice-service.js';
 import { PushToTalkController } from './voice/local/push-to-talk-controller.js';
 import { resolveWhisperTinyModelPaths } from './voice/local/whisper-tiny-model.js';
@@ -202,8 +205,10 @@ export async function main(
   let localVoiceService: ReturnType<typeof createLocalMicrophoneVoiceService> | undefined;
   let voiceOrchestrator: VoiceConversationOrchestrator | undefined;
   let pushToTalk: PushToTalkController | undefined;
+  let naturalDuplex: NaturalDuplexController | undefined;
   let unsubscribeVoice: (() => void) | undefined;
   try {
+    const naturalDuplexConfig = resolveNaturalDuplexConfig(env);
     const runner = new ConversationRunner(core);
     const pendingActionNotice = formatPendingActionStartupNotice(pendingActionLoad);
     if (pendingActionNotice) process.stdout.write(`${pendingActionNotice}\n`);
@@ -215,7 +220,7 @@ export async function main(
       onReminderCreated: () => reminderScheduler.refresh(),
     });
     const conversationExporter = new MarkdownConversationExporter();
-    const startVoiceCapture = async (): Promise<void> => {
+    const startVoiceCapture = async (mode: 'ptt' | 'duplex' = 'ptt'): Promise<void> => {
       const modelDirectory = env.YUKI_STT_MODEL_DIR?.trim();
       if (!modelDirectory) {
         process.stdout.write('Falta YUKI_STT_MODEL_DIR; prepara el modelo local con npm run setup:local-stt-model -- <ruta-absoluta-fuera-del-repo>.\n');
@@ -232,6 +237,10 @@ export async function main(
         const vadModelPath = env.YUKI_VAD_MODEL_PATH?.trim()
           ? resolveSileroVadModelPath(env.YUKI_VAD_MODEL_PATH)
           : undefined;
+        if (mode === 'duplex' && !vadModelPath) {
+          process.stdout.write('El modo duplex requiere YUKI_VAD_MODEL_PATH; PTT con /listen sigue disponible.\n');
+          return;
+        }
         localVoiceService ??= createLocalMicrophoneVoiceService(modelPaths, {
           ttsModel: ttsModelPaths,
           ...(vadModelPath ? {
@@ -263,6 +272,29 @@ export async function main(
           else if (event.type === 'error') process.stdout.write(`\nNo se pudo completar la interacción de voz (${event.code}).\n`);
         });
         pushToTalk ??= new PushToTalkController(localVoiceService.microphone, voiceOrchestrator);
+        if (mode === 'duplex') {
+          if (pushToTalk.isCapturing) {
+            process.stdout.write('Finaliza primero la captura PTT con /listen-stop.\n');
+            return;
+          }
+          if (naturalDuplex?.isActive) {
+            process.stdout.write('El modo duplex ya está escuchando.\n');
+            return;
+          }
+          naturalDuplex = new NaturalDuplexController({
+            microphone: localVoiceService.microphone,
+            orchestrator: voiceOrchestrator,
+            pauseGraceMs: naturalDuplexConfig.pauseGraceMs,
+          });
+          await naturalDuplex.start();
+          process.stdout.write(`Modo duplex activo. Habla y pausa para enviar cada turno (gracia ${naturalDuplexConfig.pauseGraceMs} ms). Usa /duplex-stop para detenerlo.\n`);
+          return;
+        }
+        if (naturalDuplex?.isActive) {
+          process.stdout.write('Detén primero el modo duplex con /duplex-stop.\n');
+          return;
+        }
+        voiceOrchestrator.setDeferredFinalTranscripts(false);
         await pushToTalk.start();
         process.stdout.write(`${vadModelPath ? 'VAD local activo: habla y pausa para cerrar cada frase. ' : ''}Escuchando. Di la frase y escribe /listen-stop para finalizar.\n`);
       } catch (error) {
@@ -271,6 +303,7 @@ export async function main(
       }
     };
     await reminderScheduler.start();
+    if (naturalDuplexConfig.enabled) await startVoiceCapture('duplex');
     await runner.run(terminal, {
       signal: controller.signal,
       interruptible: true,
@@ -290,6 +323,20 @@ export async function main(
         }
         if (command === '/listen') {
           await startVoiceCapture();
+          return;
+        }
+        if (command === CONVERSATION_DUPLEX_COMMAND) {
+          await startVoiceCapture('duplex');
+          return;
+        }
+        if (command === CONVERSATION_DUPLEX_STOP_COMMAND) {
+          if (!naturalDuplex?.isActive) {
+            process.stdout.write('El modo duplex no está activo.\n');
+            return;
+          }
+          await naturalDuplex.shutdown();
+          naturalDuplex = undefined;
+          process.stdout.write('Modo duplex detenido. Puedes volver a /listen para usar PTT.\n');
           return;
         }
         if (command === '/listen-stop') {
@@ -313,7 +360,7 @@ export async function main(
           return;
         }
         if (command === CONVERSATION_HELP_COMMAND) {
-          process.stdout.write(`${LOCAL_COMMAND_HELP}\nVoz local: /listen inicia PTT y /listen-stop envía la frase reconocida al flujo normal.\n`);
+          process.stdout.write(`${LOCAL_COMMAND_HELP}\nVoz local: /duplex inicia turnos automáticos con VAD; /duplex-stop lo detiene. /listen y /listen-stop mantienen PTT.\n`);
           return;
         }
         if (command === CONVERSATION_SUMMARY_COMMAND) {
@@ -789,6 +836,7 @@ export async function main(
       },
     });
   } finally {
+    await naturalDuplex?.shutdown();
     await voiceOrchestrator?.shutdown();
     await localVoiceService?.service.shutdownStreaming();
     unsubscribeVoice?.();

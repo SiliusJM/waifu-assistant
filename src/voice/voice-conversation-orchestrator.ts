@@ -11,8 +11,9 @@ export type VoiceConversationErrorStage = 'stt' | 'core' | 'tts' | 'playback' | 
 
 export type VoiceConversationEvent =
   | { readonly type: 'stateChanged'; readonly state: VoiceInteractionState; readonly generation: number }
-  | { readonly type: 'speechStart'; readonly source: VoiceActivitySource; readonly generation: number }
-  | { readonly type: 'speechEnd'; readonly generation: number }
+  | { readonly type: 'speechStart'; readonly source: VoiceActivitySource; readonly generation: number; readonly segmentId?: string }
+  | { readonly type: 'speechEnd'; readonly generation: number; readonly segmentId?: string }
+  | { readonly type: 'transcriptionSegment'; readonly text: string; readonly generation: number; readonly segmentId?: string }
   | { readonly type: 'assistantSpeechStart'; readonly text: string; readonly generation: number }
   | { readonly type: 'assistantSpeechEnd'; readonly generation: number }
   | { readonly type: 'assistantCue'; readonly text: string; readonly generation: number }
@@ -125,6 +126,7 @@ export class VoiceConversationOrchestrator {
   private ambiguousCueEmitted = false;
   private ambiguousCueTimer: ReturnType<typeof setTimeout> | undefined;
   private activeCue: StreamingVoiceSynthesisHandle | undefined;
+  private deferFinalTranscripts = false;
   private closed = false;
 
   constructor(options: VoiceConversationOrchestratorOptions) {
@@ -152,11 +154,11 @@ export class VoiceConversationOrchestrator {
   }
 
   /** VAD-facing contract. Only confirmed user speech interrupts active assistant work. */
-  speechStart(source: VoiceActivitySource = 'confirmed-user-speech'): boolean {
+  speechStart(source: VoiceActivitySource = 'confirmed-user-speech', segmentId?: string): boolean {
     if (this.closed) return false;
     this.refreshInterruptedContextScope();
     this.clearAmbiguousCueTimer();
-    this.emit({ type: 'speechStart', source, generation: this.generation });
+    this.emit({ type: 'speechStart', source, generation: this.generation, ...(segmentId ? { segmentId } : {}) });
     if (source !== 'confirmed-user-speech') return true;
     if (this.activeCue) this.stopLocalCue();
     const hasActiveResponse = this.activeTurn !== undefined || this.activeSynthesis !== undefined;
@@ -183,9 +185,9 @@ export class VoiceConversationOrchestrator {
   }
 
   /** Arms a single short local cue after a confirmed barge-in pause. */
-  speechEnd(): boolean {
+  speechEnd(segmentId?: string): boolean {
     if (this.closed) return false;
-    this.emit({ type: 'speechEnd', generation: this.generation });
+    this.emit({ type: 'speechEnd', generation: this.generation, ...(segmentId ? { segmentId } : {}) });
     if (!this.bargeInAwaitingTranscript || this.ambiguousCueEmitted || this.ambiguousCueTimer) return true;
     this.ambiguousCueTimer = setTimeout(() => {
       this.ambiguousCueTimer = undefined;
@@ -293,25 +295,32 @@ export class VoiceConversationOrchestrator {
     try {
       for await (const event of handle.events()) {
         if (event.type === 'speech_activity_started') {
-          const source = event.payload.source === 'possible-noise' || this.currentState === 'speaking'
-            ? 'possible-noise'
-            : 'confirmed-user-speech';
+          const source = event.payload.source;
           if (event.payload.segmentId) {
             if (source === 'possible-noise') this.ambiguousVadSegmentIds.add(event.payload.segmentId);
             else this.ambiguousVadSegmentIds.delete(event.payload.segmentId);
           }
-          this.speechStart(source);
+          this.speechStart(source, event.payload.segmentId);
         } else if (event.type === 'speech_activity_ended') {
-          this.speechEnd();
+          this.speechEnd(event.payload.segmentId);
         } else if (event.type === 'transcription_partial' || event.type === 'transcription_final') {
           if (event.type === 'transcription_final' && event.payload.segmentId
             && this.ambiguousVadSegmentIds.delete(event.payload.segmentId)) {
             continue;
           }
-          this.acceptTranscription({
-            type: event.type === 'transcription_partial' ? 'partial' : 'final',
-            text: event.payload.text,
-          });
+          if (event.type === 'transcription_final' && this.deferFinalTranscripts) {
+            this.emit({
+              type: 'transcriptionSegment',
+              text: event.payload.text,
+              generation: this.generation,
+              ...('segmentId' in event.payload && event.payload.segmentId ? { segmentId: event.payload.segmentId } : {}),
+            });
+          } else {
+            this.acceptTranscription({
+              type: event.type === 'transcription_partial' ? 'partial' : 'final',
+              text: event.payload.text,
+            });
+          }
         }
       }
       const result = await handle.result();
@@ -337,6 +346,12 @@ export class VoiceConversationOrchestrator {
 
   async whenIdle(): Promise<void> {
     await this.drainPromise;
+  }
+
+  /** Natural duplex owns VAD endpointing and batches finalized VAD segments before dispatch. */
+  setDeferredFinalTranscripts(deferred: boolean): void {
+    if (this.activeCapture) throw new VoiceError('Transcription deferral cannot change during capture.', 'VOICE_STATE_ERROR');
+    this.deferFinalTranscripts = deferred;
   }
 
   async shutdown(): Promise<void> {
