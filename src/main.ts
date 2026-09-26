@@ -72,6 +72,13 @@ import {
   parseToneCommand,
 } from './personality/conversation-tone-preferences.js';
 import { ResponseFormatStore, resolveResponseFormatPath } from './personality/response-format-store.js';
+import {
+  formatPendingActionStartupNotice,
+  PendingActionJournal,
+  resolvePendingActionsPath,
+  type PendingActionLoadResult,
+} from './actions/pending-action-journal.js';
+import { handlePendingActionCommand } from './actions/pending-action-cli.js';
 import { VoiceConversationOrchestrator } from './voice/voice-conversation-orchestrator.js';
 import { createLocalMicrophoneVoiceService } from './voice/local/local-voice-service.js';
 import { PushToTalkController } from './voice/local/push-to-talk-controller.js';
@@ -113,6 +120,14 @@ export async function main(
   await toneStore.load();
   const responseFormatStore = new ResponseFormatStore(resolveResponseFormatPath(env));
   await responseFormatStore.load();
+  let pendingActionJournal: PendingActionJournal | undefined;
+  let pendingActionLoad: PendingActionLoadResult = { status: 'io-error', actions: [], recoveredExecutingCount: 0 };
+  try {
+    pendingActionJournal = new PendingActionJournal(resolvePendingActionsPath(env));
+    pendingActionLoad = await pendingActionJournal.load();
+  } catch {
+    // An unavailable/corrupt journal must not prevent ordinary conversation from starting.
+  }
   const handleNaturalTonePreference = async (input: string): Promise<boolean> => {
     const tone = parseNaturalToneRequest(input);
     if (tone === undefined) return false;
@@ -190,6 +205,8 @@ export async function main(
   let unsubscribeVoice: (() => void) | undefined;
   try {
     const runner = new ConversationRunner(core);
+    const pendingActionNotice = formatPendingActionStartupNotice(pendingActionLoad);
+    if (pendingActionNotice) process.stdout.write(`${pendingActionNotice}\n`);
     const clarification = new SafeClarificationFlow({
       toolManager: localToolManager,
       sessionId: runner.session.id,
@@ -266,6 +283,11 @@ export async function main(
       onResponse: (): void => { process.stdout.write('\n'); },
       onInterruption: (): void => { process.stdout.write('\n[Respuesta interrumpida]\n'); },
       onCommand: async (command, context): Promise<void> => {
+        const pendingActionOutput = await handlePendingActionCommand(pendingActionJournal, command);
+        if (pendingActionOutput !== undefined) {
+          process.stdout.write(`${pendingActionOutput}\n`);
+          return;
+        }
         if (command === '/listen') {
           await startVoiceCapture();
           return;

@@ -36,6 +36,10 @@ export const CONVERSATION_NOTE_ADD_COMMAND = '/note-add';
 export const CONVERSATION_NOTES_COMMAND = '/notes';
 export const CONVERSATION_NOTE_SHOW_COMMAND = '/note-show';
 export const CONVERSATION_NOTE_DELETE_COMMAND = '/note-delete';
+export const CONVERSATION_PENDING_COMMAND = '/pending';
+export const CONVERSATION_CONFIRM_ACTION_COMMAND = '/confirm-action';
+export const CONVERSATION_DISCARD_ACTION_COMMAND = '/discard-action';
+export const CONVERSATION_DEFER_ACTION_COMMAND = '/defer-action';
 export const LOCAL_COMMAND_HELP = formatCapabilityHelp();
 
 export type ConversationRunStatus = 'completed' | 'cancelled';
@@ -249,7 +253,15 @@ export class ConversationRunner {
       || input === CONVERSATION_NOTE_SHOW_COMMAND
       || input.startsWith(`${CONVERSATION_NOTE_SHOW_COMMAND} `)
       || input === CONVERSATION_NOTE_DELETE_COMMAND
-      || input.startsWith(`${CONVERSATION_NOTE_DELETE_COMMAND} `);
+      || input.startsWith(`${CONVERSATION_NOTE_DELETE_COMMAND} `)
+      || input === CONVERSATION_PENDING_COMMAND
+      || input.startsWith(`${CONVERSATION_PENDING_COMMAND} `)
+      || input === CONVERSATION_CONFIRM_ACTION_COMMAND
+      || input.startsWith(`${CONVERSATION_CONFIRM_ACTION_COMMAND} `)
+      || input === CONVERSATION_DISCARD_ACTION_COMMAND
+      || input.startsWith(`${CONVERSATION_DISCARD_ACTION_COMMAND} `)
+      || input === CONVERSATION_DEFER_ACTION_COMMAND
+      || input.startsWith(`${CONVERSATION_DEFER_ACTION_COMMAND} `);
 
     const executeLocalCommand = async (input: string, activeAtArrival: boolean): Promise<void> => {
       options.clarification?.clear();

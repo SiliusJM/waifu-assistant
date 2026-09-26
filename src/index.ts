@@ -3,6 +3,27 @@ export { createContext, type Context } from './core/context.js';
 export { createMessage, type Message, type MessageRole } from './core/message.js';
 export { toAssistantResponse, type Response } from './core/response.js';
 export { Session } from './core/session.js';
+export {
+  PENDING_ACTION_MAX_DOCUMENT_BYTES,
+  PENDING_ACTION_MAX_ENTRIES,
+  PENDING_ACTION_MAX_PAYLOAD_BYTES,
+  PENDING_ACTION_SCHEMA_VERSION,
+  PENDING_ACTION_STATES,
+  PENDING_ACTION_TERMINAL_RETENTION_MS,
+  PendingActionJournal,
+  formatPendingAction,
+  formatPendingActionStartupNotice,
+  resolvePendingActionsPath,
+  type PendingAction,
+  type PendingActionFileHandle,
+  type PendingActionFileSystem,
+  type PendingActionJournalOptions,
+  type PendingActionLoadResult,
+  type PendingActionState,
+  type PendingActionType,
+  type PendingReminderPayload,
+} from './actions/pending-action-journal.js';
+export { handlePendingActionCommand } from './actions/pending-action-cli.js';
 export { CONVERSATION_TITLE_MAX_LENGTH, DEFAULT_CONVERSATION_TITLE, normalizeConversationTitle } from './core/conversation-title.js';
 export {
   CONVERSATION_EXIT_COMMAND,
@@ -31,6 +52,10 @@ export {
   CONVERSATION_NOTES_COMMAND,
   CONVERSATION_NOTE_SHOW_COMMAND,
   CONVERSATION_NOTE_DELETE_COMMAND,
+  CONVERSATION_PENDING_COMMAND,
+  CONVERSATION_CONFIRM_ACTION_COMMAND,
+  CONVERSATION_DISCARD_ACTION_COMMAND,
+  CONVERSATION_DEFER_ACTION_COMMAND,
   ConversationRunner,
   type ConversationRunOptions,
   type ConversationRunResult,

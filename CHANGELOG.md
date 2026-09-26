@@ -1,3 +1,17 @@
+## Crash Recovery / Pending Action Journal V1
+
+### Added
+
+- Journal local, versionado y acotado para propuestas de acciones allowlisted, con transiciones explícitas, confirmación no ejecutable y comandos CLI de revisión, posposición y descarte.
+- Recuperación segura al inicio: registros que quedaron `executing` pasan a `reconciliation_required`; no se reintentan automáticamente.
+- Escritura atómica con archivo temporal exclusivo, sincronización y rename; manejo no fatal de journal ausente, corrupto o con versión no soportada.
+
+### Security / limitations
+
+- El journal queda fuera del repositorio, limita tipo/payload, no almacena credenciales y no integra Calendar/Tasks ni ningún ejecutor externo.
+- La confirmación solo cambia estado; nunca ejecuta una acción.
+- V1 no agrega un flujo de usuario para crear acciones propuestas; se deja la API lista para productores locales futuros.
+
 ## Phase 8 — Browser DNS Rebinding Evidence Harness
 
 ### Added

@@ -96,6 +96,20 @@ pueden redirigirse mediante `YUKI_SESSIONS_PATH`. Esta persistencia es
 independiente de `PersistentMemory`, no guarda automáticamente al salir y
 `/clear` solo limpia la `Session` actual; no elimina sesiones guardadas.
 
+### Acciones pendientes
+
+El journal local versionado se guarda en `~/.waifu-assistant/pending-actions.json`
+fuera del repositorio; `YUKI_PENDING_ACTIONS_PATH` permite indicar otra ruta
+absoluta externa al repositorio. En CLI, `/pending [id]` inspecciona acciones,
+`/confirm-action <id>` registra confirmación sin ejecutarla,
+`/defer-action <id>` la devuelve a preparada y `/discard-action <id>` descarta
+una acción que todavía no comenzó. Ninguna acción se ejecuta automáticamente;
+si había una ejecución en curso al reiniciar, requiere reconciliación explícita.
+El journal es independiente de Session, Persistent Memory y conversaciones
+guardadas: `/clear` y `/forget` no lo modifican. En esta versión no se conectan
+acciones externas de Calendar o Tasks ni se añade un comando de usuario para
+crear propuestas; los productores futuros podrán usar la API local allowlisted.
+
 La conversación actual puede organizarse con `/rename Proyecto Waifu Assistant`
 y consultarse con `/session-info`. `/sessions` muestra, de más reciente a más
 antigua, título, cantidad de mensajes e instante de actualización, sin revelar
