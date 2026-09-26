@@ -8,8 +8,8 @@
     {
       "id": "spanish-yuki-short",
       "category": "spanish_personality",
-      "prompt": "Responde en una sola frase: ¿qué puedes hacer como asistente personal?",
-      "checks": ["spanish", "oneSentence", "nonEmpty"]
+      "prompt": "Hola Yuki, dime en una frase corta qué puedes hacer como asistente personal.",
+      "checks": ["spanish", "oneSentence", "nonEmpty", "answersCapabilityRequest"]
     },
     {
       "id": "strict-three-points",

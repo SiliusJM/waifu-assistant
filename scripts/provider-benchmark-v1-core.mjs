@@ -4,6 +4,28 @@ import { resolve } from 'node:path';
 export const BENCHMARK_CALL_BUDGET = 110;
 export const BENCHMARK_PROFILE_IDS = Object.freeze(['omniroute', 'groq', 'gemini']);
 
+export function providerPacingDelayMs(nextRequestAt, now = Date.now()) {
+  if (!Number.isFinite(nextRequestAt)) return 0;
+  return Math.max(0, nextRequestAt - now);
+}
+
+export function providerPacingIntervalMs(profile, configuredValue) {
+  if (profile !== 'gemini' || configuredValue === undefined || configuredValue === '') return 0;
+  const interval = Number(configuredValue);
+  if (!Number.isSafeInteger(interval) || interval < 0) {
+    throw new Error('Gemini benchmark pacing interval must be a non-negative integer in milliseconds.');
+  }
+  return interval;
+}
+
+export function parseRetryAfterMs(value, now = Date.now()) {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - now) : undefined;
+}
+
 export function parseBenchmarkArgs(argv) {
   const args = { profiles: ['omniroute', 'groq', 'gemini'], iterations: 3, timeoutMs: 30000 };
   for (let index = 0; index < argv.length; index += 1) {
@@ -68,6 +90,12 @@ export function evaluateScenario(checks, text, expectedCode) {
     } else if (check === 'preserveTechnicalTerms') {
       flags.entityPreservation = ['Spring Boot', 'QueryDSL', 'GitHub', 'VS Code', 'streaming'].every((term) => value.includes(term));
     } else if (check === 'asksForTime') flags.instructionFollowing = /\?/u.test(value) && /(hora|horario)/iu.test(value);
+    else if (check === 'answersCapabilityRequest') {
+      const capabilityAction = '(?:organizar|planificar|redactar|resumir|gestionar|explicar|buscar|crear|recordar|resolver|coordinar|preparar|automatizar|organizo|planifico|redacto|resumo|gestiono|explico|busco|creo|recuerdo|resuelvo|coordino|preparo|automatizo)';
+      const explicitCapability = new RegExp(`\\b(?:puedo|puedes|soy capaz de)(?:\\s+ayudarte)?\\s+a?\\s*${capabilityAction}\\b`, 'iu');
+      const directHelp = /\bte ayudo\b.{0,50}\b(?:tareas?|recordatorios?|consultas?|preguntas?|planificar|organizar|redactar|resolver|explicar)\b/iu;
+      flags.semanticRelevance = explicitCapability.test(value) || new RegExp(`\\b${capabilityAction}\\b`, 'iu').test(value) || directHelp.test(value);
+    }
     else if (check === 'noActionClaim') flags.noActionClaim = !/(ya (lo )?(guard[eé]|program[eé])|recordatorio (creado|guardado)|he (guardado|programado))/iu.test(value);
     else if (check === 'twoParagraphs') flags.formatCorrect = value.split(/\n\s*\n/u).filter((part) => part.trim()).length === 2;
     else if (check === 'recallsSessionCode') flags.contextCorrect = typeof expectedCode === 'string' && value.includes(expectedCode);

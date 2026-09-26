@@ -9,7 +9,10 @@ import {
   BENCHMARK_CALL_BUDGET,
   evaluateScenario,
   loadScenarioSet,
+  parseRetryAfterMs,
   parseBenchmarkArgs,
+  providerPacingDelayMs,
+  providerPacingIntervalMs,
   resolveBenchmarkConfig,
   summarizeBenchmark,
   warmupGate,
@@ -57,6 +60,7 @@ function createProvider(config, timeoutMs, state) {
     fetchImpl: async (input, init) => {
       const response = await fetch(input, init);
       state.httpStatus = response.status;
+      state.retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'));
       state.responseHeadersMs ??= performance.now() - state.started;
       if (!response.body || [204, 205, 304].includes(response.status)) return response;
       const observedBody = response.body.pipeThrough(new TransformStream({
@@ -129,6 +133,7 @@ async function streamAttempt(config, request, timeoutMs, signal, kind) {
       deltaCount,
       responseChars: text.length,
       ...safeErrorFields(error),
+      ...(Number.isFinite(state.retryAfterMs) ? { retryAfterMs: state.retryAfterMs } : {}),
     };
   }
 }
@@ -155,6 +160,7 @@ async function retryableAttempt(config, request, timeoutMs, ledger, kind, state)
       state.callBudgetExhausted = true;
       break;
     }
+    await waitForProviderSlot(state);
     ledger.httpAttempts += 1;
     last = await streamAttempt(config, request, timeoutMs, undefined, kind);
     ledger.records.push({ ...last, attempt, isRetry: attempt > 1 });
@@ -182,8 +188,15 @@ async function retryableAttempt(config, request, timeoutMs, ledger, kind, state)
   return last;
 }
 
-async function cancellationProbe(config, timeoutMs, ledger) {
+async function waitForProviderSlot(state) {
+  const waitMs = providerPacingDelayMs(state.nextRequestAt);
+  if (waitMs > 0) await new Promise((resolveDelay) => setTimeout(resolveDelay, waitMs));
+  state.nextRequestAt = Date.now() + state.minimumRequestIntervalMs;
+}
+
+async function cancellationProbe(config, timeoutMs, ledger, providerState) {
   if (ledger.httpAttempts >= BENCHMARK_CALL_BUDGET) return { profile: config.profile, kind: 'cancellation', status: 'NOT RUN_CALL_BUDGET' };
+  await waitForProviderSlot(providerState);
   ledger.httpAttempts += 1;
   const controller = new AbortController();
   const state = { started: performance.now(), httpStatus: undefined };
@@ -261,7 +274,11 @@ async function run() {
 
   await mkdir(destination, { recursive: true });
   const ledger = { httpAttempts: 0, records: [], blocked };
-  const providerStates = new Map(ready.map((config) => [config.profile, { rateLimitCount: 0, paused: false }]));
+  const providerStates = new Map(ready.map((config) => [config.profile, {
+    rateLimitCount: 0,
+    paused: false,
+    minimumRequestIntervalMs: providerPacingIntervalMs(config.profile, process.env.YUKI_BENCHMARK_GEMINI_MIN_INTERVAL_MS),
+  }]));
   const configSummary = ready.map(({ profile, model, baseHost }) => ({ profile, model, baseHost, accessClass: profile === 'omniroute' && model.includes('best-free') ? 'FREE_ROUTE_LABEL' : 'EXISTING_ACCESS_UNVERIFIED' }));
 
   // One bounded warmup per ready provider. Never included in latency/quality summaries.
@@ -281,7 +298,7 @@ async function run() {
 
   // Separate, single cancellation probe per ready provider; normal measured calls follow it.
   for (const config of ready) {
-    if (!providerStates.get(config.profile).paused) await cancellationProbe(config, args.timeoutMs, ledger);
+    if (!providerStates.get(config.profile).paused) await cancellationProbe(config, args.timeoutMs, ledger, providerStates.get(config.profile));
   }
 
   const singles = scenarioSet.singleTurnScenarios;

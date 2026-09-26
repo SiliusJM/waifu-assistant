@@ -3,7 +3,10 @@ import test from 'node:test';
 import {
   evaluateScenario,
   loadScenarioSet,
+  parseRetryAfterMs,
   parseBenchmarkArgs,
+  providerPacingDelayMs,
+  providerPacingIntervalMs,
   percentile,
   redactRecord,
   resolveBenchmarkConfig,
@@ -43,6 +46,21 @@ test('quality checks are explicit and evaluate the fixed scenario contract', () 
   assert.equal(evaluateScenario(['preserveTechnicalTerms'], 'Spring Boot QueryDSL GitHub VS Code streaming').pass, true);
   assert.equal(evaluateScenario(['asksForTime', 'noActionClaim'], '¿A qué hora quieres llamar?').pass, true);
   assert.equal(evaluateScenario(['recallsSessionCode'], 'El código era SATURNO-418.', 'SATURNO-418').pass, true);
+  assert.equal(evaluateScenario(['answersCapabilityRequest'], 'Puedo organizar tareas y responder preguntas.').pass, true);
+  assert.equal(evaluateScenario(['answersCapabilityRequest'], 'Organizo tareas, explico conceptos y te ayudo a planificar.').pass, true);
+  assert.equal(evaluateScenario(['answersCapabilityRequest'], 'Te ayudo con tareas, recordatorios y consultas.').pass, true);
+  assert.equal(evaluateScenario(['answersCapabilityRequest'], '¡Hola! ¿En qué puedo ayudarte hoy?').pass, false);
+  assert.equal(evaluateScenario(['answersCapabilityRequest'], 'Espero que estés bien.').pass, false);
+});
+
+test('Gemini pacing interval is optional/configurable and Retry-After supports seconds and HTTP dates', () => {
+  assert.equal(providerPacingDelayMs(7_000, 5_000), 2_000);
+  assert.equal(providerPacingIntervalMs('gemini', '7000'), 7_000);
+  assert.equal(providerPacingIntervalMs('gemini', undefined), 0);
+  assert.equal(providerPacingIntervalMs('groq', 'invalid'), 0);
+  assert.throws(() => providerPacingIntervalMs('gemini', 'invalid'));
+  assert.equal(parseRetryAfterMs('2', 1_000), 2_000);
+  assert.equal(parseRetryAfterMs(new Date(6_000).toUTCString(), 1_000), 5_000);
 });
 
 test('percentiles use nearest-rank and summaries retain all failed-call latency samples', () => {
