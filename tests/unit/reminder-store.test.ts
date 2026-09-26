@@ -194,7 +194,7 @@ test('storage enforces the maximum and cleans atomic temporary files', async () 
       status: 'pending',
     }));
     await writeFile(filePath, JSON.stringify({ version: 1, reminders: atLimit }), 'utf8');
-    const bounded = new ReminderStore(filePath);
+    const bounded = new ReminderStore(filePath, { now: () => new Date(NOW), idFactory: newId });
     await bounded.load();
     await assertAsyncReminderError(bounded.add('One too many', new Date(2026, 8, 26, 9, 0)), 'REMINDER_LIMIT_ERROR');
   });
